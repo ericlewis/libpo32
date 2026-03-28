@@ -101,6 +101,15 @@ Use:
 Use the typed packet structs plus `po32_packet_encode(...)` when constructing
 wire payloads.
 
+For pattern triggers, use:
+
+- `po32_pattern_trigger_lane(...)`
+- `po32_pattern_trigger_encode(...)`
+- `po32_pattern_trigger_decode(...)`
+
+These helpers handle the packed lane-byte format used by
+`po32_pattern_packet_t.trigger_lanes`.
+
 ## Body Bytes vs Frame Bytes
 
 The C core works with full transmitted frames and encoded packet-body bytes.

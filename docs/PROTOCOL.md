@@ -95,6 +95,23 @@ And typed encode/decode helpers:
 - [`po32_packet_encode(...)`](../include/po32.h)
 - [`po32_packet_decode(...)`](../include/po32.h)
 
+For `po32_pattern_packet_t`, `trigger_lanes` stores packed lane bytes rather
+than direct instrument numbers. The lane index, packed selector bits, accent
+bit, and low nibble together determine the triggered sound and step behavior.
+
+The lane grouping is:
+
+- lane 0: `1, 5, 9, 13`
+- lane 1: `2, 6, 10, 14`
+- lane 2: `3, 7, 11, 15`
+- lane 3: `4, 8, 12, 16`
+
+Use:
+
+- `po32_pattern_trigger_lane(...)`
+- `po32_pattern_trigger_encode(...)`
+- `po32_pattern_trigger_decode(...)`
+
 ## Body vs Frame
 
 The project uses two byte slices repeatedly:

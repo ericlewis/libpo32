@@ -396,6 +396,67 @@ void po32_morph_pairs_default(po32_morph_pair_t *pairs, size_t pair_count) {
   }
 }
 
+po32_status_t po32_pattern_trigger_lane(uint8_t instrument, uint8_t *out_lane) {
+  if (out_lane == NULL)
+    return PO32_ERR_INVALID_ARG;
+  if (instrument < 1u || instrument > 16u)
+    return PO32_ERR_RANGE;
+  *out_lane = (uint8_t)((instrument - 1u) & 3u);
+  return PO32_OK;
+}
+
+po32_status_t po32_pattern_trigger_encode(uint8_t instrument, uint8_t fill_rate, int accent,
+                                          uint8_t *out_trigger) {
+  uint8_t zero_based;
+  uint8_t trigger;
+
+  if (out_trigger == NULL)
+    return PO32_ERR_INVALID_ARG;
+  if (instrument < 1u || instrument > 16u || fill_rate == 0u || fill_rate > 0x0Fu)
+    return PO32_ERR_RANGE;
+
+  zero_based = (uint8_t)(instrument - 1u);
+  trigger = fill_rate;
+  if (accent)
+    trigger = (uint8_t)(trigger | 0x80u);
+  if ((zero_based & 7u) >= 4u)
+    trigger = (uint8_t)(trigger | 0x10u);
+  if (zero_based >= 8u)
+    trigger = (uint8_t)(trigger | 0x20u);
+
+  *out_trigger = trigger;
+  return PO32_OK;
+}
+
+po32_status_t po32_pattern_trigger_decode(uint8_t lane_index, uint8_t trigger,
+                                          uint8_t *out_instrument, uint8_t *out_fill_rate,
+                                          int *out_accent) {
+  uint8_t instrument;
+
+  if (lane_index >= PO32_PATTERN_LANE_COUNT)
+    return PO32_ERR_RANGE;
+  if ((trigger & 0x40u) != 0u)
+    return PO32_ERR_RANGE;
+
+  if ((trigger & 0x0Fu) == 0u) {
+    if (out_instrument != NULL) *out_instrument = 0u;
+    if (out_fill_rate != NULL) *out_fill_rate = 0u;
+    if (out_accent != NULL) *out_accent = 0;
+    return PO32_OK;
+  }
+
+  instrument = (uint8_t)(lane_index + 1u);
+  if ((trigger & 0x10u) != 0u)
+    instrument = (uint8_t)(instrument + 4u);
+  if ((trigger & 0x20u) != 0u)
+    instrument = (uint8_t)(instrument + 8u);
+
+  if (out_instrument != NULL) *out_instrument = instrument;
+  if (out_fill_rate != NULL) *out_fill_rate = (uint8_t)(trigger & 0x0Fu);
+  if (out_accent != NULL) *out_accent = ((trigger & 0x80u) != 0u) ? 1 : 0;
+  return PO32_OK;
+}
+
 po32_status_t po32_builder_append_packet(po32_builder_t *builder, uint16_t tag_code,
                                          const uint8_t *payload, size_t payload_len,
                                          size_t *packet_offset) {

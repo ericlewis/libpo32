@@ -206,11 +206,28 @@ typedef struct po32_state_packet {
 
 typedef struct po32_pattern_packet {
   uint8_t pattern_number;
+  /* Raw packed lane bytes, not direct instrument numbers. */
   uint8_t trigger_lanes[PO32_PATTERN_LANE_COUNT * PO32_PATTERN_STEP_COUNT];
   po32_morph_pair_t morph_lanes[PO32_PATTERN_LANE_COUNT * PO32_PATTERN_STEP_COUNT];
   uint8_t reserved[PO32_PATTERN_RESERVED_COUNT];
   uint16_t accent_bits;
 } po32_pattern_packet_t;
+
+/*
+ * Pattern trigger helpers.
+ *
+ * Instruments are grouped into four fixed trigger lanes:
+ * lane 0 -> 1, 5, 9, 13
+ * lane 1 -> 2, 6, 10, 14
+ * lane 2 -> 3, 7, 11, 15
+ * lane 3 -> 4, 8, 12, 16
+ */
+po32_status_t po32_pattern_trigger_lane(uint8_t instrument, uint8_t *out_lane);
+po32_status_t po32_pattern_trigger_encode(uint8_t instrument, uint8_t fill_rate, int accent,
+                                          uint8_t *out_trigger);
+po32_status_t po32_pattern_trigger_decode(uint8_t lane_index, uint8_t trigger,
+                                          uint8_t *out_instrument, uint8_t *out_fill_rate,
+                                          int *out_accent);
 
 /* Encode/decode between typed packet structs and wire payloads. */
 po32_status_t po32_packet_encode(uint16_t tag, const void *pkt, po32_packet_t *out);

@@ -359,6 +359,44 @@ static void test_extended_payload_encoders(void) {
   (void)dpkt;
 }
 
+static void test_pattern_trigger_helpers(void) {
+  for (uint8_t instrument = 1u; instrument <= 16u; ++instrument) {
+    uint8_t lane = 0u;
+    uint8_t trigger = 0u;
+    uint8_t decoded_instrument = 0u;
+    uint8_t fill_rate = 0u;
+    int accent = 0;
+    po32_status_t status = po32_pattern_trigger_lane(instrument, &lane);
+    assert(status == PO32_OK);
+    assert(lane == (uint8_t)((instrument - 1u) & 3u));
+
+    status = po32_pattern_trigger_encode(instrument, 1u, 1, &trigger);
+    assert(status == PO32_OK);
+
+    status = po32_pattern_trigger_decode(lane, trigger, &decoded_instrument, &fill_rate, &accent);
+    assert(status == PO32_OK);
+    assert(decoded_instrument == instrument);
+    assert(fill_rate == 1u);
+    assert(accent == 1);
+  }
+
+  {
+    uint8_t instrument = 99u;
+    uint8_t fill_rate = 99u;
+    int accent = 99;
+    assert(po32_pattern_trigger_encode(0u, 1u, 0, NULL) == PO32_ERR_INVALID_ARG);
+    assert(po32_pattern_trigger_encode(0u, 1u, 0, &instrument) == PO32_ERR_RANGE);
+    assert(po32_pattern_trigger_encode(1u, 0u, 0, &instrument) == PO32_ERR_RANGE);
+    assert(po32_pattern_trigger_lane(17u, &instrument) == PO32_ERR_RANGE);
+    assert(po32_pattern_trigger_decode(4u, 1u, &instrument, &fill_rate, &accent) == PO32_ERR_RANGE);
+    assert(po32_pattern_trigger_decode(0u, 0x40u, &instrument, &fill_rate, &accent) == PO32_ERR_RANGE);
+    assert(po32_pattern_trigger_decode(0u, 0u, &instrument, &fill_rate, &accent) == PO32_OK);
+    assert(instrument == 0u);
+    assert(fill_rate == 0u);
+    assert(accent == 0);
+  }
+}
+
 static void test_builder_exact_capacity_boundary(void) {
   po32_patch_params_t patch;
   po32_builder_t builder;
@@ -650,6 +688,7 @@ int main(void) {
   test_frame_build_and_parse();
   test_streaming_modulator_matches_block_render();
   test_extended_payload_encoders();
+  test_pattern_trigger_helpers();
   test_builder_exact_capacity_boundary();
   test_state_payload_lengths();
   test_known_transfer_shapes();
