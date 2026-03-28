@@ -45,6 +45,6 @@ jobs:
             body_file=$(mktemp)
             git log -1 --format=%B "$rev" > "$body_file"
             echo "Checking $rev: $subject"
-            ./scripts/check-commit-message.sh "$body_file"
+            sh ./scripts/check-commit-message.sh "$body_file"
             rm -f "$body_file"
           done
