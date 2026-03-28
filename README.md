@@ -116,4 +116,4 @@ ctest --test-dir build --output-on-failure
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+Copyright (c) 2026 Eric Lewis. Licensed under the MIT License. See [LICENSE](LICENSE).
