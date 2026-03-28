@@ -1,15 +1,30 @@
 #include "po32.h"
 #include "po32_lut.h"
 
-#include <math.h>
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
-#include <string.h>
+#define PO32_PI 3.14159265358979323846f
 
-#ifndef M_PI
-#define M_PI 3.14159265358979323846
-#endif
+/* ── freestanding helpers ──────────────────────────────── */
+
+static void po32_zero(void *dst, size_t n) {
+  unsigned char *d = (unsigned char *)dst;
+  while (n-- > 0u) *d++ = 0u;
+}
+
+static void po32_memcpy(void *dst, const void *src, size_t n) {
+  unsigned char *d = (unsigned char *)dst;
+  const unsigned char *s = (const unsigned char *)src;
+  while (n-- > 0u) *d++ = *s++;
+}
+
+static int po32_memcmp(const void *a, const void *b, size_t n) {
+  const unsigned char *pa = (const unsigned char *)a;
+  const unsigned char *pb = (const unsigned char *)b;
+  while (n-- > 0u) {
+    if (*pa != *pb) return (int)*pa - (int)*pb;
+    ++pa; ++pb;
+  }
+  return 0;
+}
 
 #define PO32_PREAMBLE_FILL         0x55u
 #define PO32_TAIL_MARKER_1         0xC3u
@@ -56,7 +71,7 @@ static const po32_tag_spec_t *po32_tag_spec_find(uint16_t tag_code) {
   return NULL;
 }
 
-static bool po32_tag_payload_len_is_valid(uint16_t tag_code, size_t payload_len) {
+static int po32_tag_payload_len_is_valid(uint16_t tag_code, size_t payload_len) {
   const po32_tag_spec_t *spec = po32_tag_spec_find(tag_code);
   return spec != NULL && payload_len >= spec->min_payload_len &&
          payload_len <= spec->max_payload_len;
@@ -293,7 +308,7 @@ po32_status_t po32_frame_parse(const uint8_t *frame, size_t frame_len,
   if (frame == NULL || frame_len < PO32_PREAMBLE_BYTES + PO32_FINAL_TAIL_BYTES) {
     return PO32_ERR_INVALID_ARG;
   }
-  if (memcmp(frame, po32_preamble_bytes(), PO32_PREAMBLE_BYTES) != 0) {
+  if (po32_memcmp(frame, po32_preamble_bytes(), PO32_PREAMBLE_BYTES) != 0) {
     return PO32_ERR_FRAME;
   }
 
@@ -377,14 +392,14 @@ void po32_builder_reset(po32_builder_t *builder) {
     return;
   }
 
-  memcpy(builder->buffer, po32_preamble_bytes(), PO32_PREAMBLE_BYTES);
+  po32_memcpy(builder->buffer, po32_preamble_bytes(), PO32_PREAMBLE_BYTES);
   builder->length = PO32_PREAMBLE_BYTES;
 }
 
 void po32_patch_params_zero(po32_patch_params_t *params) {
   if (params == NULL)
     return;
-  memset(params, 0, sizeof(*params));
+  po32_zero(params, sizeof(*params));
 }
 
 void po32_morph_pairs_default(po32_morph_pair_t *pairs, size_t pair_count) {
@@ -421,7 +436,7 @@ static void po32_pattern_zero_slot(po32_pattern_packet_t *pattern, uint8_t step_
 void po32_pattern_init(po32_pattern_packet_t *pattern, uint8_t pattern_number) {
   if (pattern == NULL)
     return;
-  memset(pattern, 0, sizeof(*pattern));
+  po32_zero(pattern, sizeof(*pattern));
   pattern->pattern_number = pattern_number;
 }
 
@@ -430,7 +445,7 @@ void po32_pattern_clear(po32_pattern_packet_t *pattern) {
   if (pattern == NULL)
     return;
   pattern_number = pattern->pattern_number;
-  memset(pattern, 0, sizeof(*pattern));
+  po32_zero(pattern, sizeof(*pattern));
   pattern->pattern_number = pattern_number;
 }
 
@@ -716,7 +731,7 @@ po32_status_t po32_decode_patch(const uint8_t *data, size_t len, po32_patch_para
 /* ── typed packet helpers ───────────────────────────────────────── */
 
 static po32_status_t po32_patch_packet_encode(const po32_patch_packet_t *pkt, po32_packet_t *out) {
-  memset(out, 0, sizeof(*out));
+  po32_zero(out, sizeof(*out));
   out->tag_code = PO32_TAG_PATCH;
 
   out->payload[0] = (uint8_t)((pkt->side == PO32_PATCH_LEFT ? PO32_PATCH_SIDE_LEFT_PREFIX
@@ -768,7 +783,7 @@ static po32_status_t po32_patch_packet_decode(const uint8_t *data, size_t len,
 
 static po32_status_t po32_knob_packet_encode(const po32_knob_packet_t *pkt, po32_packet_t *out) {
   uint8_t selector;
-  memset(out, 0, sizeof(*out));
+  po32_zero(out, sizeof(*out));
   out->tag_code = PO32_TAG_KNOB;
   switch (pkt->kind) {
   case PO32_KNOB_PITCH:
@@ -797,7 +812,7 @@ static po32_status_t po32_knob_packet_decode(const uint8_t *data, size_t len,
 }
 
 static po32_status_t po32_reset_packet_encode(const po32_reset_packet_t *pkt, po32_packet_t *out) {
-  memset(out, 0, sizeof(*out));
+  po32_zero(out, sizeof(*out));
   out->tag_code = PO32_TAG_RESET;
   out->payload[0] = (uint8_t)(PO32_RESET_PREFIX | (pkt->instrument - 1u));
   out->payload_len = 1u;
@@ -816,7 +831,7 @@ static po32_status_t po32_state_packet_encode(const po32_state_packet_t *pkt, po
   size_t pos = 0u;
   if (pkt->pattern_count > PO32_PATTERN_STEP_COUNT)
     return PO32_ERR_RANGE;
-  memset(out, 0, sizeof(*out));
+  po32_zero(out, sizeof(*out));
   out->tag_code = PO32_TAG_STATE;
   for (size_t i = 0u; i < PO32_STATE_MORPH_PAIR_COUNT; ++i) {
     out->payload[pos++] = pkt->morph_pairs[i].flag;
@@ -857,7 +872,7 @@ static po32_status_t po32_state_packet_decode(const uint8_t *data, size_t len,
 static po32_status_t po32_pattern_packet_encode(const po32_pattern_packet_t *pkt,
                                                 po32_packet_t *out) {
   size_t pos = 0u;
-  memset(out, 0, sizeof(*out));
+  po32_zero(out, sizeof(*out));
   out->tag_code = PO32_TAG_PATTERN;
   out->payload[pos++] = pkt->pattern_number;
 
@@ -885,7 +900,7 @@ static po32_status_t po32_pattern_packet_encode(const po32_pattern_packet_t *pkt
       out->payload[pos++] = pkt->morph_lanes[index].morph;
     }
   }
-  memcpy(out->payload + pos, pkt->reserved, PO32_PATTERN_RESERVED_COUNT);
+  po32_memcpy(out->payload + pos, pkt->reserved, PO32_PATTERN_RESERVED_COUNT);
   pos += PO32_PATTERN_RESERVED_COUNT;
   out->payload[pos++] = (uint8_t)(pkt->accent_bits & 0xFFu);
   out->payload[pos++] = (uint8_t)((pkt->accent_bits >> 8) & 0xFFu);
@@ -921,7 +936,7 @@ static po32_status_t po32_pattern_packet_decode(const uint8_t *data, size_t len,
       out->morph_lanes[index].morph = data[pos++];
     }
   }
-  memcpy(out->reserved, data + pos, PO32_PATTERN_RESERVED_COUNT);
+  po32_memcpy(out->reserved, data + pos, PO32_PATTERN_RESERVED_COUNT);
   pos += PO32_PATTERN_RESERVED_COUNT;
   out->accent_bits = (uint16_t)data[pos] | (uint16_t)((uint16_t)data[pos + 1u] << 8);
   return PO32_OK;
@@ -1009,7 +1024,7 @@ void po32_modulator_init(po32_modulator_t *m, const uint8_t *frame, size_t frame
     return;
   }
 
-  memset(m, 0, sizeof(*m));
+  po32_zero(m, sizeof(*m));
   if (frame == NULL || sample_rate == 0u) {
     return;
   }
@@ -1022,7 +1037,7 @@ void po32_modulator_init(po32_modulator_t *m, const uint8_t *frame, size_t frame
   m->symbol_phase = 1.0f;
   m->symbols_per_sample = (float)PO32_NATIVE_BAUD / (float)sample_rate;
   carrier_step = m->symbols_per_sample *
-                 (2.0f * PO32_DPSK_CARRIER_CYCLES_PER_SYMBOL * (float)M_PI);
+                 (2.0f * PO32_DPSK_CARRIER_CYCLES_PER_SYMBOL * PO32_PI);
   m->rot_sin = po32_lut_sinf(carrier_step);
   m->rot_cos = po32_lut_cosf(carrier_step);
   m->osc_cos = 1.0f;
@@ -1157,13 +1172,13 @@ static void po32_demodulator_init(po32_demodulator_t *d, float sample_rate) {
   if (d == NULL)
     return;
 
-  memset(d, 0, sizeof(*d));
+  po32_zero(d, sizeof(*d));
   if (sample_rate <= 0.0f)
     return;
 
   d->sample_rate = sample_rate;
   d->symbols_per_sample = PO32_NATIVE_BAUD / sample_rate;
-  carrier_step = d->symbols_per_sample * (2.0f * PO32_DPSK_CARRIER_CYCLES_PER_SYMBOL * (float)M_PI);
+  carrier_step = d->symbols_per_sample * (2.0f * PO32_DPSK_CARRIER_CYCLES_PER_SYMBOL * PO32_PI);
   d->rot_sin = po32_lut_sinf(carrier_step);
   d->rot_cos = po32_lut_cosf(carrier_step);
   d->osc_cos = 1.0f;
@@ -1271,7 +1286,7 @@ typedef struct {
 
 static void po32_demod_run_init(po32_demod_run_t *run, po32_demodulator_t *d,
                                 po32_packet_callback_t cb, void *user) {
-  memset(run, 0, sizeof(*run));
+  po32_zero(run, sizeof(*run));
   run->demod = d;
   run->cb = cb;
   run->user = user;
@@ -1429,7 +1444,7 @@ static int po32_decode_collect_packet(const po32_packet_t *packet, void *user) {
 
 static void po32_decode_result_clear(po32_decode_result_t *out_result, size_t *out_len) {
   if (out_result != NULL) {
-    memset(out_result, 0, sizeof(*out_result));
+    po32_zero(out_result, sizeof(*out_result));
   }
   if (out_len != NULL) {
     *out_len = 0u;

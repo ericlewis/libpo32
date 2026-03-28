@@ -9,8 +9,78 @@
 #include "po32_lut.h"
 
 #include <stddef.h>
-#include <stdlib.h>
-#include <string.h>
+
+/* ── freestanding helpers ──────────────────────────────── */
+
+static size_t po32_cstrlen(const char *s) {
+  const char *p = s;
+  while (*p != '\0') ++p;
+  return (size_t)(p - s);
+}
+
+static int po32_import_memcmp(const void *a, const void *b, size_t n) {
+  const unsigned char *pa = (const unsigned char *)a;
+  const unsigned char *pb = (const unsigned char *)b;
+  while (n-- > 0u) {
+    if (*pa != *pb) return (int)*pa - (int)*pb;
+    ++pa; ++pb;
+  }
+  return 0;
+}
+
+static void po32_import_memcpy(void *dst, const void *src, size_t n) {
+  unsigned char *d = (unsigned char *)dst;
+  const unsigned char *s = (const unsigned char *)src;
+  while (n-- > 0u) *d++ = *s++;
+}
+
+static float po32_import_strtof(const char *s, char **endptr) {
+  const char *p = s;
+  float result = 0.0f;
+  float frac = 0.0f;
+  float frac_div = 1.0f;
+  int sign = 1;
+  int got_digit = 0;
+  int in_frac = 0;
+  int exp_sign = 1;
+  int exponent = 0;
+
+  if (*p == '-') { sign = -1; ++p; }
+  else if (*p == '+') { ++p; }
+
+  while (*p >= '0' && *p <= '9') {
+    result = result * 10.0f + (float)(*p - '0');
+    got_digit = 1; ++p;
+  }
+  if (*p == '.') {
+    ++p; in_frac = 1;
+    while (*p >= '0' && *p <= '9') {
+      frac_div *= 10.0f;
+      frac += (float)(*p - '0') / frac_div;
+      got_digit = 1; ++p;
+    }
+  }
+  result = (float)sign * (result + frac);
+
+  if (got_digit && (*p == 'e' || *p == 'E')) {
+    ++p;
+    if (*p == '-') { exp_sign = -1; ++p; }
+    else if (*p == '+') { ++p; }
+    while (*p >= '0' && *p <= '9') {
+      exponent = exponent * 10 + (*p - '0'); ++p;
+    }
+    {
+      float mul = 1.0f;
+      int i;
+      for (i = 0; i < exponent; ++i) mul *= 10.0f;
+      result = exp_sign > 0 ? result * mul : result / mul;
+    }
+  }
+
+  if (endptr != NULL) *endptr = got_digit ? (char *)p : (char *)s;
+  (void)in_frac;
+  return result;
+}
 
 typedef struct po32_span {
   const char *begin;
@@ -40,19 +110,19 @@ static po32_span_t po32_patch_import_trim(po32_span_t span) {
 }
 
 static int po32_patch_import_key_equals(po32_span_t key, const char *literal) {
-  const size_t literal_len = strlen(literal);
+  const size_t literal_len = po32_cstrlen(literal);
   return (size_t)(key.end - key.begin) == literal_len &&
-         memcmp(key.begin, literal, literal_len) == 0;
+         po32_import_memcmp(key.begin, literal, literal_len) == 0;
 }
 
 static int po32_patch_import_starts_with(po32_span_t value, const char *literal) {
-  const size_t literal_len = strlen(literal);
+  const size_t literal_len = po32_cstrlen(literal);
   return (size_t)(value.end - value.begin) >= literal_len &&
-         memcmp(value.begin, literal, literal_len) == 0;
+         po32_import_memcmp(value.begin, literal, literal_len) == 0;
 }
 
 static int po32_patch_import_contains(po32_span_t value, const char *literal) {
-  const size_t literal_len = strlen(literal);
+  const size_t literal_len = po32_cstrlen(literal);
   const size_t value_len = (size_t)(value.end - value.begin);
   size_t i;
 
@@ -61,7 +131,7 @@ static int po32_patch_import_contains(po32_span_t value, const char *literal) {
   }
 
   for (i = 0u; i + literal_len <= value_len; ++i) {
-    if (memcmp(value.begin + i, literal, literal_len) == 0) {
+    if (po32_import_memcmp(value.begin + i, literal, literal_len) == 0) {
       return 1;
     }
   }
@@ -96,9 +166,9 @@ static po32_status_t po32_patch_import_parse_leading_float(po32_span_t value, fl
     return PO32_ERR_PARSE;
   }
 
-  memcpy(buffer, value.begin, len);
+  po32_import_memcpy(buffer, value.begin, len);
   buffer[len] = '\0';
-  *out = strtof(buffer, &endptr);
+  *out = po32_import_strtof(buffer, &endptr);
   if (endptr == buffer) {
     return PO32_ERR_PARSE;
   }
