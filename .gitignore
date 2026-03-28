@@ -1,0 +1,10 @@
+.DS_Store
+.build/
+.swiftpm/
+build/
+build-*/
+build-release-check/
+compile_commands.json
+demo_*.wav
+*.o
+*.a
