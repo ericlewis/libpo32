@@ -396,6 +396,117 @@ void po32_morph_pairs_default(po32_morph_pair_t *pairs, size_t pair_count) {
   }
 }
 
+static size_t po32_pattern_slot_index(uint8_t step_index, uint8_t lane_index) {
+  return (size_t)lane_index * (size_t)PO32_PATTERN_STEP_COUNT + (size_t)step_index;
+}
+
+static int po32_pattern_step_has_trigger(const po32_pattern_packet_t *pattern, uint8_t step_index) {
+  for (uint8_t lane = 0u; lane < PO32_PATTERN_LANE_COUNT; ++lane) {
+    if (pattern->steps[po32_pattern_slot_index(step_index, lane)].instrument != 0u)
+      return 1;
+  }
+  return 0;
+}
+
+static void po32_pattern_zero_slot(po32_pattern_packet_t *pattern, uint8_t step_index,
+                                   uint8_t lane_index) {
+  size_t index = po32_pattern_slot_index(step_index, lane_index);
+  pattern->steps[index].instrument = 0u;
+  pattern->steps[index].fill_rate = 0u;
+  pattern->steps[index].accent = 0;
+  pattern->morph_lanes[index].flag = 0u;
+  pattern->morph_lanes[index].morph = 0u;
+}
+
+void po32_pattern_init(po32_pattern_packet_t *pattern, uint8_t pattern_number) {
+  if (pattern == NULL)
+    return;
+  memset(pattern, 0, sizeof(*pattern));
+  pattern->pattern_number = pattern_number;
+}
+
+void po32_pattern_clear(po32_pattern_packet_t *pattern) {
+  uint8_t pattern_number;
+  if (pattern == NULL)
+    return;
+  pattern_number = pattern->pattern_number;
+  memset(pattern, 0, sizeof(*pattern));
+  pattern->pattern_number = pattern_number;
+}
+
+po32_status_t po32_pattern_set_trigger(po32_pattern_packet_t *pattern, uint8_t step_index,
+                                       uint8_t instrument, uint8_t fill_rate) {
+  uint8_t lane_index = 0u;
+  size_t index;
+  if (pattern == NULL)
+    return PO32_ERR_INVALID_ARG;
+  if (step_index >= PO32_PATTERN_STEP_COUNT)
+    return PO32_ERR_RANGE;
+  if (fill_rate == 0u || fill_rate > 0x0Fu)
+    return PO32_ERR_RANGE;
+  if (po32_pattern_trigger_lane(instrument, &lane_index) != PO32_OK)
+    return PO32_ERR_RANGE;
+
+  index = po32_pattern_slot_index(step_index, lane_index);
+  pattern->steps[index].instrument = instrument;
+  pattern->steps[index].fill_rate = fill_rate;
+  pattern->steps[index].accent = ((pattern->accent_bits >> step_index) & 1u) != 0u;
+  po32_morph_pairs_default(&pattern->morph_lanes[index], 1u);
+  return PO32_OK;
+}
+
+po32_status_t po32_pattern_clear_trigger(po32_pattern_packet_t *pattern, uint8_t step_index,
+                                         uint8_t lane_index) {
+  if (pattern == NULL)
+    return PO32_ERR_INVALID_ARG;
+  if (step_index >= PO32_PATTERN_STEP_COUNT || lane_index >= PO32_PATTERN_LANE_COUNT)
+    return PO32_ERR_RANGE;
+
+  po32_pattern_zero_slot(pattern, step_index, lane_index);
+  if (!po32_pattern_step_has_trigger(pattern, step_index)) {
+    pattern->accent_bits =
+        (uint16_t)(pattern->accent_bits & (uint16_t)~(uint16_t)(1u << step_index));
+  }
+  return PO32_OK;
+}
+
+po32_status_t po32_pattern_clear_step(po32_pattern_packet_t *pattern, uint8_t step_index) {
+  if (pattern == NULL)
+    return PO32_ERR_INVALID_ARG;
+  if (step_index >= PO32_PATTERN_STEP_COUNT)
+    return PO32_ERR_RANGE;
+
+  for (uint8_t lane = 0u; lane < PO32_PATTERN_LANE_COUNT; ++lane) {
+    po32_pattern_zero_slot(pattern, step_index, lane);
+  }
+  pattern->accent_bits =
+      (uint16_t)(pattern->accent_bits & (uint16_t)~(uint16_t)(1u << step_index));
+  return PO32_OK;
+}
+
+po32_status_t po32_pattern_set_accent(po32_pattern_packet_t *pattern, uint8_t step_index,
+                                      int enabled) {
+  uint16_t mask;
+  if (pattern == NULL)
+    return PO32_ERR_INVALID_ARG;
+  if (step_index >= PO32_PATTERN_STEP_COUNT)
+    return PO32_ERR_RANGE;
+
+  mask = (uint16_t)(1u << step_index);
+  if (enabled) {
+    pattern->accent_bits = (uint16_t)(pattern->accent_bits | mask);
+  } else {
+    pattern->accent_bits = (uint16_t)(pattern->accent_bits & (uint16_t)~mask);
+  }
+
+  for (uint8_t lane = 0u; lane < PO32_PATTERN_LANE_COUNT; ++lane) {
+    size_t index = po32_pattern_slot_index(step_index, lane);
+    if (pattern->steps[index].instrument != 0u)
+      pattern->steps[index].accent = enabled ? 1 : 0;
+  }
+  return PO32_OK;
+}
+
 po32_status_t po32_pattern_trigger_lane(uint8_t instrument, uint8_t *out_lane) {
   if (out_lane == NULL)
     return PO32_ERR_INVALID_ARG;
@@ -749,11 +860,30 @@ static po32_status_t po32_pattern_packet_encode(const po32_pattern_packet_t *pkt
   memset(out, 0, sizeof(*out));
   out->tag_code = PO32_TAG_PATTERN;
   out->payload[pos++] = pkt->pattern_number;
-  memcpy(out->payload + pos, pkt->trigger_lanes, PO32_PATTERN_LANE_BYTES);
-  pos += PO32_PATTERN_LANE_BYTES;
-  for (size_t i = 0u; i < PO32_PATTERN_LANE_BYTES; ++i) {
-    out->payload[pos++] = pkt->morph_lanes[i].flag;
-    out->payload[pos++] = pkt->morph_lanes[i].morph;
+
+  /* The wire format is lane-chunked: 16 trigger bytes, then 32 morph bytes,
+     repeated once per lane. */
+  for (size_t lane = 0u; lane < PO32_PATTERN_LANE_COUNT; ++lane) {
+    size_t lane_base = lane * (size_t)PO32_PATTERN_STEP_COUNT;
+    for (size_t step = 0u; step < PO32_PATTERN_STEP_COUNT; ++step) {
+      size_t index = lane_base + step;
+      if (pkt->steps[index].instrument == 0u) {
+        out->payload[pos++] = 0u;
+      } else {
+        uint8_t trigger = 0u;
+        po32_status_t s = po32_pattern_trigger_encode(
+            pkt->steps[index].instrument, pkt->steps[index].fill_rate,
+            pkt->steps[index].accent, &trigger);
+        if (s != PO32_OK)
+          return s;
+        out->payload[pos++] = trigger;
+      }
+    }
+    for (size_t step = 0u; step < PO32_PATTERN_STEP_COUNT; ++step) {
+      size_t index = lane_base + step;
+      out->payload[pos++] = pkt->morph_lanes[index].flag;
+      out->payload[pos++] = pkt->morph_lanes[index].morph;
+    }
   }
   memcpy(out->payload + pos, pkt->reserved, PO32_PATTERN_RESERVED_COUNT);
   pos += PO32_PATTERN_RESERVED_COUNT;
@@ -769,11 +899,27 @@ static po32_status_t po32_pattern_packet_decode(const uint8_t *data, size_t len,
   if (len < PO32_PATTERN_PAYLOAD_BYTES)
     return PO32_ERR_FRAME;
   out->pattern_number = data[pos++];
-  memcpy(out->trigger_lanes, data + pos, PO32_PATTERN_LANE_BYTES);
-  pos += PO32_PATTERN_LANE_BYTES;
-  for (size_t i = 0u; i < PO32_PATTERN_LANE_BYTES; ++i) {
-    out->morph_lanes[i].flag = data[pos++];
-    out->morph_lanes[i].morph = data[pos++];
+
+  for (size_t lane = 0u; lane < PO32_PATTERN_LANE_COUNT; ++lane) {
+    size_t lane_base = lane * (size_t)PO32_PATTERN_STEP_COUNT;
+    for (size_t step = 0u; step < PO32_PATTERN_STEP_COUNT; ++step) {
+      size_t index = lane_base + step;
+      po32_status_t s = po32_pattern_trigger_decode(
+          (uint8_t)lane, data[pos++],
+          &out->steps[index].instrument, &out->steps[index].fill_rate,
+          &out->steps[index].accent);
+      if (s != PO32_OK) {
+        out->steps[index].instrument = 0u;
+        out->steps[index].fill_rate = 0u;
+        out->steps[index].accent = 0;
+      }
+    }
+
+    for (size_t step = 0u; step < PO32_PATTERN_STEP_COUNT; ++step) {
+      size_t index = lane_base + step;
+      out->morph_lanes[index].flag = data[pos++];
+      out->morph_lanes[index].morph = data[pos++];
+    }
   }
   memcpy(out->reserved, data + pos, PO32_PATTERN_RESERVED_COUNT);
   pos += PO32_PATTERN_RESERVED_COUNT;

@@ -26,6 +26,11 @@ The demo builds a transfer frame, renders it to audio, decodes it back
 (verifying a lossless roundtrip), synthesizes a drum hit, and writes two
 WAV files: `demo_modem.wav` and `demo_kick.wav`.
 
+Other supported examples include:
+
+- `./build/po32_pattern_editor` for interactive PO-32 pattern editing and WAV export
+- `./build/po32_decode_capture <input.wav> <out-dir>` for packet and pattern dumps
+
 ## Public API
 
 - [`include/po32.h`](include/po32.h) — transfer builder, packet

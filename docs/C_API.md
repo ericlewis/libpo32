@@ -101,6 +101,17 @@ Use:
 Use the typed packet structs plus `po32_packet_encode(...)` when constructing
 wire payloads.
 
+For higher-level pattern editing, prefer:
+
+- `po32_pattern_init(...)`
+- `po32_pattern_clear(...)`
+- `po32_pattern_set_trigger(...)`
+- `po32_pattern_clear_trigger(...)`
+- `po32_pattern_clear_step(...)`
+- `po32_pattern_set_accent(...)`
+
+Those helpers keep `steps[]`, `morph_lanes[]`, and `accent_bits` in sync.
+
 For pattern triggers, use:
 
 - `po32_pattern_trigger_lane(...)`
@@ -108,7 +119,11 @@ For pattern triggers, use:
 - `po32_pattern_trigger_decode(...)`
 
 These helpers handle the packed lane-byte format used by
-`po32_pattern_packet_t.trigger_lanes`.
+`po32_pattern_packet_t.steps[]`.
+
+Pattern packets are serialized per lane: `16` trigger bytes, then `16` morph
+pairs, repeated four times, followed by reserved bytes and `accent_bits`.
+A trigger is active only when its low nibble is non-zero.
 
 ## Body Bytes vs Frame Bytes
 

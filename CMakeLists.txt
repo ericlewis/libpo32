@@ -38,6 +38,12 @@ target_link_libraries(po32_example PRIVATE po32)
 add_executable(po32_demo examples/po32_demo.c)
 target_link_libraries(po32_demo PRIVATE po32)
 
+add_executable(po32_pattern_editor examples/po32_pattern_editor.c)
+target_link_libraries(po32_pattern_editor PRIVATE po32)
+
+add_executable(po32_decode_capture examples/po32_decode_capture.c)
+target_link_libraries(po32_decode_capture PRIVATE po32)
+
 # tests
 
 add_executable(po32_core_tests tests/test_core.c)

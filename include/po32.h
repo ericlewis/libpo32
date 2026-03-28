@@ -204,17 +204,24 @@ typedef struct po32_state_packet {
   size_t pattern_count;
 } po32_state_packet_t;
 
+typedef struct po32_pattern_step {
+  uint8_t instrument; /* 1-16, or 0 = empty */
+  uint8_t fill_rate;  /* 1-15 when active */
+  int     accent;     /* from trigger byte 0x80 */
+} po32_pattern_step_t;
+
 typedef struct po32_pattern_packet {
   uint8_t pattern_number;
-  /* Raw packed lane bytes, not direct instrument numbers. */
-  uint8_t trigger_lanes[PO32_PATTERN_LANE_COUNT * PO32_PATTERN_STEP_COUNT];
+  /* Decoded per-lane-step triggers. Populated by decode, consumed by encode. */
+  po32_pattern_step_t steps[PO32_PATTERN_LANE_COUNT * PO32_PATTERN_STEP_COUNT];
+  /* Wire order is per lane: 16 trigger bytes, then 16 morph pairs, repeated 4 times. */
   po32_morph_pair_t morph_lanes[PO32_PATTERN_LANE_COUNT * PO32_PATTERN_STEP_COUNT];
   uint8_t reserved[PO32_PATTERN_RESERVED_COUNT];
   uint16_t accent_bits;
 } po32_pattern_packet_t;
 
 /*
- * Pattern trigger helpers.
+ * Pattern builder and trigger helpers.
  *
  * Instruments are grouped into four fixed trigger lanes:
  * lane 0 -> 1, 5, 9, 13
@@ -222,6 +229,21 @@ typedef struct po32_pattern_packet {
  * lane 2 -> 3, 7, 11, 15
  * lane 3 -> 4, 8, 12, 16
  */
+/* Reset all pattern data and set the target pattern number. */
+void po32_pattern_init(po32_pattern_packet_t *pattern, uint8_t pattern_number);
+/* Clear all step data while preserving pattern_number. */
+void po32_pattern_clear(po32_pattern_packet_t *pattern);
+/* Set or replace the trigger on the instrument's fixed lane at one step. */
+po32_status_t po32_pattern_set_trigger(po32_pattern_packet_t *pattern, uint8_t step_index,
+                                       uint8_t instrument, uint8_t fill_rate);
+/* Clear one lane at one step. */
+po32_status_t po32_pattern_clear_trigger(po32_pattern_packet_t *pattern, uint8_t step_index,
+                                         uint8_t lane_index);
+/* Clear all four lanes at one step. */
+po32_status_t po32_pattern_clear_step(po32_pattern_packet_t *pattern, uint8_t step_index);
+/* Accent is step-wide: enabling or disabling it updates all active lanes there. */
+po32_status_t po32_pattern_set_accent(po32_pattern_packet_t *pattern, uint8_t step_index,
+                                      int enabled);
 po32_status_t po32_pattern_trigger_lane(uint8_t instrument, uint8_t *out_lane);
 po32_status_t po32_pattern_trigger_encode(uint8_t instrument, uint8_t fill_rate, int accent,
                                           uint8_t *out_trigger);

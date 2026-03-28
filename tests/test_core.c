@@ -275,7 +275,6 @@ static void test_extended_payload_encoders(void) {
   po32_morph_pair_t pattern_pairs[PO32_PATTERN_LANE_COUNT * PO32_PATTERN_STEP_COUNT];
   po32_packet_t dpkt;
   po32_status_t status;
-  const uint8_t trigger_lanes[PO32_PATTERN_LANE_COUNT * PO32_PATTERN_STEP_COUNT] = {0u};
 
   memset(state_pairs, 0, sizeof(state_pairs));
   memset(pattern_pairs, 0, sizeof(pattern_pairs));
@@ -345,7 +344,7 @@ static void test_extended_payload_encoders(void) {
     po32_pattern_packet_t pat_pkt;
     memset(&pat_pkt, 0, sizeof(pat_pkt));
     pat_pkt.pattern_number = 3u;
-    memcpy(pat_pkt.trigger_lanes, trigger_lanes, sizeof(pat_pkt.trigger_lanes));
+    /* steps[] left zeroed = all empty */
     memcpy(pat_pkt.morph_lanes, pattern_pairs, sizeof(pat_pkt.morph_lanes));
     pat_pkt.accent_bits = 0xA55Au;
     status = po32_packet_encode(PO32_TAG_PATTERN, &pat_pkt, &dpkt);
@@ -380,21 +379,161 @@ static void test_pattern_trigger_helpers(void) {
     assert(accent == 1);
   }
 
+  /* A low-nibble value of 0 means "empty" on the wire, so encode rejects it. */
+  for (uint8_t instrument = 1u; instrument <= 16u; ++instrument) {
+    uint8_t trigger = 0u;
+    assert(po32_pattern_trigger_encode(instrument, 0u, 0, &trigger) == PO32_ERR_RANGE);
+    assert(po32_pattern_trigger_encode(instrument, 0u, 1, &trigger) == PO32_ERR_RANGE);
+  }
+
   {
     uint8_t instrument = 99u;
     uint8_t fill_rate = 99u;
     int accent = 99;
     assert(po32_pattern_trigger_encode(0u, 1u, 0, NULL) == PO32_ERR_INVALID_ARG);
     assert(po32_pattern_trigger_encode(0u, 1u, 0, &instrument) == PO32_ERR_RANGE);
-    assert(po32_pattern_trigger_encode(1u, 0u, 0, &instrument) == PO32_ERR_RANGE);
     assert(po32_pattern_trigger_lane(17u, &instrument) == PO32_ERR_RANGE);
     assert(po32_pattern_trigger_decode(4u, 1u, &instrument, &fill_rate, &accent) == PO32_ERR_RANGE);
     assert(po32_pattern_trigger_decode(0u, 0x40u, &instrument, &fill_rate, &accent) == PO32_ERR_RANGE);
+    /* Any zero low nibble is empty on the wire. */
     assert(po32_pattern_trigger_decode(0u, 0u, &instrument, &fill_rate, &accent) == PO32_OK);
     assert(instrument == 0u);
     assert(fill_rate == 0u);
     assert(accent == 0);
+    instrument = 99u;
+    fill_rate = 99u;
+    accent = 99;
+    assert(po32_pattern_trigger_decode(0u, 0x80u, &instrument, &fill_rate, &accent) == PO32_OK);
+    assert(instrument == 0u);
+    assert(fill_rate == 0u);
+    assert(accent == 0);
   }
+
+  /* steps[] round-trip through pattern packet encode/decode. */
+  {
+    po32_pattern_packet_t in_pkt, out_pkt;
+    po32_packet_t dpkt;
+    po32_status_t status;
+    memset(&in_pkt, 0, sizeof(in_pkt));
+    in_pkt.pattern_number = 7u;
+    /* inst 9 (lane 0) fill=2, inst 2 (lane 1) fill=3, inst 13 (lane 0) fill=1 accent */
+    in_pkt.steps[0 * 16 + 0].instrument = 9u;
+    in_pkt.steps[0 * 16 + 0].fill_rate = 2u;
+    in_pkt.steps[1 * 16 + 4].instrument = 2u;
+    in_pkt.steps[1 * 16 + 4].fill_rate = 3u;
+    in_pkt.steps[0 * 16 + 8].instrument = 13u;
+    in_pkt.steps[0 * 16 + 8].fill_rate = 1u;
+    in_pkt.steps[0 * 16 + 8].accent = 1;
+    po32_morph_pairs_default(in_pkt.morph_lanes, PO32_PATTERN_LANE_COUNT * PO32_PATTERN_STEP_COUNT);
+    in_pkt.accent_bits = (uint16_t)(1u << 8);
+
+    status = po32_packet_encode(PO32_TAG_PATTERN, &in_pkt, &dpkt);
+    assert(status == PO32_OK);
+    assert(dpkt.payload_len == PO32_PATTERN_PAYLOAD_BYTES);
+
+    memset(&out_pkt, 0, sizeof(out_pkt));
+    status = po32_packet_decode(PO32_TAG_PATTERN, dpkt.payload, dpkt.payload_len, &out_pkt);
+    assert(status == PO32_OK);
+    assert(out_pkt.pattern_number == 7u);
+    assert(out_pkt.steps[0 * 16 + 0].instrument == 9u);
+    assert(out_pkt.steps[0 * 16 + 0].fill_rate == 2u);
+    assert(out_pkt.steps[1 * 16 + 4].instrument == 2u);
+    assert(out_pkt.steps[1 * 16 + 4].fill_rate == 3u);
+    assert(out_pkt.steps[0 * 16 + 8].instrument == 13u);
+    assert(out_pkt.steps[0 * 16 + 8].fill_rate == 1u);
+    assert(out_pkt.steps[0 * 16 + 8].accent == 1);
+    /* Empty positions stay empty. */
+    assert(out_pkt.steps[2 * 16 + 0].instrument == 0u);
+    assert(out_pkt.accent_bits == (uint16_t)(1u << 8));
+    /* Pattern payload is lane-chunked: 16 triggers, then 32 morph bytes, per lane. */
+    assert(dpkt.payload[1u + 0u] == 0x22u);
+    assert(dpkt.payload[1u + 8u] == 0xB1u);
+    assert(dpkt.payload[1u + 16u] == 0x80u);
+    assert(dpkt.payload[1u + 17u] == 0x01u);
+    assert(dpkt.payload[1u + 48u + 4u] == 0x03u);
+    assert(dpkt.payload[1u + 48u + 16u] == 0x80u);
+    assert(dpkt.payload[1u + 48u + 17u] == 0x01u);
+  }
+}
+
+static void test_pattern_builder_helpers(void) {
+  po32_pattern_packet_t pattern;
+  size_t index;
+
+  po32_pattern_init(&pattern, 12u);
+  assert(pattern.pattern_number == 12u);
+  assert(pattern.accent_bits == 0u);
+  for (size_t i = 0u; i < PO32_PATTERN_LANE_COUNT * PO32_PATTERN_STEP_COUNT; ++i) {
+    assert(pattern.steps[i].instrument == 0u);
+    assert(pattern.steps[i].fill_rate == 0u);
+    assert(pattern.steps[i].accent == 0);
+    assert(pattern.morph_lanes[i].flag == 0u);
+    assert(pattern.morph_lanes[i].morph == 0u);
+  }
+
+  assert(po32_pattern_set_accent(&pattern, 0u, 1) == PO32_OK);
+  assert(pattern.accent_bits == 0x0001u);
+
+  assert(po32_pattern_set_trigger(&pattern, 0u, 1u, 1u) == PO32_OK);
+  assert(po32_pattern_set_trigger(&pattern, 0u, 2u, 3u) == PO32_OK);
+
+  index = 0u * 16u + 0u;
+  assert(pattern.steps[index].instrument == 1u);
+  assert(pattern.steps[index].fill_rate == 1u);
+  assert(pattern.steps[index].accent == 1);
+  assert(pattern.morph_lanes[index].flag == 0x80u);
+  assert(pattern.morph_lanes[index].morph == 0x01u);
+
+  index = 1u * 16u + 0u;
+  assert(pattern.steps[index].instrument == 2u);
+  assert(pattern.steps[index].fill_rate == 3u);
+  assert(pattern.steps[index].accent == 1);
+  assert(pattern.morph_lanes[index].flag == 0x80u);
+  assert(pattern.morph_lanes[index].morph == 0x01u);
+
+  assert(po32_pattern_clear_trigger(&pattern, 0u, 0u) == PO32_OK);
+  index = 0u * 16u + 0u;
+  assert(pattern.steps[index].instrument == 0u);
+  assert(pattern.steps[index].fill_rate == 0u);
+  assert(pattern.steps[index].accent == 0);
+  assert(pattern.morph_lanes[index].flag == 0u);
+  assert(pattern.morph_lanes[index].morph == 0u);
+  assert(pattern.accent_bits == 0x0001u);
+
+  assert(po32_pattern_set_accent(&pattern, 0u, 0) == PO32_OK);
+  index = 1u * 16u + 0u;
+  assert(pattern.steps[index].accent == 0);
+  assert(pattern.accent_bits == 0u);
+
+  assert(po32_pattern_clear_step(&pattern, 0u) == PO32_OK);
+  for (size_t lane = 0u; lane < PO32_PATTERN_LANE_COUNT; ++lane) {
+    index = lane * 16u + 0u;
+    assert(pattern.steps[index].instrument == 0u);
+    assert(pattern.morph_lanes[index].flag == 0u);
+  }
+
+  assert(po32_pattern_set_trigger(&pattern, 15u, 16u, 1u) == PO32_OK);
+  assert(po32_pattern_set_accent(&pattern, 15u, 1) == PO32_OK);
+  index = 3u * 16u + 15u;
+  assert(pattern.steps[index].instrument == 16u);
+  assert(pattern.steps[index].fill_rate == 1u);
+  assert(pattern.steps[index].accent == 1);
+  assert(pattern.accent_bits == (uint16_t)(1u << 15));
+
+  po32_pattern_clear(&pattern);
+  assert(pattern.pattern_number == 12u);
+  assert(pattern.accent_bits == 0u);
+  for (size_t i = 0u; i < PO32_PATTERN_LANE_COUNT * PO32_PATTERN_STEP_COUNT; ++i) {
+    assert(pattern.steps[i].instrument == 0u);
+    assert(pattern.morph_lanes[i].flag == 0u);
+  }
+
+  assert(po32_pattern_set_trigger(NULL, 0u, 1u, 1u) == PO32_ERR_INVALID_ARG);
+  assert(po32_pattern_set_trigger(&pattern, 16u, 1u, 1u) == PO32_ERR_RANGE);
+  assert(po32_pattern_set_trigger(&pattern, 0u, 1u, 0u) == PO32_ERR_RANGE);
+  assert(po32_pattern_clear_trigger(&pattern, 0u, 4u) == PO32_ERR_RANGE);
+  assert(po32_pattern_clear_step(&pattern, 16u) == PO32_ERR_RANGE);
+  assert(po32_pattern_set_accent(&pattern, 16u, 1) == PO32_ERR_RANGE);
 }
 
 static void test_builder_exact_capacity_boundary(void) {
@@ -523,7 +662,6 @@ static void test_known_transfer_shapes(void) {
   po32_packet_t dpkt_reset;
   po32_packet_t dpkt_pattern;
   po32_packet_t dpkt_state;
-  const uint8_t trigger_lanes[PO32_PATTERN_LANE_COUNT * PO32_PATTERN_STEP_COUNT] = {0u};
   size_t frame_len = 0u;
   po32_status_t status;
   const uint16_t sound_tags[4] = {PO32_TAG_PATCH, PO32_TAG_PATCH, PO32_TAG_KNOB, PO32_TAG_KNOB};
@@ -584,7 +722,7 @@ static void test_known_transfer_shapes(void) {
     po32_pattern_packet_t pkt;
     memset(&pkt, 0, sizeof(pkt));
     pkt.pattern_number = 3u;
-    memcpy(pkt.trigger_lanes, trigger_lanes, sizeof(pkt.trigger_lanes));
+    /* steps[] left zeroed = all empty */
     memcpy(pkt.morph_lanes, pattern_pairs, sizeof(pkt.morph_lanes));
     pkt.accent_bits = 0u;
     status = po32_packet_encode(PO32_TAG_PATTERN, &pkt, &dpkt_pattern);
@@ -689,6 +827,7 @@ int main(void) {
   test_streaming_modulator_matches_block_render();
   test_extended_payload_encoders();
   test_pattern_trigger_helpers();
+  test_pattern_builder_helpers();
   test_builder_exact_capacity_boundary();
   test_state_payload_lengths();
   test_known_transfer_shapes();

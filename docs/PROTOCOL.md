@@ -95,9 +95,29 @@ And typed encode/decode helpers:
 - [`po32_packet_encode(...)`](../include/po32.h)
 - [`po32_packet_decode(...)`](../include/po32.h)
 
-For `po32_pattern_packet_t`, `trigger_lanes` stores packed lane bytes rather
-than direct instrument numbers. The lane index, packed selector bits, accent
-bit, and low nibble together determine the triggered sound and step behavior.
+For `po32_pattern_packet_t`, `steps[]` stores decoded per-lane step entries,
+not raw lane bytes.
+
+For normal pattern construction, prefer the `po32_pattern_*` helpers in
+[`../include/po32.h`](../include/po32.h) rather than writing `steps[]`,
+`morph_lanes[]`, and `accent_bits` manually.
+
+On the wire, each pattern payload is lane-chunked:
+
+1. `16` trigger bytes for lane 0
+2. `16` morph pairs for lane 0
+3. `16` trigger bytes for lane 1
+4. `16` morph pairs for lane 1
+5. `16` trigger bytes for lane 2
+6. `16` morph pairs for lane 2
+7. `16` trigger bytes for lane 3
+8. `16` morph pairs for lane 3
+9. `16` reserved zero bytes
+10. `2` bytes accent bitmask, little-endian
+
+Each trigger byte is packed. The lane index, selector bits, accent bit, and
+low nibble together determine the triggered sound and step behavior. A zero low
+nibble means the step is empty.
 
 The lane grouping is:
 
@@ -108,6 +128,12 @@ The lane grouping is:
 
 Use:
 
+- `po32_pattern_init(...)`
+- `po32_pattern_clear(...)`
+- `po32_pattern_set_trigger(...)`
+- `po32_pattern_clear_trigger(...)`
+- `po32_pattern_clear_step(...)`
+- `po32_pattern_set_accent(...)`
 - `po32_pattern_trigger_lane(...)`
 - `po32_pattern_trigger_encode(...)`
 - `po32_pattern_trigger_decode(...)`

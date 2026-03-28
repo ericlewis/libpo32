@@ -13,6 +13,8 @@ The initial public launch covers the core C library only:
 - `src/po32_synth.c`
 - `examples/po32_example.c`
 - `examples/po32_demo.c`
+- `examples/po32_pattern_editor.c`
+- `examples/po32_decode_capture.c`
 
 ## Checklist
 
