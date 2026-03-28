@@ -78,11 +78,10 @@ static size_t lane_index(int step_index, int slot_index) {
 static int set_trigger_slot(po32_pattern_editor_t *editor, int step_index, int slot_index,
                             uint8_t instrument) {
   if (instrument == 0u) {
-    return po32_pattern_clear_trigger(&editor->pattern, (uint8_t)step_index,
-                                      (uint8_t)slot_index) == PO32_OK;
+    return po32_pattern_clear_trigger(&editor->pattern, (uint8_t)step_index, (uint8_t)slot_index) ==
+           PO32_OK;
   }
-  return po32_pattern_set_trigger(&editor->pattern, (uint8_t)step_index, instrument, 1u) ==
-         PO32_OK;
+  return po32_pattern_set_trigger(&editor->pattern, (uint8_t)step_index, instrument, 1u) == PO32_OK;
 }
 
 static void editor_init(po32_pattern_editor_t *editor) {
@@ -165,8 +164,7 @@ static int apply_starter_pattern(po32_pattern_editor_t *editor,
       if (relative_instrument == 0u) {
         continue;
       }
-      if (po32_pattern_set_trigger(&editor->pattern,
-                                   (uint8_t)step,
+      if (po32_pattern_set_trigger(&editor->pattern, (uint8_t)step,
                                    starter_instrument_for_bank(editor, relative_instrument),
                                    1u) != PO32_OK) {
         return 0;
@@ -219,10 +217,7 @@ static void print_help(void) {
 
 static void print_editor(const po32_pattern_editor_t *editor) {
   printf("\npattern=%u bank=%u tempo=%u swing=%u accent_bits=0x%04x\n",
-         editor->pattern.pattern_number,
-         editor->bank,
-         editor->tempo,
-         editor->swing_times_12,
+         editor->pattern.pattern_number, editor->bank, editor->tempo, editor->swing_times_12,
          editor->pattern.accent_bits);
 
   printf("step :");
@@ -304,8 +299,10 @@ static int write_wav_file(const char *path, const float *samples, size_t sample_
   for (size_t i = 0u; i < sample_count; ++i) {
     float sample = samples[i];
     int16_t pcm_sample;
-    if (sample > 1.0f) sample = 1.0f;
-    if (sample < -1.0f) sample = -1.0f;
+    if (sample > 1.0f)
+      sample = 1.0f;
+    if (sample < -1.0f)
+      sample = -1.0f;
     pcm_sample = (int16_t)(sample * 32767.0f);
     fwrite(&pcm_sample, 2u, 1u, fp);
   }
@@ -314,10 +311,8 @@ static int write_wav_file(const char *path, const float *samples, size_t sample_
   return 1;
 }
 
-static po32_status_t build_pattern_transfer(const po32_pattern_editor_t *editor,
-                                            uint8_t *frame,
-                                            size_t frame_capacity,
-                                            size_t *frame_len) {
+static po32_status_t build_pattern_transfer(const po32_pattern_editor_t *editor, uint8_t *frame,
+                                            size_t frame_capacity, size_t *frame_len) {
   po32_builder_t builder;
   po32_state_packet_t state_packet;
   po32_packet_t encoded_packet;
@@ -485,10 +480,7 @@ static void repl(po32_pattern_editor_t *editor) {
         continue;
       }
       if (!instrument_in_selected_bank(editor, instrument)) {
-        fprintf(stderr,
-                "instrument %d is not in selected bank %u\n",
-                instrument,
-                editor->bank);
+        fprintf(stderr, "instrument %d is not in selected bank %u\n", instrument, editor->bank);
         continue;
       }
       if (!add_trigger(editor, step - 1, instrument)) {
@@ -510,20 +502,14 @@ static void repl(po32_pattern_editor_t *editor) {
         continue;
       }
       if (instrument != 0 && !instrument_in_selected_bank(editor, instrument)) {
-        fprintf(stderr,
-                "instrument %d is not in selected bank %u\n",
-                instrument,
-                editor->bank);
+        fprintf(stderr, "instrument %d is not in selected bank %u\n", instrument, editor->bank);
         continue;
       }
       if (instrument != 0) {
         uint8_t expected_lane = 0u;
         if (po32_pattern_trigger_lane((uint8_t)instrument, &expected_lane) != PO32_OK ||
             expected_lane != (uint8_t)(slot - 1)) {
-          fprintf(stderr,
-                  "instrument %d does not belong to lane %d\n",
-                  instrument,
-                  slot);
+          fprintf(stderr, "instrument %d does not belong to lane %d\n", instrument, slot);
           continue;
         }
       }

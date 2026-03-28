@@ -33,10 +33,8 @@ size_t po32_synth_samples_for_duration(const po32_synth_t *synth, float seconds)
  * out_capacity: max floats that fit in out
  * out_len:  set to actual number of samples written
  */
-po32_status_t po32_synth_render(const po32_synth_t *synth,
-                                const po32_patch_params_t *params,
-                                int velocity, float duration,
-                                float *out, size_t out_capacity,
+po32_status_t po32_synth_render(const po32_synth_t *synth, const po32_patch_params_t *params,
+                                int velocity, float duration, float *out, size_t out_capacity,
                                 size_t *out_len);
 
 #ifdef __cplusplus

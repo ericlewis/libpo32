@@ -207,7 +207,7 @@ typedef struct po32_state_packet {
 typedef struct po32_pattern_step {
   uint8_t instrument; /* 1-16, or 0 = empty */
   uint8_t fill_rate;  /* 1-15 when active */
-  int     accent;     /* from trigger byte 0x80 */
+  int accent;         /* from trigger byte 0x80 */
 } po32_pattern_step_t;
 
 typedef struct po32_pattern_packet {
@@ -292,8 +292,8 @@ size_t po32_modulator_samples_remaining(const po32_modulator_t *m);
 int po32_modulator_done(const po32_modulator_t *m);
 
 /* Render the next chunk of mono float samples in [-1, 1]. */
-po32_status_t po32_modulator_render_f32(po32_modulator_t *m, float *out_samples, size_t out_capacity,
-                                        size_t *out_len);
+po32_status_t po32_modulator_render_f32(po32_modulator_t *m, float *out_samples,
+                                        size_t out_capacity, size_t *out_len);
 
 /* Render a full transmitted frame to mono float samples in [-1, 1]. */
 po32_status_t po32_render_dpsk_f32(const uint8_t *frame, size_t frame_len, uint32_t sample_rate,

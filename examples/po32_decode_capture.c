@@ -25,10 +25,8 @@ static uint16_t read_le16(const uint8_t *data) {
 }
 
 static uint32_t read_le32(const uint8_t *data) {
-  return (uint32_t)data[0] |
-         (uint32_t)((uint32_t)data[1] << 8) |
-         (uint32_t)((uint32_t)data[2] << 16) |
-         (uint32_t)((uint32_t)data[3] << 24);
+  return (uint32_t)data[0] | (uint32_t)((uint32_t)data[1] << 8) |
+         (uint32_t)((uint32_t)data[2] << 16) | (uint32_t)((uint32_t)data[3] << 24);
 }
 
 static int ensure_directory(const char *path) {
@@ -61,7 +59,8 @@ static int load_file(const char *path, uint8_t **out_data, size_t *out_len) {
   long len_long;
 
   if (fp == NULL || out_data == NULL || out_len == NULL) {
-    if (fp != NULL) fclose(fp);
+    if (fp != NULL)
+      fclose(fp);
     return 0;
   }
   if (fseek(fp, 0, SEEK_END) != 0) {
@@ -99,9 +98,7 @@ static float pcm16_to_float(int16_t value) {
 }
 
 static float pcm24_to_float(const uint8_t *data) {
-  int32_t value = (int32_t)data[0] |
-                  ((int32_t)data[1] << 8) |
-                  ((int32_t)data[2] << 16);
+  int32_t value = (int32_t)data[0] | ((int32_t)data[1] << 8) | ((int32_t)data[2] << 16);
   if ((value & 0x00800000) != 0) {
     value |= (int32_t)0xFF000000;
   }
@@ -128,7 +125,8 @@ static int decode_wav(const char *path, wav_data_t *out_wav) {
   if (out_wav == NULL || !load_file(path, &file_data, &file_len)) {
     return 0;
   }
-  if (file_len < 44u || memcmp(file_data, "RIFF", 4u) != 0 || memcmp(file_data + 8u, "WAVE", 4u) != 0) {
+  if (file_len < 44u || memcmp(file_data, "RIFF", 4u) != 0 ||
+      memcmp(file_data + 8u, "WAVE", 4u) != 0) {
     free(file_data);
     return 0;
   }
@@ -240,11 +238,7 @@ static void write_pattern_fields(FILE *fp, const po32_pattern_packet_t *pattern)
       if (entry->instrument == 0u) {
         fputs(step == 0u ? "--" : ",--", fp);
       } else {
-        fprintf(fp,
-                "%s%u/f%u%s",
-                step == 0u ? "" : ",",
-                entry->instrument,
-                entry->fill_rate,
+        fprintf(fp, "%s%u/f%u%s", step == 0u ? "" : ",", entry->instrument, entry->fill_rate,
                 entry->accent ? "a" : "");
       }
     }
@@ -252,15 +246,13 @@ static void write_pattern_fields(FILE *fp, const po32_pattern_packet_t *pattern)
   }
 }
 
-static void write_pattern_summary(FILE *fp, int packet_index, const po32_pattern_packet_t *pattern) {
+static void write_pattern_summary(FILE *fp, int packet_index,
+                                  const po32_pattern_packet_t *pattern) {
   if (fp == NULL) {
     return;
   }
-  fprintf(fp,
-          "packet_%02d_pattern: pattern_number=%u accent_bits=0x%04x\n",
-          packet_index,
-          pattern->pattern_number,
-          pattern->accent_bits);
+  fprintf(fp, "packet_%02d_pattern: pattern_number=%u accent_bits=0x%04x\n", packet_index,
+          pattern->pattern_number, pattern->accent_bits);
   for (size_t lane = 0u; lane < PO32_PATTERN_LANE_COUNT; ++lane) {
     int any = 0;
     for (size_t step = 0u; step < PO32_PATTERN_STEP_COUNT; ++step) {
@@ -280,11 +272,7 @@ static void write_pattern_summary(FILE *fp, int packet_index, const po32_pattern
       if (entry->instrument == 0u) {
         fputs(step == 0u ? "--" : ",--", fp);
       } else {
-        fprintf(fp,
-                "%s%u/f%u%s",
-                step == 0u ? "" : ",",
-                entry->instrument,
-                entry->fill_rate,
+        fprintf(fp, "%s%u/f%u%s", step == 0u ? "" : ",", entry->instrument, entry->fill_rate,
                 entry->accent ? "a" : "");
       }
     }
@@ -297,12 +285,8 @@ static void write_state_summary(FILE *fp, int packet_index, const po32_state_pac
   if (fp == NULL) {
     return;
   }
-  fprintf(fp,
-          "packet_%02d_state: tempo=%u swing_times_12=%u pattern_count=%zu\n",
-          packet_index,
-          state->tempo,
-          state->swing_times_12,
-          state->pattern_count);
+  fprintf(fp, "packet_%02d_state: tempo=%u swing_times_12=%u pattern_count=%zu\n", packet_index,
+          state->tempo, state->swing_times_12, state->pattern_count);
   fputs("pattern_numbers=", fp);
   for (size_t i = 0u; i < state->pattern_count; ++i) {
     fprintf(fp, "%s%u", i == 0u ? "" : ",", state->pattern_numbers[i]);
@@ -319,8 +303,8 @@ static int dump_packet(const po32_packet_t *packet, void *user) {
   FILE *fp;
 
   ++ctx->packet_index;
-  (void)snprintf(dir_path, sizeof(dir_path), "%s/packet_%02d_%s",
-                 ctx->output_dir, ctx->packet_index, po32_tag_name(packet->tag_code));
+  (void)snprintf(dir_path, sizeof(dir_path), "%s/packet_%02d_%s", ctx->output_dir,
+                 ctx->packet_index, po32_tag_name(packet->tag_code));
   if (!ensure_directory(dir_path)) {
     return 1;
   }
@@ -347,28 +331,33 @@ static int dump_packet(const po32_packet_t *packet, void *user) {
 
   if (packet->tag_code == PO32_TAG_PATCH) {
     po32_patch_packet_t decoded;
-    if (po32_packet_decode(packet->tag_code, packet->payload, packet->payload_len, &decoded) == PO32_OK) {
+    if (po32_packet_decode(packet->tag_code, packet->payload, packet->payload_len, &decoded) ==
+        PO32_OK) {
       write_patch_fields(fp, &decoded);
     }
   } else if (packet->tag_code == PO32_TAG_KNOB) {
     po32_knob_packet_t decoded;
-    if (po32_packet_decode(packet->tag_code, packet->payload, packet->payload_len, &decoded) == PO32_OK) {
+    if (po32_packet_decode(packet->tag_code, packet->payload, packet->payload_len, &decoded) ==
+        PO32_OK) {
       write_knob_fields(fp, &decoded);
     }
   } else if (packet->tag_code == PO32_TAG_RESET) {
     po32_reset_packet_t decoded;
-    if (po32_packet_decode(packet->tag_code, packet->payload, packet->payload_len, &decoded) == PO32_OK) {
+    if (po32_packet_decode(packet->tag_code, packet->payload, packet->payload_len, &decoded) ==
+        PO32_OK) {
       write_reset_fields(fp, &decoded);
     }
   } else if (packet->tag_code == PO32_TAG_STATE) {
     po32_state_packet_t decoded;
-    if (po32_packet_decode(packet->tag_code, packet->payload, packet->payload_len, &decoded) == PO32_OK) {
+    if (po32_packet_decode(packet->tag_code, packet->payload, packet->payload_len, &decoded) ==
+        PO32_OK) {
       write_state_fields(fp, &decoded);
       write_state_summary(ctx->pattern_summary_fp, ctx->packet_index, &decoded);
     }
   } else if (packet->tag_code == PO32_TAG_PATTERN) {
     po32_pattern_packet_t decoded;
-    if (po32_packet_decode(packet->tag_code, packet->payload, packet->payload_len, &decoded) == PO32_OK) {
+    if (po32_packet_decode(packet->tag_code, packet->payload, packet->payload_len, &decoded) ==
+        PO32_OK) {
       write_pattern_fields(fp, &decoded);
       write_pattern_summary(ctx->pattern_summary_fp, ctx->packet_index, &decoded);
     }
@@ -411,12 +400,7 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  if (po32_decode_f32(wav.samples,
-                      wav.sample_count,
-                      (float)wav.sample_rate,
-                      &result,
-                      frame,
-                      65536u,
+  if (po32_decode_f32(wav.samples, wav.sample_count, (float)wav.sample_rate, &result, frame, 65536u,
                       &frame_len) != PO32_OK) {
     fprintf(stderr, "po32_decode_f32 failed\n");
     free(wav.samples);
@@ -435,19 +419,20 @@ int main(int argc, char **argv) {
       return 1;
     }
     if (frame_len >= PO32_PREAMBLE_BYTES + PO32_FINAL_TAIL_BYTES) {
-      (void)write_binary_file(body_path,
-                              frame + PO32_PREAMBLE_BYTES,
+      (void)write_binary_file(body_path, frame + PO32_PREAMBLE_BYTES,
                               frame_len - PO32_PREAMBLE_BYTES - PO32_FINAL_TAIL_BYTES);
     }
   }
 
   dump_ctx.output_dir = argv[2];
   dump_ctx.packet_index = 0;
-  (void)snprintf(pattern_summary_path, sizeof(pattern_summary_path), "%s/pattern_summary.txt", argv[2]);
+  (void)snprintf(pattern_summary_path, sizeof(pattern_summary_path), "%s/pattern_summary.txt",
+                 argv[2]);
   pattern_summary_fp = fopen(pattern_summary_path, "w");
   dump_ctx.pattern_summary_fp = pattern_summary_fp;
   if (po32_frame_parse(frame, frame_len, dump_packet, &dump_ctx, &tail) != PO32_OK) {
-    if (pattern_summary_fp != NULL) fclose(pattern_summary_fp);
+    if (pattern_summary_fp != NULL)
+      fclose(pattern_summary_fp);
     free(wav.samples);
     free(frame);
     return 3;

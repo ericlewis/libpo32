@@ -1,0 +1,21 @@
+#!/bin/sh
+set -eu
+
+root_dir=$(git rev-parse --show-toplevel)
+
+: "${CLANG_FORMAT:=clang-format}"
+
+staged_files=$(
+  git diff --cached --name-only --diff-filter=ACMR |
+    grep -E '\.(c|h)$' || true
+)
+
+if [ -z "$staged_files" ]; then
+  exit 0
+fi
+
+printf '%s\n' "$staged_files" | while IFS= read -r path; do
+  [ -n "$path" ] || continue
+  "$CLANG_FORMAT" -i "$root_dir/$path"
+  git add "$path"
+done

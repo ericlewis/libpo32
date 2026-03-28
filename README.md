@@ -1,5 +1,11 @@
 # libpo32
 
+[![Tests](https://github.com/ericlewis/libpo32/actions/workflows/tests.yml/badge.svg)](https://github.com/ericlewis/libpo32/actions/workflows/tests.yml)
+[![Commit Messages](https://github.com/ericlewis/libpo32/actions/workflows/commit-messages.yml/badge.svg)](https://github.com/ericlewis/libpo32/actions/workflows/commit-messages.yml)
+[![Formatting](https://github.com/ericlewis/libpo32/actions/workflows/format.yml/badge.svg)](https://github.com/ericlewis/libpo32/actions/workflows/format.yml)
+[![Static Analysis](https://github.com/ericlewis/libpo32/actions/workflows/static-analysis.yml/badge.svg)](https://github.com/ericlewis/libpo32/actions/workflows/static-analysis.yml)
+[![Codecov](https://codecov.io/gh/ericlewis/libpo32/graph/badge.svg)](https://codecov.io/gh/ericlewis/libpo32)
+
 A small C99 library for Teenage Engineering PO-32 acoustic data transfers
 and drum synthesis.
 
@@ -17,6 +23,7 @@ to build, send, receive, and preview PO-32 transfers.
 - [Public API](#public-api)
 - [Documentation](#documentation)
 - [Project Layout](#project-layout)
+- [Contributing](#contributing)
 - [License](#license)
 
 ## Overview
@@ -68,6 +75,16 @@ ctest --test-dir build --output-on-failure
 ./build/po32_demo
 ```
 
+Optional, but recommended for local development:
+
+```sh
+./scripts/install-git-hooks.sh
+```
+
+That enables the repo-managed pre-commit hook, which runs `clang-format` on
+staged `.c` and `.h` files before each commit and validates commit subjects
+against Conventional Commits.
+
 The demo builds a transfer frame, renders it to audio, decodes it back
 (verifying a lossless roundtrip), synthesizes a drum hit, and writes two
 WAV files: `demo_modem.wav` and `demo_kick.wav`.
@@ -97,6 +114,7 @@ WAV files: `demo_modem.wav` and `demo_kick.wav`.
 | [Synth](docs/SYNTH.md) | Synthesizer signal path |
 | [Patch Parameters](docs/PATCH_PARAMETERS.md) | The 21 parameters |
 | [Examples](examples/README.md) | Supported example programs |
+| [Contributing](CONTRIBUTING.md) | Local setup, checks, and commit conventions |
 
 ## Project Layout
 
@@ -107,6 +125,11 @@ WAV files: `demo_modem.wav` and `demo_kick.wav`.
 | [`examples`](examples) | Supported C examples |
 | [`tests`](tests) | Core test coverage |
 | [`docs`](docs) | Architecture, protocol, and API notes |
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for local setup, verification commands,
+and the Conventional Commits policy used for SemVer-friendly history.
 
 ## License
 

@@ -7,21 +7,25 @@
 
 static void po32_zero(void *dst, size_t n) {
   unsigned char *d = (unsigned char *)dst;
-  while (n-- > 0u) *d++ = 0u;
+  while (n-- > 0u)
+    *d++ = 0u;
 }
 
 static void po32_memcpy(void *dst, const void *src, size_t n) {
   unsigned char *d = (unsigned char *)dst;
   const unsigned char *s = (const unsigned char *)src;
-  while (n-- > 0u) *d++ = *s++;
+  while (n-- > 0u)
+    *d++ = *s++;
 }
 
 static int po32_memcmp(const void *a, const void *b, size_t n) {
   const unsigned char *pa = (const unsigned char *)a;
   const unsigned char *pb = (const unsigned char *)b;
   while (n-- > 0u) {
-    if (*pa != *pb) return (int)*pa - (int)*pb;
-    ++pa; ++pb;
+    if (*pa != *pb)
+      return (int)*pa - (int)*pb;
+    ++pa;
+    ++pb;
   }
   return 0;
 }
@@ -33,7 +37,7 @@ static int po32_memcmp(const void *a, const void *b, size_t n) {
 #define PO32_PACKET_HEADER_BYTES   3u
 #define PO32_PACKET_TRAILER_BYTES  2u
 #define PO32_PACKET_OVERHEAD_BYTES (PO32_PACKET_HEADER_BYTES + PO32_PACKET_TRAILER_BYTES)
-#define PO32_PATCH_PARAM_BYTES ((size_t)PO32_PARAM_COUNT * 2u)
+#define PO32_PATCH_PARAM_BYTES     ((size_t)PO32_PARAM_COUNT * 2u)
 #define PO32_TIMING_RECOVERY_GAIN  0.01f
 
 #define PO32_STATE_PAYLOAD_MIN_BYTES ((size_t)PO32_STATE_MORPH_PAIR_COUNT * 2u + 3u)
@@ -79,21 +83,17 @@ static int po32_tag_payload_len_is_valid(uint16_t tag_code, size_t payload_len) 
 
 static const uint8_t PO32_PREAMBLE_SYNC_WORD[4] = {0x14u, 0x19u, 0x9Du, 0xCFu};
 
-#define PO32_REPEAT_4(x) x, x, x, x
-#define PO32_REPEAT_8(x) PO32_REPEAT_4(x), PO32_REPEAT_4(x)
+#define PO32_REPEAT_4(x)  x, x, x, x
+#define PO32_REPEAT_8(x)  PO32_REPEAT_4(x), PO32_REPEAT_4(x)
 #define PO32_REPEAT_16(x) PO32_REPEAT_8(x), PO32_REPEAT_8(x)
 #define PO32_REPEAT_32(x) PO32_REPEAT_16(x), PO32_REPEAT_16(x)
 #define PO32_REPEAT_64(x) PO32_REPEAT_32(x), PO32_REPEAT_32(x)
 
 static const uint8_t PO32_PREAMBLE[PO32_PREAMBLE_BYTES] = {
-    PO32_REPEAT_64(PO32_PREAMBLE_FILL),
-    PO32_REPEAT_32(PO32_PREAMBLE_FILL),
-    PO32_REPEAT_16(PO32_PREAMBLE_FILL),
-    PO32_REPEAT_8(PO32_PREAMBLE_FILL),
-    PO32_REPEAT_4(PO32_PREAMBLE_FILL),
-    PO32_PREAMBLE_SYNC_WORD[0],
-    PO32_PREAMBLE_SYNC_WORD[1],
-    PO32_PREAMBLE_SYNC_WORD[2],
+    PO32_REPEAT_64(PO32_PREAMBLE_FILL), PO32_REPEAT_32(PO32_PREAMBLE_FILL),
+    PO32_REPEAT_16(PO32_PREAMBLE_FILL), PO32_REPEAT_8(PO32_PREAMBLE_FILL),
+    PO32_REPEAT_4(PO32_PREAMBLE_FILL),  PO32_PREAMBLE_SYNC_WORD[0],
+    PO32_PREAMBLE_SYNC_WORD[1],         PO32_PREAMBLE_SYNC_WORD[2],
     PO32_PREAMBLE_SYNC_WORD[3],
 };
 
@@ -494,8 +494,7 @@ po32_status_t po32_pattern_clear_step(po32_pattern_packet_t *pattern, uint8_t st
   for (uint8_t lane = 0u; lane < PO32_PATTERN_LANE_COUNT; ++lane) {
     po32_pattern_zero_slot(pattern, step_index, lane);
   }
-  pattern->accent_bits =
-      (uint16_t)(pattern->accent_bits & (uint16_t)~(uint16_t)(1u << step_index));
+  pattern->accent_bits = (uint16_t)(pattern->accent_bits & (uint16_t)~(uint16_t)(1u << step_index));
   return PO32_OK;
 }
 
@@ -565,9 +564,12 @@ po32_status_t po32_pattern_trigger_decode(uint8_t lane_index, uint8_t trigger,
     return PO32_ERR_RANGE;
 
   if ((trigger & 0x0Fu) == 0u) {
-    if (out_instrument != NULL) *out_instrument = 0u;
-    if (out_fill_rate != NULL) *out_fill_rate = 0u;
-    if (out_accent != NULL) *out_accent = 0;
+    if (out_instrument != NULL)
+      *out_instrument = 0u;
+    if (out_fill_rate != NULL)
+      *out_fill_rate = 0u;
+    if (out_accent != NULL)
+      *out_accent = 0;
     return PO32_OK;
   }
 
@@ -577,9 +579,12 @@ po32_status_t po32_pattern_trigger_decode(uint8_t lane_index, uint8_t trigger,
   if ((trigger & 0x20u) != 0u)
     instrument = (uint8_t)(instrument + 8u);
 
-  if (out_instrument != NULL) *out_instrument = instrument;
-  if (out_fill_rate != NULL) *out_fill_rate = (uint8_t)(trigger & 0x0Fu);
-  if (out_accent != NULL) *out_accent = ((trigger & 0x80u) != 0u) ? 1 : 0;
+  if (out_instrument != NULL)
+    *out_instrument = instrument;
+  if (out_fill_rate != NULL)
+    *out_fill_rate = (uint8_t)(trigger & 0x0Fu);
+  if (out_accent != NULL)
+    *out_accent = ((trigger & 0x80u) != 0u) ? 1 : 0;
   return PO32_OK;
 }
 
@@ -701,9 +706,11 @@ po32_status_t po32_encode_patch(const po32_patch_params_t *params, uint8_t *out,
 #define ENCODE_PATCH_PARAM(idx, name)                                                              \
   {                                                                                                \
     float _v = params->name;                                                                       \
-    if (_v < 0.0f) _v = 0.0f;                                                                     \
-    if (_v > 1.0f) _v = 1.0f;                                                                     \
-    uint16_t raw = (uint16_t)(_v * PO32_PARAM_SCALE + 0.5f);                                      \
+    if (_v < 0.0f)                                                                                 \
+      _v = 0.0f;                                                                                   \
+    if (_v > 1.0f)                                                                                 \
+      _v = 1.0f;                                                                                   \
+    uint16_t raw = (uint16_t)(_v * PO32_PARAM_SCALE + 0.5f);                                       \
     out[(size_t)(idx) * 2u] = (uint8_t)(raw & 0xFFu);                                              \
     out[(size_t)(idx) * 2u + 1u] = (uint8_t)((raw >> 8) & 0xFFu);                                  \
   }
@@ -741,9 +748,11 @@ static po32_status_t po32_patch_packet_encode(const po32_patch_packet_t *pkt, po
 #define ENCODE_PARAM(idx, name)                                                                    \
   {                                                                                                \
     float _v = pkt->params.name;                                                                   \
-    if (_v < 0.0f) _v = 0.0f;                                                                     \
-    if (_v > 1.0f) _v = 1.0f;                                                                     \
-    uint16_t raw = (uint16_t)(_v * PO32_PARAM_SCALE + 0.5f);                                      \
+    if (_v < 0.0f)                                                                                 \
+      _v = 0.0f;                                                                                   \
+    if (_v > 1.0f)                                                                                 \
+      _v = 1.0f;                                                                                   \
+    uint16_t raw = (uint16_t)(_v * PO32_PARAM_SCALE + 0.5f);                                       \
     out->payload[1u + (size_t)(idx) * 2u] = (uint8_t)(raw & 0xFFu);                                \
     out->payload[1u + (size_t)(idx) * 2u + 1u] = (uint8_t)((raw >> 8) & 0xFFu);                    \
   }
@@ -886,9 +895,9 @@ static po32_status_t po32_pattern_packet_encode(const po32_pattern_packet_t *pkt
         out->payload[pos++] = 0u;
       } else {
         uint8_t trigger = 0u;
-        po32_status_t s = po32_pattern_trigger_encode(
-            pkt->steps[index].instrument, pkt->steps[index].fill_rate,
-            pkt->steps[index].accent, &trigger);
+        po32_status_t s =
+            po32_pattern_trigger_encode(pkt->steps[index].instrument, pkt->steps[index].fill_rate,
+                                        pkt->steps[index].accent, &trigger);
         if (s != PO32_OK)
           return s;
         out->payload[pos++] = trigger;
@@ -919,10 +928,9 @@ static po32_status_t po32_pattern_packet_decode(const uint8_t *data, size_t len,
     size_t lane_base = lane * (size_t)PO32_PATTERN_STEP_COUNT;
     for (size_t step = 0u; step < PO32_PATTERN_STEP_COUNT; ++step) {
       size_t index = lane_base + step;
-      po32_status_t s = po32_pattern_trigger_decode(
-          (uint8_t)lane, data[pos++],
-          &out->steps[index].instrument, &out->steps[index].fill_rate,
-          &out->steps[index].accent);
+      po32_status_t s =
+          po32_pattern_trigger_decode((uint8_t)lane, data[pos++], &out->steps[index].instrument,
+                                      &out->steps[index].fill_rate, &out->steps[index].accent);
       if (s != PO32_OK) {
         out->steps[index].instrument = 0u;
         out->steps[index].fill_rate = 0u;
@@ -1036,8 +1044,7 @@ void po32_modulator_init(po32_modulator_t *m, const uint8_t *frame, size_t frame
   m->sample_rate = (float)sample_rate;
   m->symbol_phase = 1.0f;
   m->symbols_per_sample = (float)PO32_NATIVE_BAUD / (float)sample_rate;
-  carrier_step = m->symbols_per_sample *
-                 (2.0f * PO32_DPSK_CARRIER_CYCLES_PER_SYMBOL * PO32_PI);
+  carrier_step = m->symbols_per_sample * (2.0f * PO32_DPSK_CARRIER_CYCLES_PER_SYMBOL * PO32_PI);
   m->rot_sin = po32_lut_sinf(carrier_step);
   m->rot_cos = po32_lut_cosf(carrier_step);
   m->osc_cos = 1.0f;
@@ -1070,8 +1077,8 @@ int po32_modulator_done(const po32_modulator_t *m) {
   return m == NULL || m->sample_index >= m->total_samples;
 }
 
-po32_status_t po32_modulator_render_f32(po32_modulator_t *m, float *out_samples, size_t out_capacity,
-                                        size_t *out_len) {
+po32_status_t po32_modulator_render_f32(po32_modulator_t *m, float *out_samples,
+                                        size_t out_capacity, size_t *out_len) {
   size_t count, i;
   float osc_s, osc_c, rot_s, rot_c;
   float sym_phase, sym_step;
@@ -1091,20 +1098,21 @@ po32_status_t po32_modulator_render_f32(po32_modulator_t *m, float *out_samples,
 
   /* Single loop bound */
   count = m->total_samples - m->sample_index;
-  if (count > out_capacity) count = out_capacity;
+  if (count > out_capacity)
+    count = out_capacity;
 
   /* Hoist hot fields into locals so the compiler can register-allocate
    * them without worrying about aliasing through out_samples. */
-  osc_s      = m->osc_sin;
-  osc_c      = m->osc_cos;
-  rot_s      = m->rot_sin;
-  rot_c      = m->rot_cos;
-  sym_phase  = m->symbol_phase;
-  sym_step   = m->symbols_per_sample;
-  frame      = m->frame;
+  osc_s = m->osc_sin;
+  osc_c = m->osc_cos;
+  rot_s = m->rot_sin;
+  rot_c = m->rot_cos;
+  sym_phase = m->symbol_phase;
+  sym_step = m->symbols_per_sample;
+  frame = m->frame;
   bit_cursor = m->bit_cursor;
   total_bits = m->total_bits;
-  state      = m->state;
+  state = m->state;
 
   for (i = 0; i < count; ++i) {
     float ns, nc, sample;
@@ -1134,11 +1142,11 @@ po32_status_t po32_modulator_render_f32(po32_modulator_t *m, float *out_samples,
   }
 
   /* Write back to struct */
-  m->osc_sin      = osc_s;
-  m->osc_cos      = osc_c;
+  m->osc_sin = osc_s;
+  m->osc_cos = osc_c;
   m->symbol_phase = sym_phase;
-  m->bit_cursor   = bit_cursor;
-  m->state        = state;
+  m->bit_cursor = bit_cursor;
+  m->state = state;
   m->sample_index += count;
 
   *out_len = count;
@@ -1398,8 +1406,8 @@ static po32_status_t po32_demod_run_sample(po32_demod_run_t *run, float sample, 
   return PO32_OK;
 }
 
-static po32_status_t po32_demodulator_push(po32_demodulator_t *d, const float *samples, size_t count,
-                                           po32_packet_callback_t cb, void *user) {
+static po32_status_t po32_demodulator_push(po32_demodulator_t *d, const float *samples,
+                                           size_t count, po32_packet_callback_t cb, void *user) {
   po32_demod_run_t run;
   int stop = 0;
 
@@ -1452,10 +1460,11 @@ static void po32_decode_result_clear(po32_decode_result_t *out_result, size_t *o
 }
 
 static po32_status_t po32_decode_prepare(const float *samples, size_t count, float sample_rate,
-                                         uint8_t *out_frame, size_t out_capacity, const size_t *out_len,
-                                         po32_builder_t *builder, po32_decode_ctx_t *ctx) {
-  if (samples == NULL || count == 0u || sample_rate <= 0.0f ||
-      out_frame == NULL || out_len == NULL || builder == NULL || ctx == NULL) {
+                                         uint8_t *out_frame, size_t out_capacity,
+                                         const size_t *out_len, po32_builder_t *builder,
+                                         po32_decode_ctx_t *ctx) {
+  if (samples == NULL || count == 0u || sample_rate <= 0.0f || out_frame == NULL ||
+      out_len == NULL || builder == NULL || ctx == NULL) {
     return PO32_ERR_INVALID_ARG;
   }
 
@@ -1471,8 +1480,7 @@ static po32_status_t po32_decode_prepare(const float *samples, size_t count, flo
 
 static po32_status_t po32_decode_finalize(const po32_demodulator_t *demod,
                                           const po32_decode_ctx_t *ctx,
-                                          po32_decode_result_t *out_result,
-                                          size_t *out_len) {
+                                          po32_decode_result_t *out_result, size_t *out_len) {
   po32_status_t status;
 
   if (demod == NULL || ctx == NULL || out_len == NULL) {

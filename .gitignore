@@ -6,6 +6,7 @@ build-*/
 build-release-check/
 build-decode-out-libpo32_artifacts/
 build-decode-out-libpo32
+coverage/
 compile_commands.json
 demo_*.wav
 *.o

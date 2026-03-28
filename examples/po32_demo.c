@@ -20,7 +20,8 @@
 static int write_wav(const char *path, const float *samples, size_t sample_count,
                      uint32_t sample_rate_hz) {
   FILE *fp = fopen(path, "wb");
-  if (!fp) return -1;
+  if (!fp)
+    return -1;
 
   uint32_t data_bytes = (uint32_t)(sample_count * 2u);
   uint32_t file_size = 36 + data_bytes;
@@ -45,8 +46,10 @@ static int write_wav(const char *path, const float *samples, size_t sample_count
 
   for (size_t i = 0; i < sample_count; i++) {
     float s = samples[i];
-    if (s > 1.0f) s = 1.0f;
-    if (s < -1.0f) s = -1.0f;
+    if (s > 1.0f)
+      s = 1.0f;
+    if (s < -1.0f)
+      s = -1.0f;
     int16_t pcm_sample = (int16_t)(s * 32767.0f);
     fwrite(&pcm_sample, 2, 1, fp);
   }
@@ -62,15 +65,15 @@ int main(void) {
 
   po32_patch_params_t kick = {0};
   po32_patch_params_zero(&kick);
-  kick.OscWave = 0.0f;   /* sine */
-  kick.OscFreq = 0.18f;  /* ~130 Hz */
-  kick.OscAtk  = 0.0f;
-  kick.OscDcy  = 0.45f;
-  kick.ModMode = 0.0f;   /* decay mod */
+  kick.OscWave = 0.0f;  /* sine */
+  kick.OscFreq = 0.18f; /* ~130 Hz */
+  kick.OscAtk = 0.0f;
+  kick.OscDcy = 0.45f;
+  kick.ModMode = 0.0f; /* decay mod */
   kick.ModRate = 0.0f;
-  kick.ModAmt  = 0.55f;
-  kick.Mix     = 0.0f;   /* osc only */
-  kick.Level   = 0.88f;
+  kick.ModAmt = 0.55f;
+  kick.Mix = 0.0f; /* osc only */
+  kick.Level = 0.88f;
 
   uint8_t frame_buf[8192];
   po32_builder_t builder;
@@ -104,23 +107,21 @@ int main(void) {
   float *modem = malloc(modem_count * sizeof(float));
   po32_render_dpsk_f32(frame_buf, frame_len, sample_rate, modem, modem_count);
 
-  printf("modem audio: %zu samples (%.2f s)\n",
-         modem_count, (float)modem_count / (float)sample_rate);
+  printf("modem audio: %zu samples (%.2f s)\n", modem_count,
+         (float)modem_count / (float)sample_rate);
 
   /* ── 3. Decode it back ── */
 
   po32_decode_result_t result;
   uint8_t decoded_frame[65536];
   size_t decoded_len = 0;
-  po32_decode_f32(modem, modem_count, (float)sample_rate,
-                  &result, decoded_frame, sizeof(decoded_frame), &decoded_len);
+  po32_decode_f32(modem, modem_count, (float)sample_rate, &result, decoded_frame,
+                  sizeof(decoded_frame), &decoded_len);
 
-  printf("decoded: %zu bytes, %d packets, tail=%s\n",
-         decoded_len, result.packet_count,
+  printf("decoded: %zu bytes, %d packets, tail=%s\n", decoded_len, result.packet_count,
          result.done ? "yes" : "no");
 
-  int match = (decoded_len == frame_len &&
-               memcmp(frame_buf, decoded_frame, frame_len) == 0);
+  int match = (decoded_len == frame_len && memcmp(frame_buf, decoded_frame, frame_len) == 0);
   printf("roundtrip: %s\n", match ? "PASS" : "FAIL");
 
   /* ── 4. Synthesize a drum hit ── */
@@ -131,11 +132,9 @@ int main(void) {
   size_t hit_count = po32_synth_samples_for_duration(&synth, 0.5f);
   float *hit = malloc(hit_count * sizeof(float));
   size_t hit_len = 0;
-  po32_synth_render(&synth, &kick, 100, 0.5f,
-                    hit, hit_count, &hit_len);
+  po32_synth_render(&synth, &kick, 100, 0.5f, hit, hit_count, &hit_len);
 
-  printf("synth: %zu samples (%.2f s)\n",
-         hit_len, (float)hit_len / (float)sample_rate);
+  printf("synth: %zu samples (%.2f s)\n", hit_len, (float)hit_len / (float)sample_rate);
 
   /* ── 5. Write WAV files ── */
 

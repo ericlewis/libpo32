@@ -22,9 +22,9 @@
 
 /* ── Aliases so the rest of the file reads cleanly ──────────────── */
 
-#define LUT_PI           PO32_LUT_PI
-#define LUT_TWO_PI       PO32_LUT_TWO_PI
-#define LUT_INV_TWO_PI   PO32_LUT_INV_TWO_PI
+#define LUT_PI         PO32_LUT_PI
+#define LUT_TWO_PI     PO32_LUT_TWO_PI
+#define LUT_INV_TWO_PI PO32_LUT_INV_TWO_PI
 
 #define lut_sinf   po32_lut_sinf
 #define lut_cosf   po32_lut_cosf
@@ -36,10 +36,14 @@
 
 /* sqrtf via Quake inv-sqrt — only used in synth, not worth sharing */
 static float lut_sqrtf(float x) {
-  union { float f; uint32_t u; } conv;
+  union {
+    float f;
+    uint32_t u;
+  } conv;
   float y, half_x;
 
-  if (x <= 0.0f) return 0.0f;
+  if (x <= 0.0f)
+    return 0.0f;
 
   half_x = x * 0.5f;
   conv.f = x;
@@ -53,67 +57,67 @@ static float lut_sqrtf(float x) {
 
 /* ── Synth constants ────────────────────────────────────────────── */
 
-#define SYNTH_ENV_FLOOR_GAIN           0.001f
-#define SYNTH_ENV_SPAN                 (1.0f / SYNTH_ENV_FLOOR_GAIN)
+#define SYNTH_ENV_FLOOR_GAIN 0.001f
+#define SYNTH_ENV_SPAN       (1.0f / SYNTH_ENV_FLOOR_GAIN)
 
-#define SYNTH_FREQ_MIN_HZ              20.0f
-#define SYNTH_FREQ_MAX_HZ              20000.0f
+#define SYNTH_FREQ_MIN_HZ 20.0f
+#define SYNTH_FREQ_MAX_HZ 20000.0f
 
-#define SYNTH_DECAY_MIN_SECONDS        0.01f
-#define SYNTH_DECAY_MAX_SECONDS        10.0f
+#define SYNTH_DECAY_MIN_SECONDS 0.01f
+#define SYNTH_DECAY_MAX_SECONDS 10.0f
 
 /* Precomputed: powf(10, -7/5) */
-#define SYNTH_ATTACK_SCALE_AT_ZERO     0.01995262315f
-#define SYNTH_ATTACK_EXPONENT_SPAN     (12.0f / 5.0f)
+#define SYNTH_ATTACK_SCALE_AT_ZERO 0.01995262315f
+#define SYNTH_ATTACK_EXPONENT_SPAN (12.0f / 5.0f)
 
-#define SYNTH_MIDI_MAX_VELOCITY        127.0f
-#define SYNTH_MIDI_HALF_RANGE          63.0f
+#define SYNTH_MIDI_MAX_VELOCITY 127.0f
+#define SYNTH_MIDI_HALF_RANGE   63.0f
 
-#define SYNTH_VELOCITY_CURVE_DB        37.0f
-#define SYNTH_MIX_TILT_DB              25.0f
+#define SYNTH_VELOCITY_CURVE_DB 37.0f
+#define SYNTH_MIX_TILT_DB       25.0f
 
-#define SYNTH_MOD_MAX_SEMITONES        96.0f
-#define SYNTH_SEMITONES_PER_OCTAVE     12.0f
-#define SYNTH_SINE_MOD_MAX_HZ          2000.0f
+#define SYNTH_MOD_MAX_SEMITONES    96.0f
+#define SYNTH_SEMITONES_PER_OCTAVE 12.0f
+#define SYNTH_SINE_MOD_MAX_HZ      2000.0f
 
-#define SYNTH_EQ_MAX_ABS_DB            40.0f
-#define SYNTH_EQ_ENABLE_THRESH_DB      0.5f
+#define SYNTH_EQ_MAX_ABS_DB       40.0f
+#define SYNTH_EQ_ENABLE_THRESH_DB 0.5f
 
-#define SYNTH_FILTER_Q_MIN             0.1f
-#define SYNTH_FILTER_Q_MAX             10000.0f
+#define SYNTH_FILTER_Q_MIN 0.1f
+#define SYNTH_FILTER_Q_MAX 10000.0f
 
 #define SYNTH_FILTER_FREQ_LIMIT_FRAC_SR 0.45f
 
-#define SYNTH_ONE_THIRD                (1.0f / 3.0f)
-#define SYNTH_TWO_THIRDS               (2.0f / 3.0f)
+#define SYNTH_ONE_THIRD  (1.0f / 3.0f)
+#define SYNTH_TWO_THIRDS (2.0f / 3.0f)
 
-#define SYNTH_MOD_ALPHA_MIN            0.001f
+#define SYNTH_MOD_ALPHA_MIN 0.001f
 
-#define SYNTH_MOD_ENV_PERIOD_THRESH_S  1.5e-3f
+#define SYNTH_MOD_ENV_PERIOD_THRESH_S   1.5e-3f
 #define SYNTH_MOD_ENV_PERIOD_SCALE_SLOW 2.0f
 #define SYNTH_MOD_ENV_PERIOD_SCALE_FAST 8.0f
-#define SYNTH_MOD_ENV_FAST_GAIN_NUM    0.5f
+#define SYNTH_MOD_ENV_FAST_GAIN_NUM     0.5f
 
-#define SYNTH_LEVEL_MIN_PARAM          1.0e-4f
-#define SYNTH_GAIN_SILENCE_DB          (-500.0f)
+#define SYNTH_LEVEL_MIN_PARAM 1.0e-4f
+#define SYNTH_GAIN_SILENCE_DB (-500.0f)
 
-#define SYNTH_DISTORT_MIN_AMOUNT       0.01f
+#define SYNTH_DISTORT_MIN_AMOUNT 0.01f
 
-#define SYNTH_DISTORT_DRIVE_SCALE          200.0f
-#define SYNTH_DISTORT_LOW_GAIN_SLOPE       (1.0f / 30.0f)
-#define SYNTH_DISTORT_CENTER_OFFSET        (1.0f / 3.0f)
-#define SYNTH_DISTORT_LOW_DC_SLOPE         (-2.0f / 27.0f)
-#define SYNTH_DISTORT_LOW_DC_BIAS          (-9.0f / 27.0f)
-#define SYNTH_DISTORT_STRONG_DC_BIAS       (-11.0f / 27.0f)
+#define SYNTH_DISTORT_DRIVE_SCALE    200.0f
+#define SYNTH_DISTORT_LOW_GAIN_SLOPE (1.0f / 30.0f)
+#define SYNTH_DISTORT_CENTER_OFFSET  (1.0f / 3.0f)
+#define SYNTH_DISTORT_LOW_DC_SLOPE   (-2.0f / 27.0f)
+#define SYNTH_DISTORT_LOW_DC_BIAS    (-9.0f / 27.0f)
+#define SYNTH_DISTORT_STRONG_DC_BIAS (-11.0f / 27.0f)
 
-#define SYNTH_DISTORT_STRONG_GAIN_NUM      0.2f
-#define SYNTH_DISTORT_STRONG_GAIN_OFFSET   0.4827586f
-#define SYNTH_DISTORT_STRONG_GAIN_BASE     0.58f
+#define SYNTH_DISTORT_STRONG_GAIN_NUM    0.2f
+#define SYNTH_DISTORT_STRONG_GAIN_OFFSET 0.4827586f
+#define SYNTH_DISTORT_STRONG_GAIN_BASE   0.58f
 
-#define SYNTH_RAND_MULTIPLIER          1103515245u
-#define SYNTH_RAND_INCREMENT           12345u
-#define SYNTH_RAND_MASK                0x7fffffffu
-#define SYNTH_RAND_MAX                 2147483647.0f
+#define SYNTH_RAND_MULTIPLIER 1103515245u
+#define SYNTH_RAND_INCREMENT  12345u
+#define SYNTH_RAND_MASK       0x7fffffffu
+#define SYNTH_RAND_MAX        2147483647.0f
 
 /* ── Small helpers ──────────────────────────────────────────────── */
 
@@ -122,8 +126,10 @@ static float synth_db_to_gain(float db) {
 }
 
 static float synth_clamp(float x, float lo, float hi) {
-  if (x < lo) return lo;
-  if (x > hi) return hi;
+  if (x < lo)
+    return lo;
+  if (x > hi)
+    return hi;
   return x;
 }
 
@@ -153,7 +159,8 @@ static float synth_sym_limit(float x) {
 /* ── Envelope curves ─────────────────────────────────────────────── */
 
 static float synth_attack_time(float x) {
-  if (x <= 0.0f) return 0.0f;
+  if (x <= 0.0f)
+    return 0.0f;
   return x * SYNTH_ATTACK_SCALE_AT_ZERO * lut_pow10f(SYNTH_ATTACK_EXPONENT_SPAN * x);
 }
 
@@ -162,12 +169,14 @@ static float synth_decay_time(float x) {
 }
 
 static float synth_exp_attack_env(float t, float attack_time) {
-  if (attack_time <= 0.0f) return 0.0f;
+  if (attack_time <= 0.0f)
+    return 0.0f;
   return SYNTH_ENV_FLOOR_GAIN * lut_powf(SYNTH_ENV_SPAN, t / attack_time);
 }
 
 static float synth_exp_decay_env(float t, float decay_time) {
-  if (decay_time <= 0.0f) return 0.0f;
+  if (decay_time <= 0.0f)
+    return 0.0f;
   return lut_powf(SYNTH_ENV_FLOOR_GAIN, t / decay_time);
 }
 
@@ -176,10 +185,12 @@ static float synth_exp_decay_env(float t, float decay_time) {
 static float synth_level_gain(float level) {
   float db;
 
-  if (level < SYNTH_LEVEL_MIN_PARAM) return 0.0f;
+  if (level < SYNTH_LEVEL_MIN_PARAM)
+    return 0.0f;
 
   db = 60.0f * level - 49.0f - 1.0f / level;
-  if (db < SYNTH_GAIN_SILENCE_DB) return 0.0f;
+  if (db < SYNTH_GAIN_SILENCE_DB)
+    return 0.0f;
 
   return synth_db_to_gain(db);
 }
@@ -193,13 +204,15 @@ static float synth_velocity_gain(int velocity, float sensitivity) {
 
 static float synth_mix_osc_gain(float mix) {
   float pan = mix * 2.0f - 1.0f;
-  if (pan < 0.0f) return 1.0f;
+  if (pan < 0.0f)
+    return 1.0f;
   return (1.0f - pan) * synth_db_to_gain(-SYNTH_MIX_TILT_DB * pan);
 }
 
 static float synth_mix_noise_gain(float mix) {
   float pan = mix * 2.0f - 1.0f;
-  if (pan >= 0.0f) return 1.0f;
+  if (pan >= 0.0f)
+    return 1.0f;
   return (1.0f + pan) * synth_db_to_gain(SYNTH_MIX_TILT_DB * pan);
 }
 
@@ -219,7 +232,8 @@ static float synth_distort(float x, float amount) {
   float drive = SYNTH_DISTORT_DRIVE_SCALE * amount * amount * amount;
   float gain, xc, xp, pos, xn, neg;
 
-  if (drive <= 0.0f) return x;
+  if (drive <= 0.0f)
+    return x;
 
   if (drive < 1.0f) {
     float clip_limit;
@@ -235,8 +249,7 @@ static float synth_distort(float x, float amount) {
     return (xc * (drive * (synth_fabsf(xc) - xc * xc) + 1.0f) - dc_bias) * gain;
   }
 
-  gain = SYNTH_DISTORT_STRONG_GAIN_NUM /
-         (drive - SYNTH_DISTORT_STRONG_GAIN_OFFSET) +
+  gain = SYNTH_DISTORT_STRONG_GAIN_NUM / (drive - SYNTH_DISTORT_STRONG_GAIN_OFFSET) +
          SYNTH_DISTORT_STRONG_GAIN_BASE;
 
   xp = x * drive - SYNTH_DISTORT_CENTER_OFFSET;
@@ -336,21 +349,20 @@ static float synth_biquad_process(synth_biquad_t *bq, float in) {
 /* ── Public API ──────────────────────────────────────────────────── */
 
 void po32_synth_init(po32_synth_t *synth, uint32_t sample_rate) {
-  if (synth == NULL) return;
+  if (synth == NULL)
+    return;
   synth->sample_rate = sample_rate;
 }
 
-size_t po32_synth_samples_for_duration(const po32_synth_t *synth,
-                                            float seconds) {
-  if (synth == NULL || seconds <= 0.0f) return 0;
+size_t po32_synth_samples_for_duration(const po32_synth_t *synth, float seconds) {
+  if (synth == NULL || seconds <= 0.0f)
+    return 0;
   return (size_t)((float)synth->sample_rate * seconds);
 }
 
-po32_status_t po32_synth_render(const po32_synth_t *synth,
-                                     const po32_patch_params_t *params,
-                                     int velocity, float duration,
-                                     float *out, size_t out_capacity,
-                                     size_t *out_len) {
+po32_status_t po32_synth_render(const po32_synth_t *synth, const po32_patch_params_t *params,
+                                int velocity, float duration, float *out, size_t out_capacity,
+                                size_t *out_len) {
   float sr;
   size_t n, i;
   float osc_freq, osc_atk, osc_dcy;
@@ -376,7 +388,8 @@ po32_status_t po32_synth_render(const po32_synth_t *synth,
 
   sr = (float)synth->sample_rate;
   n = (size_t)(sr * duration);
-  if (n > out_capacity) n = out_capacity;
+  if (n > out_capacity)
+    n = out_capacity;
   *out_len = n;
 
   osc_freq = synth_param_to_hz(params->OscFreq);
@@ -389,7 +402,8 @@ po32_status_t po32_synth_render(const po32_synth_t *synth,
 
   nf_freq = synth_clamp_sr_freq(synth_param_to_hz(params->NFilFrq), sr);
   nf_q = synth_param_to_q(params->NFilQ);
-  if (nf_q < SYNTH_FILTER_Q_MIN) nf_q = SYNTH_FILTER_Q_MIN;
+  if (nf_q < SYNTH_FILTER_Q_MIN)
+    nf_q = SYNTH_FILTER_Q_MIN;
 
   n_atk = synth_attack_time(params->NEnvAtk);
   n_dcy = synth_decay_time(params->NEnvDcy);
@@ -423,9 +437,8 @@ po32_status_t po32_synth_render(const po32_synth_t *synth,
   }
 
   mod_decay_time = synth_decay_time(mod_rate);
-  mod_rate_hz = (mod_mode < SYNTH_TWO_THIRDS)
-              ? (SYNTH_SINE_MOD_MAX_HZ * mod_rate)
-              : synth_param_to_hz(mod_rate);
+  mod_rate_hz = (mod_mode < SYNTH_TWO_THIRDS) ? (SYNTH_SINE_MOD_MAX_HZ * mod_rate)
+                                              : synth_param_to_hz(mod_rate);
   mod_state = 0.0f;
   phase = 0.0f;
 
@@ -531,8 +544,7 @@ po32_status_t po32_synth_render(const po32_synth_t *synth,
     noise_raw = synth_randf(&rand_state) * 2.0f - 1.0f;
     noise_sample = synth_biquad_process(&noise_filt, noise_raw) * noise_env;
 
-    sample = osc_sample * osc_gain_mix * osc_vel_g
-           + noise_sample * noise_gain_mix * noise_vel_g;
+    sample = osc_sample * osc_gain_mix * osc_vel_g + noise_sample * noise_gain_mix * noise_vel_g;
 
     if (dist_amt > SYNTH_DISTORT_MIN_AMOUNT) {
       sample = synth_distort(sample, dist_amt);
@@ -543,8 +555,10 @@ po32_status_t po32_synth_render(const po32_synth_t *synth,
     }
 
     sample *= level;
-    if (sample > 1.0f) sample = 1.0f;
-    if (sample < -1.0f) sample = -1.0f;
+    if (sample > 1.0f)
+      sample = 1.0f;
+    if (sample < -1.0f)
+      sample = -1.0f;
     out[i] = sample;
   }
 

@@ -9,7 +9,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#define SR 44100
+#define SR          44100
 #define MAX_SAMPLES ((size_t)SR * 2u)
 
 static float buf[MAX_SAMPLES];
@@ -17,7 +17,8 @@ static float buf[MAX_SAMPLES];
 static float rms(const float *samples, size_t count) {
   double sum = 0;
   size_t i;
-  for (i = 0; i < count; i++) sum += (double)samples[i] * samples[i];
+  for (i = 0; i < count; i++)
+    sum += (double)samples[i] * samples[i];
   return (float)sqrt(sum / (double)count);
 }
 
@@ -26,7 +27,8 @@ static float peak(const float *samples, size_t count) {
   size_t i;
   for (i = 0; i < count; i++) {
     float a = fabsf(samples[i]);
-    if (a > p) p = a;
+    if (a > p)
+      p = a;
   }
   return p;
 }
@@ -78,8 +80,7 @@ static void test_kick(void) {
   r2 = rms(buf + len * 3 / 4, len / 4);
   assert(r1 > r2 * 2.0f);
 
-  printf("  kick: len=%zu peak=%.3f front_rms=%.4f tail_rms=%.4f OK\n",
-         len, p, r1, r2);
+  printf("  kick: len=%zu peak=%.3f front_rms=%.4f tail_rms=%.4f OK\n", len, p, r1, r2);
 }
 
 static void test_noise_only(void) {
@@ -91,7 +92,7 @@ static void test_noise_only(void) {
   po32_synth_init(&synth, SR);
   memset(&params, 0, sizeof(params));
 
-  params.Mix = 1.0f;        /* all noise */
+  params.Mix = 1.0f; /* all noise */
   params.NFilFrq = 0.7f;
   params.NEnvDcy = 0.5f;
   params.Level = 0.836f;

@@ -1,0 +1,15 @@
+# <type>(<scope>): <summary>
+#
+# Examples:
+#   feat(pattern): add starter groove presets
+#   fix(protocol): correct lane-chunked pattern encoding
+#   docs(readme): clarify PO-32 transfer workflow
+#   chore(ci): add formatting workflow
+#
+# Allowed types:
+#   feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert
+#
+# SemVer guidance:
+#   feat     -> minor release
+#   fix/perf -> patch release
+#   !        -> breaking change / major release

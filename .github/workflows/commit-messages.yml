@@ -1,0 +1,50 @@
+name: Commit Messages
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  conventional-commits:
+    name: Conventional Commits
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate commit messages
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git fetch --no-tags origin "${{ github.base_ref }}"
+            revs=$(git rev-list --reverse "origin/${{ github.base_ref }}..HEAD")
+          elif [ "${{ github.event.before }}" = "0000000000000000000000000000000000000000" ]; then
+            revs=$(git rev-list --max-count=1 HEAD)
+          else
+            revs=$(git rev-list --reverse "${{ github.event.before }}..${{ github.sha }}")
+          fi
+
+          if [ -z "$revs" ]; then
+            echo "No commits to validate."
+            exit 0
+          fi
+
+          for rev in $revs; do
+            subject=$(git log -1 --format=%s "$rev")
+            body_file=$(mktemp)
+            git log -1 --format=%B "$rev" > "$body_file"
+            echo "Checking $rev: $subject"
+            ./scripts/check-commit-message.sh "$body_file"
+            rm -f "$body_file"
+          done

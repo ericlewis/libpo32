@@ -84,28 +84,27 @@ static void test_patch_encode_decode(void) {
 
 static void test_patch_parse_mtdrum_text(void) {
 #if PO32_ENABLE_MTDRUM_IMPORT
-  static const char text[] =
-      "OscWave: Triangle\n"
-      "OscFreq: 536.918 Hz\n"
-      "OscAtk: 0 ms\n"
-      "OscDcy: 160.811 ms\n"
-      "ModMode: Noise FM\n"
-      "ModRate: 244.983 Hz\n"
-      "ModAmt: 5.896 st\n"
-      "NFilMod: HP (hi-pass)\n"
-      "NFilFrq: 1840.23 Hz\n"
-      "NFilQ: 11.407\n"
-      "NEnvMod: Modulate\n"
-      "NEnvAtk: 0 ms\n"
-      "NEnvDcy: 31.522 ms\n"
-      "Mix: 40.626% osc, 59.374% noise\n"
-      "DistAmt: 27.083%\n"
-      "EQFreq: 1497.21 Hz\n"
-      "EQGain: 15.417 dB\n"
-      "Level: -2.645 dB\n"
-      "OscVel: 0.000%\n"
-      "NVel: 0.000%\n"
-      "ModVel: 0.000%\n";
+  static const char text[] = "OscWave: Triangle\n"
+                             "OscFreq: 536.918 Hz\n"
+                             "OscAtk: 0 ms\n"
+                             "OscDcy: 160.811 ms\n"
+                             "ModMode: Noise FM\n"
+                             "ModRate: 244.983 Hz\n"
+                             "ModAmt: 5.896 st\n"
+                             "NFilMod: HP (hi-pass)\n"
+                             "NFilFrq: 1840.23 Hz\n"
+                             "NFilQ: 11.407\n"
+                             "NEnvMod: Modulate\n"
+                             "NEnvAtk: 0 ms\n"
+                             "NEnvDcy: 31.522 ms\n"
+                             "Mix: 40.626% osc, 59.374% noise\n"
+                             "DistAmt: 27.083%\n"
+                             "EQFreq: 1497.21 Hz\n"
+                             "EQGain: 15.417 dB\n"
+                             "Level: -2.645 dB\n"
+                             "OscVel: 0.000%\n"
+                             "NVel: 0.000%\n"
+                             "ModVel: 0.000%\n";
   po32_patch_params_t params;
   po32_status_t status;
 
@@ -246,9 +245,7 @@ static void test_streaming_modulator_matches_block_render(void) {
   while (!po32_modulator_done(&modulator)) {
     size_t chunk_len = 0u;
     const size_t chunk_cap = 257u;
-    status = po32_modulator_render_f32(&modulator,
-                                       stream_samples + streamed_total,
-                                       chunk_cap,
+    status = po32_modulator_render_f32(&modulator, stream_samples + streamed_total, chunk_cap,
                                        &chunk_len);
     assert(status == PO32_OK);
     assert(chunk_len > 0u);
@@ -394,7 +391,8 @@ static void test_pattern_trigger_helpers(void) {
     assert(po32_pattern_trigger_encode(0u, 1u, 0, &instrument) == PO32_ERR_RANGE);
     assert(po32_pattern_trigger_lane(17u, &instrument) == PO32_ERR_RANGE);
     assert(po32_pattern_trigger_decode(4u, 1u, &instrument, &fill_rate, &accent) == PO32_ERR_RANGE);
-    assert(po32_pattern_trigger_decode(0u, 0x40u, &instrument, &fill_rate, &accent) == PO32_ERR_RANGE);
+    assert(po32_pattern_trigger_decode(0u, 0x40u, &instrument, &fill_rate, &accent) ==
+           PO32_ERR_RANGE);
     /* Any zero low nibble is empty on the wire. */
     assert(po32_pattern_trigger_decode(0u, 0u, &instrument, &fill_rate, &accent) == PO32_OK);
     assert(instrument == 0u);

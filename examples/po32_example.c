@@ -27,12 +27,8 @@ static int print_packet(const po32_packet_t *packet, void *user) {
   const char *name = po32_tag_name(packet->tag_code);
 
   printer->packet_count += 1;
-  printf("packet %d: %s (0x%04x), payload=%zu bytes, offset=%zu\n",
-         printer->packet_count,
-         name,
-         (unsigned int)packet->tag_code,
-         packet->payload_len,
-         packet->offset);
+  printf("packet %d: %s (0x%04x), payload=%zu bytes, offset=%zu\n", printer->packet_count, name,
+         (unsigned int)packet->tag_code, packet->payload_len, packet->offset);
   return 0;
 }
 
@@ -92,13 +88,8 @@ int main(void) {
     return exit_code;
   }
 
-  status = po32_decode_f32(samples,
-                           sample_count,
-                           (float)sample_rate,
-                           &decode_result,
-                           decoded_frame,
-                           sizeof(decoded_frame),
-                           &decoded_len);
+  status = po32_decode_f32(samples, sample_count, (float)sample_rate, &decode_result, decoded_frame,
+                           sizeof(decoded_frame), &decoded_len);
   free(samples);
   if (status != PO32_OK) {
     return fail_status("decode failed", status);
