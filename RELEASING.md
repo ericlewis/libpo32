@@ -6,15 +6,17 @@ Run commands from the repo root unless a step says otherwise.
 
 The initial public launch covers the core C library only:
 
-- `include/po32.h`
-- `include/po32_synth.h`
-- `src/po32.c`
-- `src/po32_patch_import.c`
-- `src/po32_synth.c`
-- `examples/po32_example.c`
-- `examples/po32_demo.c`
-- `examples/po32_pattern_editor.c`
-- `examples/po32_decode_capture.c`
+| Path | Role |
+| --- | --- |
+| `include/po32.h` | Transfer builder, packet, render, and decode API |
+| `include/po32_synth.h` | Drum synth API |
+| `src/po32.c` | Core transfer implementation |
+| `src/po32_patch_import.c` | `.mtdrum` patch text importer |
+| `src/po32_synth.c` | Drum synth implementation |
+| `examples/po32_example.c` | Minimal roundtrip example |
+| `examples/po32_demo.c` | End-to-end transfer plus synth demo |
+| `examples/po32_pattern_editor.c` | Interactive pattern editor and exporter |
+| `examples/po32_decode_capture.c` | Transfer WAV decoder and packet dumper |
 
 ## Checklist
 

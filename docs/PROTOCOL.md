@@ -84,16 +84,20 @@ human-readable tag name.
 
 The core provides typed packet structs:
 
-- [`po32_patch_packet_t`](../include/po32.h)
-- [`po32_knob_packet_t`](../include/po32.h)
-- [`po32_reset_packet_t`](../include/po32.h)
-- [`po32_state_packet_t`](../include/po32.h)
-- [`po32_pattern_packet_t`](../include/po32.h)
+| Family | Struct |
+| --- | --- |
+| Patch | [`po32_patch_packet_t`](../include/po32.h) |
+| Knob | [`po32_knob_packet_t`](../include/po32.h) |
+| Reset | [`po32_reset_packet_t`](../include/po32.h) |
+| State | [`po32_state_packet_t`](../include/po32.h) |
+| Pattern | [`po32_pattern_packet_t`](../include/po32.h) |
 
 And typed encode/decode helpers:
 
-- [`po32_packet_encode(...)`](../include/po32.h)
-- [`po32_packet_decode(...)`](../include/po32.h)
+| Helper | Purpose |
+| --- | --- |
+| [`po32_packet_encode(...)`](../include/po32.h) | Typed packet struct to payload bytes |
+| [`po32_packet_decode(...)`](../include/po32.h) | Payload bytes to typed packet struct |
 
 For `po32_pattern_packet_t`, `steps[]` stores decoded per-lane step entries,
 not raw lane bytes.

@@ -11,7 +11,7 @@ to build, send, receive, and preview PO-32 transfers.
 ## Contents
 
 - [Overview](#overview)
-- [With A PO-32](#with-a-po-32)
+- [Using It With a PO-32](#using-it-with-a-po-32)
 - [Getting Started](#getting-started)
 - [Examples](#examples)
 - [Public API](#public-api)
@@ -33,7 +33,7 @@ no platform audio APIs, no file I/O. Only the freestanding headers
 `<stddef.h>` and `<stdint.h>` are used. Suitable for embedded targets and
 bare-metal environments.
 
-## With A PO-32
+## Using It With a PO-32
 
 The PO-32 is not receiving finished drum audio when you transfer a sound or a
 pattern. It receives structured data:

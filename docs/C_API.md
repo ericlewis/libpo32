@@ -7,22 +7,22 @@ and
 
 ## Core Responsibilities
 
-The C surface is responsible for:
+| Included | Scope |
+| --- | --- |
+| Protocol primitives | Whitening, CRC/state updates, tag helpers |
+| Frame building | `po32_builder_t` and full frame emission |
+| Frame parsing | Packet walking over normalized frames |
+| Typed packet encode/decode | Patch, knob, reset, state, and pattern packets |
+| Mono float rendering | DPSK transfer audio output |
+| Mono float decode | Transfer audio back to normalized frame bytes |
+| Synth rendering | Local drum-hit rendering from patch parameters |
 
-- protocol primitives
-- frame building
-- frame parsing
-- typed packet encode/decode
-- mono float rendering
-- mono float decode
-- synth rendering
-
-It is not responsible for:
-
-- WAV parsing
-- device capture or playback
-- OS audio sessions
-- UI or file management
+| Excluded | Scope |
+| --- | --- |
+| WAV parsing | File/container handling stays in examples or apps |
+| Device capture or playback | No microphone, speaker, or audio-device control |
+| OS audio sessions | No Core Audio, ALSA, WASAPI, etc. |
+| UI or file management | No app framework, editor, or filesystem workflow |
 
 ## Typical Transmit Flow
 
@@ -87,11 +87,13 @@ returns.
 
 The core provides typed packet structs for the common packet families:
 
-- patch
-- knob
-- reset
-- state
-- pattern
+| Family | Struct |
+| --- | --- |
+| Patch | `po32_patch_packet_t` |
+| Knob | `po32_knob_packet_t` |
+| Reset | `po32_reset_packet_t` |
+| State | `po32_state_packet_t` |
+| Pattern | `po32_pattern_packet_t` |
 
 Use:
 

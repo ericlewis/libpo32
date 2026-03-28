@@ -2,8 +2,10 @@
 
 `libpo32` is intentionally small. The project is built around one core idea:
 
-- the C core owns the PO-32 protocol and DSP math
-- application layers own files, UI, devices, and OS integration
+| Layer | Responsibility |
+| --- | --- |
+| C core | Owns the PO-32 protocol and DSP math |
+| Application layers | Own files, UI, devices, and OS integration |
 
 That split keeps the tree manageable.
 
@@ -25,13 +27,17 @@ code. To prevent it on truly bare-metal targets, compile with `-fno-builtin`.
 
 The core is two translation units:
 
-- [`../src/po32.c`](../src/po32.c)
-- [`../src/po32_synth.c`](../src/po32_synth.c)
+| File | Purpose |
+| --- | --- |
+| [`../src/po32.c`](../src/po32.c) | Transfer framing, packet encode/decode, render, and decode |
+| [`../src/po32_synth.c`](../src/po32_synth.c) | Drum synth implementation |
 
 Public headers:
 
-- [`../include/po32.h`](../include/po32.h)
-- [`../include/po32_synth.h`](../include/po32_synth.h)
+| Header | Purpose |
+| --- | --- |
+| [`../include/po32.h`](../include/po32.h) | Transfer API |
+| [`../include/po32_synth.h`](../include/po32_synth.h) | Drum synth API |
 
 `po32.c` contains four related layers:
 

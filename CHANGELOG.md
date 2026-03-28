@@ -9,12 +9,13 @@ The format is based on Keep a Changelog, and the project follows Semantic Versio
 ## [0.2.0] - 2026-03-28
 
 ### Fixed
-- Pattern trigger decode now correctly handles fill_rate=0. Previously, any
-  trigger byte with a zero lower nibble was treated as empty, silently
-  dropping instruments 5-16 when they appeared with fill=0 in real device
-  backups. Only `0x00` is now treated as an empty step.
-- Pattern trigger encode now accepts fill_rate=0 for instruments whose
-  trigger byte is non-zero (instruments 5-16, or any instrument with accent).
+- Pattern packet encode/decode now use the correct per-lane on-wire layout:
+  `16` trigger bytes, then `16` morph pairs, repeated four times. This fixes
+  patterns that decoded locally but landed on the wrong steps or instruments
+  on real PO-32 hardware.
+- Pattern trigger handling now follows the verified wire semantics: a zero
+  low nibble means an empty step, and active triggers require a non-zero
+  fill-rate nibble.
 
 ### Added
 - `po32_pattern_step_t` struct with decoded `instrument`, `fill_rate`, and
@@ -22,8 +23,14 @@ The format is based on Keep a Changelog, and the project follows Semantic Versio
 - `po32_pattern_packet_t.steps[]` array: populated during decode, consumed
   during encode. This replaces the raw `trigger_lanes[]` byte array as the
   primary interface for pattern data.
+- High-level pattern builder helpers:
+  `po32_pattern_init(...)`, `po32_pattern_clear(...)`,
+  `po32_pattern_set_trigger(...)`, `po32_pattern_clear_trigger(...)`,
+  `po32_pattern_clear_step(...)`, and `po32_pattern_set_accent(...)`.
 - `po32_decode_capture` example: decodes a transfer WAV to per-packet dumps
   and a compact pattern summary.
+- `po32_pattern_editor` starter presets for quick hardware-safe pattern
+  export.
 
 ### Changed
 - The library is now fully freestanding. All `memset`, `memcpy`, `memcmp`,
