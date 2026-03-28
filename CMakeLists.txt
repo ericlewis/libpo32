@@ -52,8 +52,16 @@ target_link_libraries(po32_core_tests PRIVATE po32)
 add_executable(po32_synth_tests tests/test_synth.c)
 target_link_libraries(po32_synth_tests PRIVATE po32)
 
+add_executable(po32_pattern_editor_tests tests/test_example_pattern_editor.c)
+target_link_libraries(po32_pattern_editor_tests PRIVATE po32)
+
+add_executable(po32_decode_capture_tests tests/test_example_decode_capture.c)
+target_link_libraries(po32_decode_capture_tests PRIVATE po32)
+
 add_test(NAME po32_core_tests COMMAND po32_core_tests)
 add_test(NAME po32_synth_tests COMMAND po32_synth_tests)
+add_test(NAME po32_pattern_editor_tests COMMAND po32_pattern_editor_tests)
+add_test(NAME po32_decode_capture_tests COMMAND po32_decode_capture_tests)
 add_test(NAME po32_example_smoke COMMAND po32_example)
 add_test(NAME po32_demo_smoke COMMAND po32_demo)
 set_tests_properties(po32_demo_smoke PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
