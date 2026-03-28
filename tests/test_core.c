@@ -83,7 +83,6 @@ static void test_patch_encode_decode(void) {
 }
 
 static void test_patch_parse_mtdrum_text(void) {
-#if PO32_ENABLE_MTDRUM_IMPORT
   static const char text[] = "OscWave: Triangle\n"
                              "OscFreq: 536.918 Hz\n"
                              "OscAtk: 0 ms\n"
@@ -115,9 +114,6 @@ static void test_patch_parse_mtdrum_text(void) {
   assert(fabsf(params.OscFreq - 0.47629266f) < 0.0001f);
   assert(fabsf(params.NFilFrq - 0.65461403f) < 0.0001f);
   assert(fabsf(params.Level - 0.79358548f) < 0.0002f);
-#else
-  printf("  skipping mtdrum importer test (disabled)\n");
-#endif
 }
 
 static void test_builder_guards(void) {

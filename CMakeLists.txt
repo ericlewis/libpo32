@@ -54,6 +54,26 @@ target_link_libraries(po32_synth_tests PRIVATE po32)
 
 add_test(NAME po32_core_tests COMMAND po32_core_tests)
 add_test(NAME po32_synth_tests COMMAND po32_synth_tests)
+add_test(NAME po32_example_smoke COMMAND po32_example)
+add_test(NAME po32_demo_smoke COMMAND po32_demo)
+set_tests_properties(po32_demo_smoke PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+
+add_test(
+  NAME po32_pattern_editor_smoke
+  COMMAND ${CMAKE_COMMAND}
+    -DPO32_PATTERN_EDITOR=$<TARGET_FILE:po32_pattern_editor>
+    -DPO32_SMOKE_DIR=${CMAKE_CURRENT_BINARY_DIR}/smoke-pattern-editor
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/run_pattern_editor_smoke.cmake
+)
+
+add_test(
+  NAME po32_decode_capture_smoke
+  COMMAND ${CMAKE_COMMAND}
+    -DPO32_DEMO=$<TARGET_FILE:po32_demo>
+    -DPO32_DECODE_CAPTURE=$<TARGET_FILE:po32_decode_capture>
+    -DPO32_SMOKE_DIR=${CMAKE_CURRENT_BINARY_DIR}/smoke-decode-capture
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/run_decode_capture_smoke.cmake
+)
 
 # install
 
