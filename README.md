@@ -10,8 +10,9 @@ and drum synthesis.
 - **Decode** mono float audio back to frames
 - **Synthesize** drum sounds from the 21 patch parameters
 
-The core is self-contained: no external DSP libraries, no platform audio
-APIs, no file I/O.
+The core is freestanding C99: no libc dependency beyond `<stddef.h>` and
+`<stdint.h>`, no external DSP libraries, no platform audio APIs, no file
+I/O. Suitable for embedded targets and bare-metal environments.
 
 ## Quick Start
 

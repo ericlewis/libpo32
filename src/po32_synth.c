@@ -19,7 +19,6 @@
 #include "po32_lut.h"
 
 #include <stdint.h>
-#include <string.h>
 
 /* ── Aliases so the rest of the file reads cleanly ──────────────── */
 

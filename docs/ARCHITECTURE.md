@@ -7,6 +7,20 @@
 
 That split keeps the tree manageable.
 
+## Freestanding
+
+The library is freestanding C99. The only standard headers it uses are
+`<stddef.h>` and `<stdint.h>`, which are guaranteed available in
+freestanding implementations (C99 section 4 paragraph 6). All memory operations
+(`memset`, `memcpy`, `memcmp`), string functions (`strlen`), float parsing
+(`strtof`), and math functions (`sinf`, `cosf`, `powf`, etc.) are replaced
+with self-contained implementations. There is no libc runtime dependency.
+
+At optimisation levels like `-O2`, the compiler may recognise byte-loop
+patterns and emit platform-optimised intrinsics (e.g. replacing a zero-fill
+loop with `bzero`). This is standard compiler behaviour and produces faster
+code. To prevent it on truly bare-metal targets, compile with `-fno-builtin`.
+
 ## Core Modules
 
 The core is two translation units:

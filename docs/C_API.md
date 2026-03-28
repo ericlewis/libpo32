@@ -123,7 +123,8 @@ These helpers handle the packed lane-byte format used by
 
 Pattern packets are serialized per lane: `16` trigger bytes, then `16` morph
 pairs, repeated four times, followed by reserved bytes and `accent_bits`.
-A trigger is active only when its low nibble is non-zero.
+A trigger byte of `0x00` is empty. Non-zero bytes are active even when the
+low nibble (fill rate) is zero, since the upper bits encode the instrument.
 
 ## Body Bytes vs Frame Bytes
 
