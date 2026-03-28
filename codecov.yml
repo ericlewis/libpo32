@@ -13,12 +13,32 @@ coverage:
         target: 100%
 
 comment:
-  layout: "diff, flags, files"
+  layout: "diff, files, components"
   behavior: default
   require_changes: true
   require_base: false
   require_head: true
   hide_project_coverage: false
+
+component_management:
+  individual_components:
+    - component_id: transfer_core
+      name: transfer core
+      paths:
+        - src/po32.c
+    - component_id: patch_import
+      name: patch importer
+      paths:
+        - src/po32_patch_import.c
+    - component_id: synth
+      name: synth
+      paths:
+        - src/po32_synth.c
+    - component_id: lookup_tables
+      name: lookup tables
+      paths:
+        - src/po32_lut.h
+        - src/po32_synth_tables.h
 
 github_checks:
   annotations: false
