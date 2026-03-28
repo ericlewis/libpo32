@@ -16,6 +16,6 @@ fi
 
 printf '%s\n' "$staged_files" | while IFS= read -r path; do
   [ -n "$path" ] || continue
-  "$CLANG_FORMAT" -i "$root_dir/$path"
+  "$CLANG_FORMAT" -style=file -i "$root_dir/$path"
   git add "$path"
 done
