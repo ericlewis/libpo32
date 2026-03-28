@@ -173,17 +173,17 @@ static void test_alternate_modes(void) {
   po32_synth_init(&synth, SR);
   memset(&params, 0, sizeof(params));
 
-  params.OscWave = 0.5f;   /* triangle */
+  params.OscWave = 0.5f; /* triangle */
   params.OscFreq = 0.35f;
   params.OscAtk = 0.3f;
   params.OscDcy = 0.4f;
-  params.ModMode = 0.5f;   /* sine */
+  params.ModMode = 0.5f; /* sine */
   params.ModRate = 0.2f;
   params.ModAmt = 0.7f;
-  params.NFilMod = 0.5f;   /* band-pass */
+  params.NFilMod = 0.5f; /* band-pass */
   params.NFilFrq = 0.6f;
   params.NFilQ = 0.4f;
-  params.NEnvMod = 0.5f;   /* linear */
+  params.NEnvMod = 0.5f; /* linear */
   params.NEnvAtk = 0.1f;
   params.NEnvDcy = 0.4f;
   params.Mix = 0.7f;
@@ -209,16 +209,16 @@ static void test_noise_mod_and_mod_env(void) {
   po32_synth_init(&synth, SR);
   memset(&params, 0, sizeof(params));
 
-  params.OscWave = 1.0f;   /* saw */
+  params.OscWave = 1.0f; /* saw */
   params.OscFreq = 0.45f;
   params.OscDcy = 0.5f;
-  params.ModMode = 1.0f;   /* noise */
+  params.ModMode = 1.0f; /* noise */
   params.ModRate = 0.6f;
   params.ModAmt = 0.65f;
-  params.NFilMod = 1.0f;   /* high-pass */
+  params.NFilMod = 1.0f; /* high-pass */
   params.NFilFrq = 0.8f;
   params.NFilQ = 0.6f;
-  params.NEnvMod = 1.0f;   /* mod */
+  params.NEnvMod = 1.0f; /* mod */
   params.NEnvDcy = 0.55f;
   params.Mix = 0.9f;
   params.DistAmt = 0.2f;

@@ -176,7 +176,12 @@ static void test_decode_wav_formats(void) {
 static void test_decode_capture_main_paths(void) {
   char *usage_argv[] = {"po32_decode_capture", NULL};
   char *missing_argv[] = {"po32_decode_capture", "missing.wav", "out", NULL};
-  char *good_argv[] = {"po32_decode_capture", "decode_capture_input.wav", "decode_capture_out", NULL};
+  char *good_argv[] = {
+      "po32_decode_capture",
+      "decode_capture_input.wav",
+      "decode_capture_out",
+      NULL,
+  };
 
   assert(po32_decode_capture_example_main(1, usage_argv) == 64);
   assert(po32_decode_capture_example_main(3, missing_argv) == 1);
