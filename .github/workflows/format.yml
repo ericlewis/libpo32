@@ -22,7 +22,7 @@ jobs:
       - name: Install LLVM
         uses: KyleMayes/install-llvm-action@v2
         with:
-          version: "22"
+          version: "18"
 
       - name: Verify formatting
         run: ./scripts/ci-format.sh

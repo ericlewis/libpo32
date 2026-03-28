@@ -15,36 +15,7 @@ fi
 
 subject=$(sed -n '1p' "$message_file")
 
-case "$subject" in
-  Merge\ *|Revert\ *)
-    exit 0
-    ;;
-esac
-
-pattern='^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([[:alnum:]_.-]+\))?(!)?: .+$'
-
-if printf '%s\n' "$subject" | grep -Eq "$pattern"; then
-  exit 0
+if ! sh "$(dirname "$0")/check-conventional-subject.sh" "$subject"; then
+  printf '\nCommit message validation failed.\n' >&2
+  exit 1
 fi
-
-cat >&2 <<'EOF'
-Commit message must follow Conventional Commits:
-
-  <type>(<scope>)?: <summary>
-
-Examples:
-  feat(pattern): add high-level pattern builder helpers
-  fix(protocol): correct per-lane pattern packet layout
-  docs(readme): clarify PO-32 transfer workflow
-  chore(ci): add static-analysis workflow
-
-Allowed types:
-  feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert
-
-SemVer guidance:
-  feat     -> minor release
-  fix/perf -> patch release
-  !        -> breaking change / major release
-EOF
-
-exit 1

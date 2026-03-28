@@ -2,6 +2,7 @@
 
 [![Tests](https://github.com/ericlewis/libpo32/actions/workflows/tests.yml/badge.svg)](https://github.com/ericlewis/libpo32/actions/workflows/tests.yml)
 [![Commit Messages](https://github.com/ericlewis/libpo32/actions/workflows/commit-messages.yml/badge.svg)](https://github.com/ericlewis/libpo32/actions/workflows/commit-messages.yml)
+[![PR Titles](https://github.com/ericlewis/libpo32/actions/workflows/pr-titles.yml/badge.svg)](https://github.com/ericlewis/libpo32/actions/workflows/pr-titles.yml)
 [![Formatting](https://github.com/ericlewis/libpo32/actions/workflows/format.yml/badge.svg)](https://github.com/ericlewis/libpo32/actions/workflows/format.yml)
 [![Static Analysis](https://github.com/ericlewis/libpo32/actions/workflows/static-analysis.yml/badge.svg)](https://github.com/ericlewis/libpo32/actions/workflows/static-analysis.yml)
 [![Codecov](https://codecov.io/gh/ericlewis/libpo32/graph/badge.svg)](https://codecov.io/gh/ericlewis/libpo32)

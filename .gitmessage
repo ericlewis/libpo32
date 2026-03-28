@@ -1,13 +1,25 @@
-# <type>(<scope>): <summary>
+# <type>[optional scope]: <summary>
+#
+# Rules:
+#   - Use Conventional Commits: type(scope): description or type: description
+#   - Use imperative mood
+#   - Use a scope when it adds clarity
+#   - Keep the subject concise and specific
+#   - Keep it under 50 characters when practical
+#   - Body is optional and may add context
+#   - Footer is optional and may add references or breaking changes
+#   - Use BREAKING CHANGE: or ! for breaking changes
+#   - When a title field expects one line, output only the subject line
+#
+# Allowed types:
+#   feat, fix, docs, style, refactor, perf, test, build, chore, ci, revert
 #
 # Examples:
 #   feat(pattern): add starter groove presets
 #   fix(protocol): correct lane-chunked pattern encoding
 #   docs(readme): clarify PO-32 transfer workflow
-#   chore(ci): add formatting workflow
-#
-# Allowed types:
-#   feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert
+#   docs: update README usage notes
+#   fix(ci): invoke commit checker with sh
 #
 # SemVer guidance:
 #   feat     -> minor release

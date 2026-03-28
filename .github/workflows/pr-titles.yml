@@ -1,0 +1,30 @@
+name: PR Titles
+
+on:
+  pull_request:
+    types:
+      - opened
+      - edited
+      - synchronize
+      - reopened
+      - ready_for_review
+
+permissions:
+  contents: read
+
+jobs:
+  conventional-pr-title:
+    name: Conventional PR Title
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Validate PR title
+        shell: bash
+        run: |
+          set -euo pipefail
+          title='${{ github.event.pull_request.title }}'
+          echo "Checking PR title: $title"
+          sh ./scripts/check-conventional-subject.sh "$title"

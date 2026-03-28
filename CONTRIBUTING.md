@@ -45,11 +45,26 @@ Additional local checks:
 
 ## Commit Messages
 
-Commit subjects must follow:
+Commit subjects and PR titles should follow Conventional Commits.
+
+Use this format:
 
 ```text
-<type>(<scope>)?: <summary>
+<type>[optional scope]: <summary>
 ```
+
+Rules:
+
+- Use Conventional Commits: `type(scope): description` or `type: description`.
+- Use imperative mood: `Add feature`, not `Added feature`.
+- Use a scope when it adds clarity, for example `fix(ci): ...` or `docs(readme): ...`.
+- Keep the subject line concise and specific. Keep it under 50 characters when practical.
+- Use one of these types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `chore`, `ci`, `revert`.
+- A body is optional and may be used for additional context.
+- A footer is optional and may be used for issue references or breaking changes.
+- Use `BREAKING CHANGE:` in the footer, or `!` before the colon, for breaking changes.
+- Use `*` bullets in the body when listing multiple points.
+- When a title field expects a single line, output only the Conventional Commit subject line.
 
 Examples:
 
@@ -57,7 +72,8 @@ Examples:
 feat(pattern): add starter groove presets
 fix(protocol): correct lane-chunked pattern encoding
 docs(readme): clarify PO-32 transfer workflow
-chore(ci): add static-analysis workflow
+docs: update README usage notes
+fix(ci): invoke commit checker with sh
 ```
 
 Allowed types:
@@ -80,12 +96,24 @@ SemVer guidance:
 
 | Commit shape | Release impact |
 | --- | --- |
-| `feat: ...` | Minor release |
-| `fix: ...` or `perf: ...` | Patch release |
-| `feat!: ...`, `fix!: ...`, etc. | Major release |
+| `feat(scope): ...` or `feat: ...` | Minor release |
+| `fix(scope): ...`, `fix: ...`, `perf(scope): ...`, or `perf: ...` | Patch release |
+| `feat(scope)!: ...`, `feat!: ...`, `fix(scope)!: ...`, etc. | Major release |
 
 If a change is breaking, use `!` in the subject and explain the break clearly in
 the body.
+
+Prefer a scope when it adds clarity, for example:
+
+```text
+fix(ci): invoke commit checker with sh
+```
+
+But an unscoped subject is still valid when the scope does not add much:
+
+```text
+docs: update README usage notes
+```
 
 ## Pull Requests
 
@@ -97,3 +125,4 @@ Before opening one, make sure:
 - the relevant verification scripts pass
 - docs are updated when public behavior or API changes
 - the commit history uses Conventional Commits
+- the PR title also follows Conventional Commits
