@@ -30,31 +30,38 @@ WAV files: `demo_modem.wav` and `demo_kick.wav`.
 
 Other supported examples include:
 
-- `./build/po32_pattern_editor` for interactive PO-32 pattern editing and WAV export
-- `./build/po32_decode_capture <input.wav> <out-dir>` for packet and pattern dumps
+| Command | Purpose |
+| --- | --- |
+| `./build/po32_pattern_editor` | Interactive PO-32 pattern editing and WAV export |
+| `./build/po32_decode_capture <input.wav> <out-dir>` | Packet and pattern dumps from a transfer WAV |
 
 ## Public API
 
-- [`include/po32.h`](include/po32.h) — transfer builder, packet
-  helpers, renderer, and decoder
-- [`include/po32_synth.h`](include/po32_synth.h) — drum synthesizer
+| Header | Responsibility |
+| --- | --- |
+| [`include/po32.h`](include/po32.h) | Transfer builder, packet helpers, renderer, and decoder |
+| [`include/po32_synth.h`](include/po32_synth.h) | Drum synthesizer |
 
 ## Project Layout
 
-- [`src`](src) — core implementation
-- [`include`](include) — public headers
-- [`examples`](examples) — supported C examples
-- [`tests`](tests) — core test coverage
-- [`docs`](docs) — architecture, protocol, and API notes
+| Path | Purpose |
+| --- | --- |
+| [`src`](src) | Core implementation |
+| [`include`](include) | Public headers |
+| [`examples`](examples) | Supported C examples |
+| [`tests`](tests) | Core test coverage |
+| [`docs`](docs) | Architecture, protocol, and API notes |
 
 ## Documentation
 
-- [Architecture](docs/ARCHITECTURE.md) — how the codec works
-- [Protocol](docs/PROTOCOL.md) — wire format details
-- [C API](docs/C_API.md) — C function reference
-- [Synth](docs/SYNTH.md) — synthesizer signal path
-- [Patch Parameters](docs/PATCH_PARAMETERS.md) — the 21 parameters
-- [Examples](examples/README.md) — supported example programs
+| Document | Purpose |
+| --- | --- |
+| [Architecture](docs/ARCHITECTURE.md) | How the codec works |
+| [Protocol](docs/PROTOCOL.md) | Wire format details |
+| [C API](docs/C_API.md) | C function reference |
+| [Synth](docs/SYNTH.md) | Synthesizer signal path |
+| [Patch Parameters](docs/PATCH_PARAMETERS.md) | The 21 parameters |
+| [Examples](examples/README.md) | Supported example programs |
 
 ## Build
 
@@ -66,4 +73,4 @@ ctest --test-dir build --output-on-failure
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).

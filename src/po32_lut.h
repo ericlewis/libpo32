@@ -1,7 +1,7 @@
 /*
  * Internal LUT primitives shared across po32 translation units.
  *
- * Provides sin, cos, exp2, log2, powf, expf, pow10 — all via
+ * Provides sin, cos, exp2, log2, powf, expf, pow10 - all via
  * precomputed tables from po32_synth_tables.h.  No <math.h> needed.
  */
 

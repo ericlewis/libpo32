@@ -5,57 +5,28 @@ The PO-32 synth engine renders a single drum hit from 21 float parameters
 
 ## Block Diagram
 
-```
-                    ┌─────────────┐
-                    │  Velocity   │
-                    │  Scaling    │
-                    └──────┬──────┘
-                           │
-          ┌────────────────┼────────────────┐
-          ▼                ▼                ▼
-   ┌─────────────┐  ┌─────────────┐  ┌─────────────┐
-   │ Oscillator  │  │   Noise     │  │ Modulation  │
-   │             │  │  Generator  │  │   Source    │
-   │ OscWave     │  │             │  │             │
-   │ OscFreq     │  │ NFilMod     │  │ ModMode     │
-   │ OscAtk      │  │ NFilFrq     │  │ ModRate     │
-   │ OscDcy      │  │ NFilQ       │  │ ModAmt      │
-   └──────┬──────┘  │ NEnvMod     │  └──────┬──────┘
-          │         │ NEnvAtk     │         │
-          │         │ NEnvDcy     │         │
-          │         └──────┬──────┘         │
-          │                │                │
-          │    ┌───────────┘                │
-          ▼    ▼                            │
-   ┌─────────────┐                         │
-   │    Mix      │◄────────────────────────┘
-   │  (Osc/Noise │    frequency modulation
-   │   balance)  │
-   └──────┬──────┘
-          │
-          ▼
-   ┌─────────────┐
-   │ Distortion  │
-   │  DistAmt    │
-   └──────┬──────┘
-          │
-          ▼
-   ┌─────────────┐
-   │     EQ      │
-   │  EQFreq     │
-   │  EQGain     │
-   └──────┬──────┘
-          │
-          ▼
-   ┌─────────────┐
-   │   Level     │
-   │  (output    │
-   │   gain)     │
-   └──────┬──────┘
-          │
-          ▼
-      float out
-      [-1, 1]
+```mermaid
+flowchart TD
+    velocity["Velocity Scaling<br/>OscVel, NVel, ModVel"]
+    osc["Oscillator<br/>OscWave, OscFreq, OscAtk, OscDcy"]
+    noise["Noise Generator<br/>NFilMod, NFilFrq, NFilQ<br/>NEnvMod, NEnvAtk, NEnvDcy"]
+    mod["Modulation Source<br/>ModMode, ModRate, ModAmt"]
+    mix["Mix Bus<br/>Mix"]
+    dist["Distortion<br/>DistAmt"]
+    eq["EQ<br/>EQFreq, EQGain"]
+    level["Level<br/>Output Gain"]
+    out["float out<br/>[-1, 1]"]
+
+    velocity --> osc
+    velocity --> noise
+    velocity --> mod
+    mod -->|"frequency modulation"| osc
+    osc --> mix
+    noise --> mix
+    mix --> dist
+    dist --> eq
+    eq --> level
+    level --> out
 ```
 
 ## Oscillator

@@ -2,15 +2,17 @@
 
 Each of the 8 instruments is a two-layer drum synthesizer: a tonal
 **oscillator** and a **noise generator**. Each instrument has two patches
-(**Left** and **Right**) that serve as morph endpoints — the PO-32's morph
+(**Left** and **Right**) that serve as morph endpoints. The PO-32 morph
 knob interpolates linearly between them.
 
 ## Transfer Encoding
 
-- Tag: `0x37B2` (PATCH)
-- Payload: 43 bytes = 1 command byte + 21 parameters x 2 bytes
-- Command byte: `0x1N` = Left patch, `0x2N` = Right patch (N = instrument 0-15)
-- Each parameter: 16-bit unsigned little-endian, range 0x0000 (0.0) to 0xFFFF (~1.0)
+| Field | Meaning |
+| --- | --- |
+| Tag | `0x37B2` (`PATCH`) |
+| Payload | `43` bytes = `1` command byte + `21` parameters x `2` bytes |
+| Command byte | `0x1N` = Left patch, `0x2N` = Right patch (`N` = instrument `0-15`) |
+| Parameter encoding | 16-bit unsigned little-endian, range `0x0000` (`0.0`) to `0xFFFF` (`~1.0`) |
 
 ## Parameters
 
@@ -23,21 +25,12 @@ knob interpolates linearly between them.
 | 2 | OscAtk  | continuous | 0–10000 ms (exponential)     | 0 ms       |
 | 3 | OscDcy  | continuous | 10–10000 ms (exponential)    | 316 ms     |
 
-**OscWave** — Waveform shape of the tonal oscillator. Sine (smooth,
-sub-bassy), Triangle (slightly brighter, more mid content), Saw (harsh,
-buzzy, full of harmonics).
-
-**OscFreq** — Pitch of the oscillator on a logarithmic scale:
-`Hz = 20 * pow(1000, x)`. Low values make kicks, mid values make toms,
-high values make rimshots and clicks.
-
-**OscAtk** — How quickly the oscillator reaches full volume after a trigger.
-0 = instant snap, higher = slower fade-in. Exponential curve:
-`time = x * pow(10, (12x-7)/5)` seconds.
-
-**OscDcy** — How quickly the oscillator fades to silence. Controls the
-"length" of the tonal part. Exponential curve:
-`time = pow(10, 3x-2)` seconds.
+| Name | Role | Mapping / Notes |
+| --- | --- | --- |
+| `OscWave` | Waveform shape of the tonal oscillator | Sine = smooth and sub-bassy, Triangle = brighter with more mids, Saw = harsh and rich in harmonics |
+| `OscFreq` | Oscillator pitch | `Hz = 20 * pow(1000, x)`<br/>Low values suit kicks, mid values suit toms, high values suit rimshots and clicks |
+| `OscAtk` | Oscillator attack time | `time = x * pow(10, (12x-7)/5)` seconds<br/>`0` = instant snap, larger values = slower fade-in |
+| `OscDcy` | Oscillator decay time | `time = pow(10, 3x-2)` seconds<br/>Controls how long the tonal layer rings out |
 
 ### Modulation (4-6)
 
@@ -47,25 +40,11 @@ high values make rimshots and clicks.
 | 5 | ModRate | continuous | mode-dependent (see below)       | 0.5        |
 | 6 | ModAmt  | continuous | ±96 semitones (linear)           | 0          |
 
-**ModMode** — What modulates the oscillator pitch. Decay = pitch sweeps down
-(classic 808 kick), Sine = vibrato / FM wobble, Noise = random pitch jitter
-(metallic crashes, unstable oscillators).
-
-**ModRate** — Speed/frequency of modulation. **Unit depends on ModMode:**
-- **Decay mode**: rate is a pitch modulation decay time in ms. At param=0
-  the display shows "inf ms" (modulation never decays). Factory presets use
-  values in the 40–1100 ms range. Approximate mapping: `pow(10, 3x-2)`
-  seconds, but the exact formula at the extremes may differ from OscDcy.
-- **Sine mode**: rate is an LFO frequency in Hz (0–2000 Hz). Factory presets
-  range from 0 Hz (claves — no vibrato) to 2000 Hz (cowbell — audio-rate FM).
-  Mapping appears to be `2000 * x` or similar starting from 0.
-- **Noise mode**: rate is a noise filter cutoff in Hz (20–20000 Hz). Mapped
-  via `20 * pow(1000, x)`. Higher = faster/rougher random pitch changes.
-  Lower = smoother/slower random drift.
-
-**ModAmt** — Depth of pitch modulation in semitones. Range ±96 semitones
-(8 octaves). Stored as normalized 0–1 where 0.0 = -96 sm, 0.5 = 0 sm,
-1.0 = +96 sm. Linear mapping: `semitones = (param - 0.5) * 192`.
+| Name | Role | Mapping / Notes |
+| --- | --- | --- |
+| `ModMode` | Oscillator pitch modulation source | Decay = pitch sweep, Sine = vibrato / FM wobble, Noise = random pitch jitter |
+| `ModRate` | Modulation speed or frequency | Decay mode: pitch-mod decay time in ms, approximately `pow(10, 3x-2)` seconds, with `param=0` displayed as `inf ms` on-device<br/>Sine mode: LFO frequency in Hz, approximately `2000 * x`<br/>Noise mode: noise filter cutoff in Hz, `20 * pow(1000, x)` |
+| `ModAmt` | Pitch modulation depth | `semitones = (param - 0.5) * 192`<br/>Range `-96` to `+96` semitones |
 
 ### Noise (7-12)
 
@@ -78,34 +57,14 @@ high values make rimshots and clicks.
 |11 | NEnvAtk | continuous | 0–10000 ms (exponential)        | 0 ms       |
 |12 | NEnvDcy | continuous | 10–10000 ms (exponential)       | 316 ms     |
 
-**NFilMod** — Noise filter type. LP (low-pass) = dark noise like a brushed
-snare. BP (band-pass) = focused noise at a specific frequency. HP (high-pass)
-= bright hissy noise like a hi-hat.
-
-**NFilFrq** — Cutoff / center frequency of the noise filter. Same logarithmic
-scale as OscFreq: `Hz = 20 * pow(1000, x)`. Low = dark rumble, high = bright
-sizzle.
-
-**NFilQ** — Resonance of the noise filter. 5-decade exponential range:
-`Q = 0.1 * pow(10, 5x)`. At param 0 → Q = 0.1 (very broad). At param 1 →
-Q = 10000 (extremely narrow resonance). Low = broad natural noise. High =
-narrow ringing emphasis, useful for metallic hi-hat sounds.
-
-**NEnvMod** — Noise volume envelope shape:
-- **Exp** (< 0.333): Exponential attack/decay. Natural drum decay.
-- **Lin** (0.333–0.666): Linear ramps. Times scaled by 2/3.
-- **Mod** (> 0.666): Damped cosine tremolo. The noise amplitude oscillates
-  via cos(2π·t/T) while decaying exponentially, creating a ringing/shimmer
-  quality. Period = `(dcy_param/sr) * pow(10000, dcy_param)`. Short periods
-  (< 1.5ms) switch to an 8x-period mode with `sqrt(0.5/period)` amplitude
-  correction, producing audio-rate ring modulation that adds spectral
-  sidebands.
-
-**NEnvAtk** — Noise attack time. Same curve as OscAtk. Usually 0 for
-percussive sounds.
-
-**NEnvDcy** — Noise decay time. How long the noise rings out. Short = closed
-hi-hat. Long = open hi-hat or crash. Same curve as OscDcy.
+| Name | Role | Mapping / Notes |
+| --- | --- | --- |
+| `NFilMod` | Noise filter type | LP = dark brushed-snare style noise, BP = focused band noise, HP = bright hi-hat style hiss |
+| `NFilFrq` | Noise filter cutoff / center frequency | `Hz = 20 * pow(1000, x)`<br/>Low = dark rumble, high = bright sizzle |
+| `NFilQ` | Noise filter resonance | `Q = 0.1 * pow(10, 5x)`<br/>Range `0.1` to `10000`<br/>Low = broad natural noise, high = narrow metallic emphasis |
+| `NEnvMod` | Noise envelope shape | `Exp`: exponential attack/decay<br/>`Lin`: linear ramps with times scaled by `2/3`<br/>`Mod`: damped cosine tremolo with short-period audio-rate ring-mod behavior |
+| `NEnvAtk` | Noise attack time | Same curve as `OscAtk`<br/>Usually near `0` for percussive sounds |
+| `NEnvDcy` | Noise decay time | Same curve as `OscDcy`<br/>Short = closed hat, long = open hat or crash |
 
 ### Mix and Effects (13-16)
 
@@ -116,20 +75,12 @@ hi-hat. Long = open hi-hat or crash. Same curve as OscDcy.
 |15 | EQFreq  | continuous | 20–20000 Hz (logarithmic)| 0.47256   |
 |16 | EQGain  | continuous | -40 to +40 dB           | 0 dB       |
 
-**Mix** — Balance between oscillator and noise. Center (0.5) = equal blend.
-Below 0.5 = mostly oscillator (kicks, toms). Above 0.5 = mostly noise
-(hi-hats, snares). Uses an asymmetric dB crossfade: `n = mix*2 - 1`,
-then osc gain = `(1-n) * pow(10, -25n/20)` when n≥0, else 1.0;
-noise gain = `(1+n) * pow(10, 25n/20)` when n<0, else 1.0.
-
-**DistAmt** — Distortion amount. Cubic waveshaper with automatic gain
-compensation. 0 = clean. 100 = hard-clipped and aggressive.
-
-**EQFreq** — Center frequency of a single-band parametric EQ. Same
-logarithmic scale as OscFreq. Sits after the distortion stage.
-
-**EQGain** — EQ boost or cut. -40 dB = deep notch, 0 dB = flat, +40 dB =
-extreme boost. Stored as `(dB + 40) / 80`.
+| Name | Role | Mapping / Notes |
+| --- | --- | --- |
+| `Mix` | Balance between oscillator and noise | `0.5` = equal blend<br/>Below `0.5` favors oscillator, above `0.5` favors noise<br/>Uses an asymmetric dB crossfade: `n = mix*2 - 1`, then the oscillator and noise gains are scaled separately |
+| `DistAmt` | Distortion amount | Cubic waveshaper with automatic gain compensation<br/>`0` = clean, `100` = aggressive clipping |
+| `EQFreq` | EQ center frequency | Same logarithmic scale as `OscFreq`<br/>Placed after distortion |
+| `EQGain` | EQ boost or cut | Stored as `(dB + 40) / 80`<br/>Range `-40 dB` to `+40 dB` |
 
 ### Output (17-20)
 
@@ -140,19 +91,12 @@ extreme boost. Stored as `(dB + 40) / 80`.
 |19 | NVel    | continuous | 0–200%                  | 0%         |
 |20 | ModVel  | continuous | 0–200%                  | 0%         |
 
-**Level** — Master volume for this instrument. Exponential curve:
-`dB = 60x - 49 - 1/x`. At x=0 → -inf dB (silence), x=0.836 → 0 dB (unity),
-x=1.0 → +10 dB.
-
-**OscVel** — How much MIDI velocity affects oscillator volume. 0% = every
-hit identical. 100% = normal dynamics. 200% = exaggerated dynamics. The
-PO-32 sends velocity based on pattern accent flags. Stored as `val / 200`.
-
-**NVel** — Velocity sensitivity for the noise layer, independent of the
-oscillator. Lets soft hits keep noise (snare rattle) while reducing tone.
-
-**ModVel** — Velocity sensitivity for modulation depth. At 200%, soft hits
-have almost no pitch sweep while hard hits get the full sweep.
+| Name | Role | Mapping / Notes |
+| --- | --- | --- |
+| `Level` | Final instrument output gain | `dB = 60x - 49 - 1/x`<br/>`x=0` = silence, `x≈0.836` = unity, `x=1` = `+10 dB` |
+| `OscVel` | Velocity sensitivity for oscillator level | `0%` = fixed hits, `100%` = normal dynamics, `200%` = exaggerated dynamics<br/>Stored as `val / 200` |
+| `NVel` | Velocity sensitivity for noise level | Lets softer hits keep noise while reducing tone independently of the oscillator |
+| `ModVel` | Velocity sensitivity for modulation depth | High values reduce sweep on soft hits and keep full sweep on hard hits |
 
 ## Exact Mapping Functions
 
