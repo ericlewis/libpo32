@@ -22,6 +22,11 @@ comment:
 
 component_management:
   individual_components:
+    - component_id: public_surface
+      name: public surface
+      paths:
+        - src/
+        - examples/
     - component_id: transfer_core
       name: transfer core
       paths:
@@ -39,6 +44,10 @@ component_management:
       paths:
         - src/po32_lut.h
         - src/po32_synth_tables.h
+    - component_id: examples
+      name: examples
+      paths:
+        - examples/
 
 github_checks:
   annotations: false
