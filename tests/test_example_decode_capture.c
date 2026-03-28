@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #define main po32_decode_capture_example_main
 #include "../examples/po32_decode_capture.c"
@@ -118,6 +119,8 @@ static void build_demo_transfer_wav(const char *path) {
 }
 
 static void test_decode_helpers(void) {
+  int ok;
+
   assert(read_le16((const uint8_t *)"\x34\x12") == 0x1234u);
   assert(read_le32((const uint8_t *)"\x78\x56\x34\x12") == 0x12345678u);
 
@@ -137,32 +140,41 @@ static void test_decode_helpers(void) {
     uint8_t *loaded = NULL;
     size_t loaded_len = 0u;
     assert(write_binary_file("decode_capture.bin", bytes, sizeof(bytes)));
-    assert(load_file("decode_capture.bin", &loaded, &loaded_len));
+    ok = load_file("decode_capture.bin", &loaded, &loaded_len);
+    assert(ok);
     assert(loaded_len == sizeof(bytes));
     assert(memcmp(bytes, loaded, sizeof(bytes)) == 0);
     free(loaded);
   }
 
   assert(!write_binary_file("missing-dir/out.bin", "x", 1u));
-  assert(!load_file("missing.bin", NULL, NULL));
+  ok = load_file("missing.bin", NULL, NULL);
+  assert(!ok);
 }
 
 static void test_decode_wav_formats(void) {
   wav_data_t wav;
   int16_t pcm16[] = {0, 32767, -32768, 16384};
   float stereo_float[] = {0.25f, -0.25f, 0.5f, -0.5f};
+  int ok;
+
+  memset(&wav, 0, sizeof(wav));
 
   write_pcm16_wav("decode_capture_pcm16.wav", pcm16, sizeof(pcm16) / sizeof(pcm16[0]), 44100u, 1u);
-  assert(decode_wav("decode_capture_pcm16.wav", &wav));
+  ok = decode_wav("decode_capture_pcm16.wav", &wav);
+  assert(ok);
   assert(wav.sample_rate == 44100u);
   assert(wav.sample_count == 4u);
   free(wav.samples);
+  wav.samples = NULL;
 
   write_float32_stereo_wav("decode_capture_float.wav", stereo_float, 2u, 22050u);
-  assert(decode_wav("decode_capture_float.wav", &wav));
+  ok = decode_wav("decode_capture_float.wav", &wav);
+  assert(ok);
   assert(wav.sample_rate == 22050u);
   assert(wav.sample_count == 2u);
   free(wav.samples);
+  wav.samples = NULL;
 
   {
     FILE *fp = fopen("decode_capture_bad.wav", "wb");
@@ -170,7 +182,8 @@ static void test_decode_wav_formats(void) {
     fwrite("notawav", 1u, 7u, fp);
     fclose(fp);
   }
-  assert(!decode_wav("decode_capture_bad.wav", &wav));
+  ok = decode_wav("decode_capture_bad.wav", &wav);
+  assert(!ok);
 }
 
 static void test_decode_capture_main_paths(void) {
@@ -182,12 +195,16 @@ static void test_decode_capture_main_paths(void) {
       "decode_capture_out",
       NULL,
   };
+  int result;
 
-  assert(po32_decode_capture_example_main(1, usage_argv) == 64);
-  assert(po32_decode_capture_example_main(3, missing_argv) == 1);
+  result = po32_decode_capture_example_main(1, usage_argv);
+  assert(result == 64);
+  result = po32_decode_capture_example_main(3, missing_argv);
+  assert(result == 1);
 
   build_demo_transfer_wav("decode_capture_input.wav");
-  assert(po32_decode_capture_example_main(3, good_argv) == 0);
+  result = po32_decode_capture_example_main(3, good_argv);
+  assert(result == 0);
 
   {
     FILE *summary = fopen("decode_capture_out/summary.txt", "rb");

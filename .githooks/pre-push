@@ -1,0 +1,7 @@
+#!/bin/sh
+set -eu
+
+root_dir=$(git rev-parse --show-toplevel)
+
+cd "$root_dir"
+./scripts/ci-static-analysis.sh

@@ -23,6 +23,7 @@ After that:
 
 - the `pre-commit` hook formats staged `.c` and `.h` files with `clang-format`
 - the `commit-msg` hook validates commit subjects against Conventional Commits
+- the `pre-push` hook runs `./scripts/ci-static-analysis.sh`
 
 ## Build And Test
 

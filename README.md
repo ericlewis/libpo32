@@ -81,7 +81,8 @@ Optional, but recommended for local development:
 
 That enables the repo-managed pre-commit hook, which runs `clang-format` on
 staged `.c` and `.h` files before each commit and validates commit subjects
-against Conventional Commits.
+against Conventional Commits. The repo-managed `pre-push` hook runs the static
+analysis script before push.
 
 The demo builds a transfer frame, renders it to audio, decodes it back
 (verifying a lossless roundtrip), synthesizes a drum hit, and writes two

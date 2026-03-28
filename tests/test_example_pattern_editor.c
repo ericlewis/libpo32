@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 
 #define main po32_pattern_editor_example_main
 #include "../examples/po32_pattern_editor.c"
@@ -13,6 +14,7 @@
 
 static void test_editor_helpers(void) {
   po32_pattern_editor_t editor;
+  int ok;
 
   editor_init(&editor);
   assert(editor.bank == 0u);
@@ -29,10 +31,13 @@ static void test_editor_helpers(void) {
 
   {
     int value = 0;
-    assert(parse_int_arg("12", 0, 20, &value));
+    ok = parse_int_arg("12", 0, 20, &value);
+    assert(ok);
     assert(value == 12);
-    assert(!parse_int_arg("abc", 0, 20, &value));
-    assert(!parse_int_arg("99", 0, 20, &value));
+    ok = parse_int_arg("abc", 0, 20, &value);
+    assert(!ok);
+    ok = parse_int_arg("99", 0, 20, &value);
+    assert(!ok);
   }
 
   assert(find_starter_pattern("four-floor") != NULL);
@@ -66,7 +71,8 @@ static void test_editor_repl_script(void) {
   const char *frame_path = "pattern_editor_repl.frame";
   const char *wav_path = "pattern_editor_repl.wav";
   FILE *script = fopen(script_path, "w");
-  FILE *redirected_stdin;
+  FILE *script_input;
+  int saved_stdin_fd;
 
   assert(script != NULL);
   fputs("help\n", script);
@@ -96,9 +102,15 @@ static void test_editor_repl_script(void) {
   fclose(script);
 
   editor_init(&editor);
-  redirected_stdin = freopen(script_path, "r", stdin);
-  assert(redirected_stdin != NULL);
+  script_input = fopen(script_path, "r");
+  assert(script_input != NULL);
+  saved_stdin_fd = dup(fileno(stdin));
+  assert(saved_stdin_fd >= 0);
+  assert(dup2(fileno(script_input), fileno(stdin)) >= 0);
   repl(&editor);
+  assert(dup2(saved_stdin_fd, fileno(stdin)) >= 0);
+  close(saved_stdin_fd);
+  fclose(script_input);
 
   assert(editor.bank == 1u);
   assert(editor.pattern.pattern_number == 3u);

@@ -5,6 +5,7 @@ root_dir=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 
 chmod +x \
   "$root_dir/.githooks/pre-commit" \
+  "$root_dir/.githooks/pre-push" \
   "$root_dir/.githooks/commit-msg" \
   "$root_dir/scripts/check-commit-message.sh" \
   "$root_dir/scripts/check-conventional-subject.sh"
