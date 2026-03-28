@@ -28,8 +28,8 @@ The format is based on Keep a Changelog, and the project follows Semantic Versio
 ### Changed
 - The library is now fully freestanding. All `memset`, `memcpy`, `memcmp`,
   `strlen`, and `strtof` calls have been replaced with self-contained
-  implementations. The only standard headers used are `<stddef.h>` and
-  `<stdint.h>` (freestanding per C99). No libc runtime dependency.
+  implementations. Only the freestanding headers `<stddef.h>` and
+  `<stdint.h>` are used. No libc runtime dependency.
 - `po32_pattern_packet_t` no longer contains a `trigger_lanes[]` field.
   Use `steps[]` instead. The raw trigger lane bytes are derived during
   encode and consumed during decode internally.
