@@ -58,11 +58,13 @@ At a high level, the workflow with real hardware is:
 | 4 | Play the rendered transfer audio into the device |
 | 5 | The PO-32 decodes the packets and writes them to the sound or pattern slots named inside those packets |
 
-## Quick Start
+## Getting started
+
+From the repository root, configure, build, run tests, then the demo:
 
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build
+cmake --build build -j4
 ctest --test-dir build --output-on-failure
 ./build/po32_demo
 ```
@@ -105,14 +107,6 @@ Other supported examples include:
 | [Synth](docs/SYNTH.md) | Synthesizer signal path |
 | [Patch Parameters](docs/PATCH_PARAMETERS.md) | The 21 parameters |
 | [Examples](examples/README.md) | Supported example programs |
-
-## Build
-
-```sh
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j4
-ctest --test-dir build --output-on-failure
-```
 
 ## License
 
