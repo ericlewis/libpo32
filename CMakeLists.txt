@@ -49,6 +49,15 @@ target_link_libraries(po32_decode_capture PRIVATE po32)
 add_executable(po32_core_tests tests/test_core.c)
 target_link_libraries(po32_core_tests PRIVATE po32)
 
+add_executable(po32_core_internal_tests tests/test_core_internal.c)
+target_include_directories(po32_core_internal_tests PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/include
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+if(UNIX AND NOT APPLE)
+  target_link_libraries(po32_core_internal_tests PRIVATE m)
+endif()
+
 add_executable(po32_synth_tests tests/test_synth.c)
 target_link_libraries(po32_synth_tests PRIVATE po32)
 
@@ -62,6 +71,7 @@ add_executable(po32_example_cli_tests tests/test_example_roundtrip_cli.c)
 target_link_libraries(po32_example_cli_tests PRIVATE po32)
 
 add_test(NAME po32_core_tests COMMAND po32_core_tests)
+add_test(NAME po32_core_internal_tests COMMAND po32_core_internal_tests)
 add_test(NAME po32_synth_tests COMMAND po32_synth_tests)
 add_test(NAME po32_pattern_editor_tests COMMAND po32_pattern_editor_tests)
 add_test(NAME po32_decode_capture_tests COMMAND po32_decode_capture_tests)
