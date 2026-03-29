@@ -8,3 +8,4 @@ compile_commands.json
 demo_*.wav
 *.o
 *.a
+Testing/
