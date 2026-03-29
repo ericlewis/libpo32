@@ -113,6 +113,7 @@ WAV files: `demo_modem.wav` and `demo_kick.wav`.
 | [C API](core/docs/C_API.md) | C function reference |
 | [Synth](core/docs/SYNTH.md) | Synthesizer signal path |
 | [Patch Parameters](core/docs/PATCH_PARAMETERS.md) | The 21 parameters |
+| [Bindings](core/docs/BINDINGS.md) | How to write a new language binding |
 | [Examples](core/examples/README.md) | Supported example programs |
 | [Contributing](CONTRIBUTING.md) | Local setup, checks, and commit conventions |
 
@@ -125,7 +126,7 @@ WAV files: `demo_modem.wav` and `demo_kick.wav`.
 | [`core/examples`](core/examples) | Supported C examples |
 | [`core/tests`](core/tests) | Core test coverage |
 | [`core/docs`](core/docs) | Architecture, protocol, and API notes |
-| [`bindings`](bindings) | Language bindings |
+| [`bindings/go`](bindings/go) | Go bindings (cgo, wraps full public API) |
 
 ## Contributing
 
