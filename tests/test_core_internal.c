@@ -67,6 +67,7 @@ static void test_tag_and_tail_helpers(void) {
 
   assert(strcmp(po32_tag_name(PO32_TAG_PATCH), "patch") == 0);
   assert(strcmp(po32_tag_name(PO32_TAG_PATTERN), "pattern") == 0);
+  assert(strcmp(po32_tag_name(PO32_TAG_ERASE), "erase") == 0);
   assert(strcmp(po32_tag_name(0xFFFFu), "unknown") == 0);
 
   assert(po32_tag_spec_find(PO32_TAG_PATCH) != NULL);
@@ -142,6 +143,9 @@ static void test_packet_decode_internals(void) {
   state = PO32_INITIAL_STATE;
   status = po32_packet_decode_bytes(NULL, body_len, &state, &consumed, &packet);
   assert(status == PO32_ERR_INVALID_ARG);
+  status = po32_packet_decode_bytes(frame + PO32_PREAMBLE_BYTES, PO32_PACKET_OVERHEAD_BYTES - 1u,
+                                    &state, &consumed, &packet);
+  assert(status == PO32_ERR_FRAME);
   status =
       po32_packet_decode_bytes(frame + PO32_PREAMBLE_BYTES, body_len, NULL, &consumed, &packet);
   assert(status == PO32_ERR_INVALID_ARG);
@@ -161,6 +165,12 @@ static void test_packet_decode_internals(void) {
   mutated[body_len - 1u] ^= 0x01u;
   state = PO32_INITIAL_STATE;
   status = po32_packet_decode_bytes(mutated, body_len, &state, &consumed, &packet);
+  assert(status == PO32_ERR_FRAME);
+
+  state = PO32_INITIAL_STATE;
+  status = po32_packet_decode_bytes(frame + PO32_PREAMBLE_BYTES,
+                                    PO32_PACKET_HEADER_BYTES + PO32_PATCH_PAYLOAD_BYTES - 1u,
+                                    &state, &consumed, &packet);
   assert(status == PO32_ERR_FRAME);
 }
 
@@ -339,9 +349,14 @@ static void test_public_guard_paths(void) {
   pattern_packet.steps[0].accent = 0;
   status = po32_pattern_packet_encode(&pattern_packet, &encoded);
   assert(status == PO32_ERR_RANGE);
+  status = po32_pattern_set_trigger(&pattern_packet, 0u, 17u, 1u);
+  assert(status == PO32_ERR_RANGE);
 
   memset(pattern_bytes, 0u, sizeof(pattern_bytes));
   status = po32_pattern_packet_decode(pattern_bytes, sizeof(pattern_bytes) - 1u, &pattern_packet);
+  assert(status == PO32_ERR_FRAME);
+  patch_bytes[0] = 0x00u;
+  status = po32_patch_packet_decode(patch_bytes, sizeof(patch_bytes), &patch_packet);
   assert(status == PO32_ERR_FRAME);
   pattern_bytes[0] = 9u;
   pattern_bytes[1] = 0x40u;
@@ -361,6 +376,10 @@ static void test_public_guard_paths(void) {
   po32_zero(&modulator, sizeof(modulator));
   status = po32_modulator_render_f32(&modulator, &sample, 1u, &out_len);
   assert(status == PO32_ERR_INVALID_ARG);
+  po32_modulator_init(&modulator, frame, frame_len, 44100u);
+  status = po32_modulator_render_f32(&modulator, &sample, 0u, &out_len);
+  assert(status == PO32_OK);
+  assert(out_len == 0u);
   assert(po32_render_dpsk_f32(NULL, frame_len, 44100u, &sample, 1u) == PO32_ERR_INVALID_ARG);
   assert(po32_render_dpsk_f32(frame, frame_len, 0u, &sample, 1u) == PO32_ERR_INVALID_ARG);
   assert(po32_render_dpsk_f32(frame, frame_len, 44100u, &sample, 1u) == PO32_ERR_BUFFER_TOO_SMALL);
@@ -615,6 +634,17 @@ static void test_decode_internal_helpers(void) {
   demod.done = 1;
   status = po32_demodulator_push(&demod, &sample, 1u, NULL, NULL);
   assert(status == PO32_OK);
+
+  po32_builder_init(&builder, frame, PO32_PREAMBLE_BYTES);
+  ctx.builder = &builder;
+  ctx.status = PO32_OK;
+  demod.done = 1;
+  demod.packet_count = 1;
+  status = po32_decode_finalize(&demod, &ctx, &result, &out_len);
+  assert(status == PO32_ERR_BUFFER_TOO_SMALL);
+
+  status = po32_decode_f32(NULL, 1u, 44100.0f, &result, frame, sizeof(frame), &out_len);
+  assert(status == PO32_ERR_INVALID_ARG);
 }
 
 int main(void) {
