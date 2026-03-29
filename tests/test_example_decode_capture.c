@@ -158,6 +158,8 @@ static void test_decode_helpers(void) {
     fwrite(bytes, 1u, sizeof(bytes), fp);
     fclose(fp);
   }
+
+  assert(!ensure_directory("missing-parent/decode_capture_dir"));
 }
 
 static void test_decode_wav_formats(void) {
@@ -222,6 +224,38 @@ static void test_decode_wav_formats(void) {
   }
   ok = decode_wav("decode_capture_truncated.wav", &wav);
   assert(!ok);
+
+  {
+    FILE *fp = fopen("decode_capture_unsupported.wav", "wb");
+    uint32_t sample_rate = 44100u;
+    uint16_t channels = 1u;
+    uint16_t audio_format = 1u;
+    uint16_t bits_per_sample = 8u;
+    uint16_t block_align = 1u;
+    uint32_t byte_rate = sample_rate * block_align;
+    uint32_t fmt_size = 16u;
+    uint32_t data_bytes = 1u;
+    uint32_t file_size = 36u + data_bytes;
+    uint8_t sample = 0x80u;
+
+    assert(fp != NULL);
+    fwrite("RIFF", 1u, 4u, fp);
+    fwrite(&file_size, 4u, 1u, fp);
+    fwrite("WAVEfmt ", 1u, 8u, fp);
+    fwrite(&fmt_size, 4u, 1u, fp);
+    fwrite(&audio_format, 2u, 1u, fp);
+    fwrite(&channels, 2u, 1u, fp);
+    fwrite(&sample_rate, 4u, 1u, fp);
+    fwrite(&byte_rate, 4u, 1u, fp);
+    fwrite(&block_align, 2u, 1u, fp);
+    fwrite(&bits_per_sample, 2u, 1u, fp);
+    fwrite("data", 1u, 4u, fp);
+    fwrite(&data_bytes, 4u, 1u, fp);
+    fwrite(&sample, 1u, 1u, fp);
+    fclose(fp);
+  }
+  ok = decode_wav("decode_capture_unsupported.wav", &wav);
+  assert(!ok);
 }
 
 static void test_decode_capture_main_paths(void) {
@@ -233,6 +267,10 @@ static void test_decode_capture_main_paths(void) {
       "decode_capture_out",
       NULL,
   };
+  char *bad_output_argv[] = {"po32_decode_capture", "decode_capture_input.wav",
+                             "decode_capture_file", NULL};
+  char *bad_signal_argv[] = {"po32_decode_capture", "decode_capture_pcm16.wav",
+                             "decode_capture_fail", NULL};
   int result;
 
   result = po32_decode_capture_example_main(1, usage_argv);
@@ -241,8 +279,12 @@ static void test_decode_capture_main_paths(void) {
   assert(result == 1);
 
   build_demo_transfer_wav("decode_capture_input.wav");
+  result = po32_decode_capture_example_main(3, bad_output_argv);
+  assert(result == 1);
   result = po32_decode_capture_example_main(3, good_argv);
   assert(result == 0);
+  result = po32_decode_capture_example_main(3, bad_signal_argv);
+  assert(result == 2);
 
   {
     FILE *summary = fopen("decode_capture_out/summary.txt", "rb");
@@ -257,6 +299,9 @@ static void test_decode_capture_main_paths(void) {
 static void test_packet_dump_helpers(void) {
   packet_dump_ctx_t ctx;
   po32_packet_t packet;
+  po32_patch_packet_t patch;
+  po32_knob_packet_t knob;
+  po32_reset_packet_t reset;
   po32_pattern_packet_t pattern;
   po32_state_packet_t state;
   po32_packet_t encoded;
@@ -269,6 +314,28 @@ static void test_packet_dump_helpers(void) {
   ctx.output_dir = "decode_capture_dump";
   ctx.packet_index = 0;
   ctx.pattern_summary_fp = pattern_summary;
+
+  patch.instrument = 1u;
+  patch.side = PO32_PATCH_LEFT;
+  po32_patch_params_zero(&patch.params);
+  assert(po32_packet_encode(PO32_TAG_PATCH, &patch, &encoded) == PO32_OK);
+  packet = encoded;
+  packet.offset = 1u;
+  assert(dump_packet(&packet, &ctx) == 0);
+
+  knob.instrument = 1u;
+  knob.kind = PO32_KNOB_PITCH;
+  knob.value = 128u;
+  assert(po32_packet_encode(PO32_TAG_KNOB, &knob, &encoded) == PO32_OK);
+  packet = encoded;
+  packet.offset = 3u;
+  assert(dump_packet(&packet, &ctx) == 0);
+
+  reset.instrument = 1u;
+  assert(po32_packet_encode(PO32_TAG_RESET, &reset, &encoded) == PO32_OK);
+  packet = encoded;
+  packet.offset = 4u;
+  assert(dump_packet(&packet, &ctx) == 0);
 
   memset(&pattern, 0, sizeof(pattern));
   po32_pattern_init(&pattern, 2u);
@@ -294,11 +361,89 @@ static void test_packet_dump_helpers(void) {
   {
     FILE *fp = fopen("decode_capture_dump/packet_01_pattern/packet.txt", "rb");
     FILE *summary = fopen("decode_capture_dump/pattern_summary.txt", "rb");
+    FILE *patch_info = fopen("decode_capture_dump/packet_01_patch/packet.txt", "rb");
+    FILE *knob_info = fopen("decode_capture_dump/packet_02_knob/packet.txt", "rb");
+    FILE *reset_info = fopen("decode_capture_dump/packet_03_reset/packet.txt", "rb");
     assert(fp != NULL);
     assert(summary != NULL);
+    assert(patch_info != NULL);
+    assert(knob_info != NULL);
+    assert(reset_info != NULL);
     fclose(fp);
     fclose(summary);
+    fclose(patch_info);
+    fclose(knob_info);
+    fclose(reset_info);
   }
+
+  ctx.output_dir = "decode_capture_file";
+  ctx.pattern_summary_fp = NULL;
+  assert(dump_packet(&packet, &ctx) == 1);
+}
+
+static void test_summary_helpers_direct(void) {
+  po32_patch_packet_t patch;
+  po32_knob_packet_t knob;
+  po32_reset_packet_t reset;
+  po32_state_packet_t state;
+  po32_pattern_packet_t pattern;
+  FILE *fp;
+
+  memset(&patch, 0, sizeof(patch));
+  patch.instrument = 7u;
+  patch.side = PO32_PATCH_RIGHT;
+  fp = fopen("decode_capture_patch_fields.txt", "w");
+  assert(fp != NULL);
+  write_patch_fields(fp, &patch);
+  fclose(fp);
+
+  memset(&knob, 0, sizeof(knob));
+  knob.instrument = 2u;
+  knob.kind = PO32_KNOB_MORPH;
+  knob.value = 42u;
+  fp = fopen("decode_capture_knob_fields.txt", "w");
+  assert(fp != NULL);
+  write_knob_fields(fp, &knob);
+  fclose(fp);
+
+  memset(&reset, 0, sizeof(reset));
+  reset.instrument = 3u;
+  fp = fopen("decode_capture_reset_fields.txt", "w");
+  assert(fp != NULL);
+  write_reset_fields(fp, &reset);
+  fclose(fp);
+
+  memset(&state, 0, sizeof(state));
+  state.tempo = 140u;
+  state.swing_times_12 = 5u;
+  state.pattern_numbers[0] = 1u;
+  state.pattern_numbers[1] = 3u;
+  state.pattern_count = 2u;
+  fp = fopen("decode_capture_state_fields.txt", "w");
+  assert(fp != NULL);
+  write_state_fields(fp, &state);
+  fclose(fp);
+
+  fp = fopen("decode_capture_state_summary.txt", "w");
+  assert(fp != NULL);
+  write_state_summary(fp, 9, &state);
+  fclose(fp);
+  write_state_summary(NULL, 9, &state);
+
+  memset(&pattern, 0, sizeof(pattern));
+  po32_pattern_init(&pattern, 5u);
+  assert(po32_pattern_set_trigger(&pattern, 0u, 1u, 1u) == PO32_OK);
+  assert(po32_pattern_set_trigger(&pattern, 1u, 2u, 3u) == PO32_OK);
+  fp = fopen("decode_capture_pattern_fields.txt", "w");
+  assert(fp != NULL);
+  write_pattern_fields(fp, &pattern);
+  fclose(fp);
+
+  fp = fopen("decode_capture_pattern_summary.txt", "w");
+  assert(fp != NULL);
+  write_pattern_summary(fp, 4, &pattern);
+  fclose(fp);
+  write_pattern_summary(NULL, 4, &pattern);
 }
 
 int main(void) {
@@ -306,5 +451,6 @@ int main(void) {
   test_decode_wav_formats();
   test_decode_capture_main_paths();
   test_packet_dump_helpers();
+  test_summary_helpers_direct();
   return 0;
 }

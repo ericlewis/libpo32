@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 #define main po32_pattern_editor_example_main
 #include "../examples/po32_pattern_editor.c"
@@ -42,8 +43,11 @@ static void test_editor_helpers(void) {
   assert(find_starter_pattern("four-floor") != NULL);
   assert(find_starter_pattern("missing") == NULL);
   assert(find_starter_pattern(NULL) == NULL);
+  assert(starter_instrument_for_bank(&editor, 0u) == 0u);
 
   editor.bank = 0u;
+  assert(!apply_starter_pattern(NULL, find_starter_pattern("four-floor")));
+  assert(!apply_starter_pattern(&editor, NULL));
   assert(apply_starter_pattern(&editor, find_starter_pattern("four-floor")));
   assert(step_has_accent(&editor, 0));
   assert(editor.pattern.steps[lane_index(0, 0)].instrument == 1u);
@@ -62,6 +66,42 @@ static void test_editor_helpers(void) {
   clear_pattern(&editor);
   assert(editor.pattern.pattern_number == 0u);
   assert(editor.pattern.steps[lane_index(0, 0)].instrument == 0u);
+}
+
+static void test_editor_io_helpers(void) {
+  po32_pattern_editor_t editor;
+  uint8_t frame[PO32_EDITOR_FRAME_CAPACITY];
+  size_t frame_len = 0u;
+  float samples[32] = {0.0f};
+  po32_status_t status;
+
+  editor_init(&editor);
+  assert(apply_starter_pattern(&editor, find_starter_pattern("four-floor")));
+
+  print_help();
+  print_presets();
+  print_editor(&editor);
+
+  status = build_pattern_transfer(NULL, frame, sizeof(frame), &frame_len);
+  assert(status == PO32_ERR_INVALID_ARG);
+  status = build_pattern_transfer(&editor, NULL, sizeof(frame), &frame_len);
+  assert(status == PO32_ERR_INVALID_ARG);
+  status = build_pattern_transfer(&editor, frame, sizeof(frame), NULL);
+  assert(status == PO32_ERR_INVALID_ARG);
+  status = build_pattern_transfer(&editor, frame, sizeof(frame), &frame_len);
+  assert(status == PO32_OK);
+  assert(frame_len > 0u);
+
+  assert(write_binary_file("pattern_editor_good.bin", frame, frame_len));
+  assert(!write_binary_file("missing-dir/pattern_editor_bad.bin", frame, frame_len));
+
+  assert(write_wav_file("pattern_editor_good.wav", samples, 0u, 44100u));
+  assert(!write_wav_file("missing-dir/pattern_editor_bad.wav", samples, 0u, 44100u));
+
+  assert(export_frame(&editor, "pattern_editor_export.frame"));
+  assert(!export_frame(&editor, "missing-dir/pattern_editor_export.frame"));
+  assert(export_wav(&editor, "pattern_editor_export.wav", 8000u));
+  assert(!export_wav(&editor, "missing-dir/pattern_editor_export.wav", 8000u));
 }
 
 static void test_editor_repl_script(void) {
@@ -128,6 +168,7 @@ static void test_editor_repl_script(void) {
 
 int main(void) {
   test_editor_helpers();
+  test_editor_io_helpers();
   test_editor_repl_script();
   return 0;
 }

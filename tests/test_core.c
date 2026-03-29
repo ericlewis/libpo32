@@ -116,6 +116,96 @@ static void test_patch_parse_mtdrum_text(void) {
   assert(fabsf(params.Level - 0.79358548f) < 0.0002f);
 }
 
+static void test_patch_parse_mtdrum_text_edge_cases(void) {
+  po32_patch_params_t params;
+  po32_status_t status;
+
+  static const char minimal_text[] = "OscWave: Sine\n"
+                                     "OscFreq: 20 Hz\n"
+                                     "OscAtk: 0 ms\n"
+                                     "OscDcy: 10 ms\n"
+                                     "ModMode: Decay\n"
+                                     "ModRate: 100 ms\n"
+                                     "ModAmt: -96 st\n"
+                                     "NFilMod: LP\n"
+                                     "NFilFrq: 20 Hz\n"
+                                     "NFilQ: 0.1\n"
+                                     "NEnvMod: Exp\n"
+                                     "NEnvAtk: 0 ms\n"
+                                     "NEnvDcy: 10 ms\n"
+                                     "Mix: 100% osc, 0% noise\n"
+                                     "DistAmt: 0%\n"
+                                     "EQFreq: 20 Hz\n"
+                                     "EQGain: -40 dB\n"
+                                     "Level: -999 dB\n"
+                                     "OscVel: 200.000%\n"
+                                     "NVel: 0.000%\n"
+                                     "ModVel: 200.000%\n";
+
+  static const char sine_rate_text[] = "ModMode: Sine\n"
+                                       "ModRate: 2000 Hz\n";
+
+  static const char noise_rate_text[] = "ModMode: Noise FM\n"
+                                        "ModRate: 20 Hz\n";
+
+  static const char linear_env_text[] = "NEnvMod: Lin\n";
+  static const char invalid_wave_text[] = "OscWave: Square\n";
+  static const char invalid_rate_text[] = "OscFreq: nope\n";
+  static const char no_fields_text[] = "Name: Example\n";
+  static const char exp_number_text[] = "OscFreq: 2.0e3 Hz\n";
+
+  memset(&params, 0, sizeof(params));
+  status = po32_patch_parse_mtdrum_text(minimal_text, sizeof(minimal_text) - 1u, &params);
+  assert(status == PO32_OK);
+  assert(fabsf(params.OscWave - 0.0f) < 0.0001f);
+  assert(fabsf(params.ModAmt - 0.0f) < 0.0001f);
+  assert(fabsf(params.OscVel - 1.0f) < 0.0001f);
+  assert(fabsf(params.ModVel - 1.0f) < 0.0001f);
+  assert(params.Level <= 0.0001f);
+
+  memset(&params, 0, sizeof(params));
+  status = po32_patch_parse_mtdrum_text(sine_rate_text, sizeof(sine_rate_text) - 1u, &params);
+  assert(status == PO32_OK);
+  assert(fabsf(params.ModMode - 0.5f) < 0.0001f);
+  assert(fabsf(params.ModRate - 1.0f) < 0.0001f);
+
+  memset(&params, 0, sizeof(params));
+  status = po32_patch_parse_mtdrum_text(noise_rate_text, sizeof(noise_rate_text) - 1u, &params);
+  assert(status == PO32_OK);
+  assert(fabsf(params.ModMode - 1.0f) < 0.0001f);
+  assert(fabsf(params.ModRate - 0.0f) < 0.0001f);
+
+  memset(&params, 0, sizeof(params));
+  status = po32_patch_parse_mtdrum_text(linear_env_text, sizeof(linear_env_text) - 1u, &params);
+  assert(status == PO32_OK);
+  assert(fabsf(params.NEnvMod - 0.5f) < 0.0001f);
+
+  memset(&params, 0, sizeof(params));
+  status = po32_patch_parse_mtdrum_text(exp_number_text, sizeof(exp_number_text) - 1u, &params);
+  assert(status == PO32_OK);
+  assert(params.OscFreq > 0.6f);
+
+  memset(&params, 0xFF, sizeof(params));
+  status = po32_patch_parse_mtdrum_text(invalid_wave_text, sizeof(invalid_wave_text) - 1u, &params);
+  assert(status == PO32_ERR_PARSE);
+  assert(params.OscWave == 0.0f);
+
+  memset(&params, 0xFF, sizeof(params));
+  status = po32_patch_parse_mtdrum_text(invalid_rate_text, sizeof(invalid_rate_text) - 1u, &params);
+  assert(status == PO32_ERR_PARSE);
+  assert(params.OscFreq == 0.0f);
+
+  memset(&params, 0xFF, sizeof(params));
+  status = po32_patch_parse_mtdrum_text(no_fields_text, sizeof(no_fields_text) - 1u, &params);
+  assert(status == PO32_ERR_PARSE);
+  assert(params.Level == 0.0f);
+
+  status = po32_patch_parse_mtdrum_text(NULL, 0u, &params);
+  assert(status == PO32_ERR_INVALID_ARG);
+  status = po32_patch_parse_mtdrum_text(minimal_text, sizeof(minimal_text) - 1u, NULL);
+  assert(status == PO32_ERR_INVALID_ARG);
+}
+
 static void test_builder_guards(void) {
   po32_builder_t builder;
   uint8_t tiny_buffer[32];
@@ -815,6 +905,7 @@ int main(void) {
   printf("===============\n");
   test_patch_encode_decode();
   test_patch_parse_mtdrum_text();
+  test_patch_parse_mtdrum_text_edge_cases();
   test_builder_guards();
   test_null_payload_rejected();
   test_frame_build_and_parse();
