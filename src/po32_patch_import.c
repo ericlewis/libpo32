@@ -98,13 +98,22 @@ static float po32_import_strtof(const char *s, char **endptr) {
     if (exp_has_digit) {
       if (exp_sign > 0) {
         if (exponent > PO32_IMPORT_POSITIVE_EXP_LIMIT) {
-          result = result < 0.0f ? -3.4028235e+38f : 3.4028235e+38f;
+          if (result == 0.0f) {
+            /* 0e39 stays zero. */
+          } else {
+            result = result < 0.0f ? -3.4028235e+38f : 3.4028235e+38f;
+          }
         } else {
           result *= po32_lut_pow10f((float)exponent);
         }
       } else {
         if (exponent > PO32_IMPORT_NEGATIVE_EXP_LIMIT) {
           result = 0.0f;
+        } else if (exponent > PO32_IMPORT_POSITIVE_EXP_LIMIT) {
+          /* Split to avoid LUT saturation: 10^38 is representable,
+             but 10^39..10^45 clamp inside po32_lut_pow10f. */
+          result /= po32_lut_pow10f((float)PO32_IMPORT_POSITIVE_EXP_LIMIT);
+          result /= po32_lut_pow10f((float)(exponent - PO32_IMPORT_POSITIVE_EXP_LIMIT));
         } else {
           result /= po32_lut_pow10f((float)exponent);
         }
