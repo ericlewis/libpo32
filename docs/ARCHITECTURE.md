@@ -25,11 +25,12 @@ code. To prevent it on truly bare-metal targets, compile with `-fno-builtin`.
 
 ## Core Modules
 
-The core is two translation units:
+The core is three translation units:
 
 | File | Purpose |
 | --- | --- |
 | [`../src/po32.c`](../src/po32.c) | Transfer framing, packet encode/decode, render, and decode |
+| [`../src/po32_patch_import.c`](../src/po32_patch_import.c) | `.mtdrum` patch text importer |
 | [`../src/po32_synth.c`](../src/po32_synth.c) | Drum synth implementation |
 
 Public headers:

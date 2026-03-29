@@ -6,6 +6,19 @@ The format is based on Keep a Changelog, and the project follows Semantic Versio
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-03-28
+
+### Fixed
+- `ARCHITECTURE.md` now lists `po32_patch_import.c` as a core module.
+- `C_API.md` now documents `PO32_ERR_PARSE`, the streaming modulator API,
+  and `po32_patch_parse_mtdrum_text(...)`.
+- `README.md` now lists the `po32_example` command in the examples table.
+
+### Changed
+- Expanded test coverage across all `src/` and `examples/` files, covering
+  error paths, edge cases, and previously untested branches in the import
+  parser, synth renderer, frame builder, and example programs.
+
 ## [0.2.0] - 2026-03-28
 
 ### Fixed

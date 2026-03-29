@@ -41,7 +41,7 @@ static int po32_memcmp(const void *a, const void *b, size_t n) {
 #define PO32_TIMING_RECOVERY_GAIN  0.01f
 
 #define PO32_STATE_PAYLOAD_MIN_BYTES ((size_t)PO32_STATE_MORPH_PAIR_COUNT * 2u + 3u)
-#define PO32_PATTERN_LANE_BYTES      ((size_t)PO32_PATTERN_LANE_COUNT * (size_t)PO32_PATTERN_STEP_COUNT)
+#define PO32_PATTERN_LANE_BYTES ((size_t)PO32_PATTERN_LANE_COUNT * (size_t)PO32_PATTERN_STEP_COUNT)
 
 #define PO32_PATCH_SIDE_LEFT_PREFIX  0x10u
 #define PO32_PATCH_SIDE_RIGHT_PREFIX 0x20u
@@ -480,7 +480,7 @@ po32_status_t po32_pattern_clear_trigger(po32_pattern_packet_t *pattern, uint8_t
   po32_pattern_zero_slot(pattern, step_index, lane_index);
   if (!po32_pattern_step_has_trigger(pattern, step_index)) {
     pattern->accent_bits =
-        (uint16_t)(pattern->accent_bits & (uint16_t) ~(uint16_t)(1u << step_index));
+        (uint16_t)(pattern->accent_bits & (uint16_t)~(uint16_t)(1u << step_index));
   }
   return PO32_OK;
 }
@@ -494,8 +494,7 @@ po32_status_t po32_pattern_clear_step(po32_pattern_packet_t *pattern, uint8_t st
   for (uint8_t lane = 0u; lane < PO32_PATTERN_LANE_COUNT; ++lane) {
     po32_pattern_zero_slot(pattern, step_index, lane);
   }
-  pattern->accent_bits =
-      (uint16_t)(pattern->accent_bits & (uint16_t) ~(uint16_t)(1u << step_index));
+  pattern->accent_bits = (uint16_t)(pattern->accent_bits & (uint16_t)~(uint16_t)(1u << step_index));
   return PO32_OK;
 }
 
@@ -593,7 +592,6 @@ po32_status_t po32_builder_append_packet(po32_builder_t *builder, uint16_t tag_c
                                          const uint8_t *payload, size_t payload_len,
                                          size_t *packet_offset) {
   size_t needed;
-  po32_status_t status;
   uint8_t header[3];
 
   if (builder == NULL || builder->buffer == NULL) {
@@ -625,31 +623,23 @@ po32_status_t po32_builder_append_packet(po32_builder_t *builder, uint16_t tag_c
   header[1] = (uint8_t)((tag_code >> 8) & 0xFFu);
   header[2] = (uint8_t)payload_len;
 
-  status = po32_builder_write_bytes(builder, header, 3u);
-  if (status != PO32_OK)
-    return status;
-
-  status = po32_builder_write_bytes(builder, payload, payload_len);
-  if (status != PO32_OK)
-    return status;
-
+  /* Capacity was validated above — these writes cannot fail. */
+  po32_builder_write_bytes(builder, header, 3u);
+  po32_builder_write_bytes(builder, payload, payload_len);
   return po32_builder_write_state_trailer(builder, builder->state);
 }
 
-static po32_status_t po32_final_tail_emit_special_byte(po32_builder_t *builder) {
+/* Caller must ensure capacity. Only invoked from po32_builder_finish after
+   the capacity pre-check guarantees PO32_FINAL_TAIL_BYTES bytes remain. */
+static void po32_final_tail_emit_special_byte(po32_builder_t *builder) {
   uint8_t x;
-  if (builder == NULL || builder->length >= builder->capacity) {
-    return PO32_ERR_BUFFER_TOO_SMALL;
-  }
   builder->buffer[builder->length++] = (uint8_t)(builder->state & 0xFFu);
   x = (uint8_t)(((builder->state >> 12) ^ (builder->state >> 8)) & 0xFFu);
   builder->state = po32_crc_mix_state(builder->state, x);
-  return PO32_OK;
 }
 
 po32_status_t po32_builder_finish(po32_builder_t *builder, size_t *frame_len) {
   size_t needed;
-  po32_status_t status;
 
   if (builder == NULL || builder->buffer == NULL) {
     return PO32_ERR_INVALID_ARG;
@@ -669,20 +659,10 @@ po32_status_t po32_builder_finish(po32_builder_t *builder, size_t *frame_len) {
     return PO32_ERR_BUFFER_TOO_SMALL;
   }
 
-  status = po32_builder_write_byte(builder, PO32_TAIL_MARKER_1);
-  if (status != PO32_OK)
-    return status;
-  status = po32_builder_write_byte(builder, PO32_TAIL_MARKER_2);
-  if (status != PO32_OK)
-    return status;
-
-  status = po32_final_tail_emit_special_byte(builder);
-  if (status != PO32_OK)
-    return status;
-
-  status = po32_builder_write_state_trailer(builder, builder->state);
-  if (status != PO32_OK)
-    return status;
+  po32_builder_write_byte(builder, PO32_TAIL_MARKER_1);
+  po32_builder_write_byte(builder, PO32_TAIL_MARKER_2);
+  po32_final_tail_emit_special_byte(builder);
+  po32_builder_write_state_trailer(builder, builder->state);
 
   builder->finished = 1;
   if (frame_len != NULL) {

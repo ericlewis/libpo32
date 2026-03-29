@@ -203,6 +203,122 @@ static void test_builder_internal_helpers(void) {
   assert(status == PO32_ERR_BUFFER_TOO_SMALL);
 }
 
+static void test_final_tail_and_trailer_corruption(void) {
+  uint8_t frame[512];
+  uint8_t mutated[512];
+  po32_packet_t packet;
+  po32_final_tail_t tail;
+  size_t frame_len;
+  size_t body_len;
+  size_t consumed = 0u;
+  uint16_t state;
+  po32_status_t status;
+
+  make_demo_patch_packet(&packet);
+  frame_len = build_demo_frame(frame, sizeof(frame), &packet);
+  body_len = frame_len - PO32_PREAMBLE_BYTES - PO32_FINAL_TAIL_BYTES;
+
+  /* Compute the CRC state after decoding the body */
+  {
+    uint16_t body_state = PO32_INITIAL_STATE;
+    size_t decoded = 0u;
+    po32_packet_t tmp;
+    status = po32_packet_decode_bytes(frame + PO32_PREAMBLE_BYTES, body_len, &body_state, &decoded,
+                                      &tmp);
+    assert(status == PO32_OK);
+
+    /* Good tail decode — verify consumed output path (line 198) */
+    consumed = 0u;
+    status = po32_final_tail_decode(body_state, frame + frame_len - PO32_FINAL_TAIL_BYTES,
+                                    PO32_FINAL_TAIL_BYTES, &tail, &consumed);
+    assert(status == PO32_OK);
+    assert(consumed == PO32_FINAL_TAIL_BYTES);
+
+    /* Good tail decode with tail=NULL (line 185 false branch) */
+    status = po32_final_tail_decode(body_state, frame + frame_len - PO32_FINAL_TAIL_BYTES,
+                                    PO32_FINAL_TAIL_BYTES, NULL, NULL);
+    assert(status == PO32_OK);
+
+    /* Corrupt the 4th byte of the tail (raw4) to trigger line 181-182 */
+    memcpy(mutated, frame, frame_len);
+    mutated[frame_len - 2u] ^= 0x01u;
+    status = po32_final_tail_decode(body_state, mutated + frame_len - PO32_FINAL_TAIL_BYTES,
+                                    PO32_FINAL_TAIL_BYTES, &tail, NULL);
+    assert(status == PO32_ERR_FRAME);
+  }
+
+  /* Corrupt the packet trailer (last 2 bytes of the body) to trigger line 250-252 */
+  memcpy(mutated, frame + PO32_PREAMBLE_BYTES, body_len);
+  mutated[body_len - 1u] ^= 0x01u;
+  state = PO32_INITIAL_STATE;
+  consumed = 0u;
+  status = po32_packet_decode_bytes(mutated, body_len, &state, &consumed, &packet);
+  assert(status == PO32_ERR_FRAME);
+}
+
+static void test_builder_finish_edge_cases(void) {
+  po32_builder_t builder;
+  po32_packet_t packet;
+  po32_status_t status;
+  size_t frame_len = 0u;
+
+  make_demo_patch_packet(&packet);
+
+  /* builder_finish with frame_len = NULL (line 688 false branch) */
+  {
+    uint8_t frame[512];
+    po32_builder_init(&builder, frame, sizeof(frame));
+    status = po32_builder_append(&builder, &packet);
+    assert(status == PO32_OK);
+    status = po32_builder_finish(&builder, NULL);
+    assert(status == PO32_OK);
+    assert(builder.finished == 1);
+  }
+
+  /* builder_finish when already finished with frame_len = NULL (line 661 branch) */
+  {
+    uint8_t frame[512];
+    po32_builder_init(&builder, frame, sizeof(frame));
+    status = po32_builder_append(&builder, &packet);
+    assert(status == PO32_OK);
+    status = po32_builder_finish(&builder, &frame_len);
+    assert(status == PO32_OK);
+    status = po32_builder_finish(&builder, NULL);
+    assert(status == PO32_OK);
+  }
+
+  /* builder_reset with buffer = NULL (line 391-392) */
+  {
+    po32_zero(&builder, sizeof(builder));
+    builder.capacity = 256u;
+    po32_builder_reset(&builder);
+    assert(builder.length == 0u);
+  }
+
+  /* builder_reset with capacity too small for preamble (line 391-392) */
+  {
+    uint8_t tiny[4];
+    po32_zero(&builder, sizeof(builder));
+    builder.buffer = tiny;
+    builder.capacity = sizeof(tiny);
+    po32_builder_reset(&builder);
+    assert(builder.length == 0u);
+  }
+
+  /* builder_finish where capacity is exactly exhausted during tail writing (lines 673-685) */
+  {
+    /* Build a frame, then set capacity to allow only partial tail */
+    uint8_t frame[512];
+    po32_builder_init(&builder, frame, sizeof(frame));
+    status = po32_builder_append(&builder, &packet);
+    assert(status == PO32_OK);
+    /* Shrink capacity to leave room for only 1 tail byte (need 5) */
+    builder.capacity = builder.length + 1u;
+    status = po32_builder_finish(&builder, &frame_len);
+    assert(status == PO32_ERR_BUFFER_TOO_SMALL);
+  }
+}
+
 static void test_public_guard_paths(void) {
   uint8_t frame[512];
   uint8_t mutated[512];
@@ -677,7 +793,9 @@ static void test_decode_internal_helpers(void) {
 int main(void) {
   test_tag_and_tail_helpers();
   test_packet_decode_internals();
+  test_final_tail_and_trailer_corruption();
   test_builder_internal_helpers();
+  test_builder_finish_edge_cases();
   test_public_guard_paths();
   test_decode_internal_helpers();
   test_demod_on_byte_paths();

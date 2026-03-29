@@ -695,6 +695,69 @@ static void test_null_payload_rejected(void) {
          PO32_ERR_INVALID_ARG);
 }
 
+static void test_frame_tail_corruption(void) {
+  po32_patch_params_t patch;
+  po32_builder_t builder;
+  po32_final_tail_t tail;
+  po32_patch_packet_t pkt;
+  po32_packet_t dpkt;
+  uint8_t frame[512];
+  uint8_t corrupted[512];
+  size_t frame_len = 0u;
+  po32_status_t status;
+
+  memset(&patch, 0, sizeof(patch));
+  patch.OscFreq = 0.18f;
+  patch.Level = 0.88f;
+  pkt.instrument = 1u;
+  pkt.side = PO32_PATCH_LEFT;
+  pkt.params = patch;
+  status = po32_packet_encode(PO32_TAG_PATCH, &pkt, &dpkt);
+  assert(status == PO32_OK);
+
+  po32_builder_init(&builder, frame, sizeof(frame));
+  status = po32_builder_append(&builder, &dpkt);
+  assert(status == PO32_OK);
+  status = po32_builder_finish(&builder, &frame_len);
+  assert(status == PO32_OK);
+
+  /* Corrupt the 4th byte from end (raw4 in final tail) → triggers line 181-182 */
+  memcpy(corrupted, frame, frame_len);
+  corrupted[frame_len - 2u] ^= 0x01u;
+  status = po32_frame_parse(corrupted, frame_len, NULL, NULL, &tail);
+  assert(status == PO32_ERR_FRAME);
+
+  /* Corrupt a packet trailer byte → triggers line 250-252 */
+  memcpy(corrupted, frame, frame_len);
+  corrupted[PO32_PREAMBLE_BYTES + PO32_PATCH_PAYLOAD_BYTES + 3u] ^= 0x01u;
+  status = po32_frame_parse(corrupted, frame_len, NULL, NULL, &tail);
+  assert(status == PO32_ERR_FRAME);
+}
+
+static void test_builder_finish_null_frame_len(void) {
+  po32_patch_params_t patch;
+  po32_builder_t builder;
+  po32_patch_packet_t pkt;
+  po32_packet_t dpkt;
+  uint8_t frame[512];
+  po32_status_t status;
+
+  memset(&patch, 0, sizeof(patch));
+  pkt.instrument = 1u;
+  pkt.side = PO32_PATCH_LEFT;
+  pkt.params = patch;
+  status = po32_packet_encode(PO32_TAG_PATCH, &pkt, &dpkt);
+  assert(status == PO32_OK);
+
+  po32_builder_init(&builder, frame, sizeof(frame));
+  status = po32_builder_append(&builder, &dpkt);
+  assert(status == PO32_OK);
+
+  /* finish with frame_len = NULL (line 688 false branch) */
+  status = po32_builder_finish(&builder, NULL);
+  assert(status == PO32_OK);
+}
+
 static void test_frame_build_and_parse(void) {
   po32_patch_params_t patch;
   po32_builder_t builder;
@@ -1374,6 +1437,8 @@ int main(void) {
   test_patch_decode_invalid_side();
   test_builder_guards();
   test_null_payload_rejected();
+  test_frame_tail_corruption();
+  test_builder_finish_null_frame_len();
   test_frame_build_and_parse();
   test_streaming_modulator_matches_block_render();
   test_extended_payload_encoders();

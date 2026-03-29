@@ -92,6 +92,7 @@ WAV files: `demo_modem.wav` and `demo_kick.wav`.
 
 | Command | Purpose |
 | --- | --- |
+| `./build/po32_example` | Minimal roundtrip: encode, render, decode, and verify |
 | `./build/po32_demo` | End-to-end demo: transfer frame build/render/decode plus local drum synthesis |
 | `./build/po32_pattern_editor` | Interactive PO-32 pattern editing and WAV export |
 | `./build/po32_decode_capture <input.wav> <out-dir>` | Packet and pattern dumps from a transfer WAV |

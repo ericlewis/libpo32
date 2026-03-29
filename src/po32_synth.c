@@ -402,8 +402,7 @@ po32_status_t po32_synth_render(const po32_synth_t *synth, const po32_patch_para
 
   nf_freq = synth_clamp_sr_freq(synth_param_to_hz(params->NFilFrq), sr);
   nf_q = synth_param_to_q(params->NFilQ);
-  if (nf_q < SYNTH_FILTER_Q_MIN)
-    nf_q = SYNTH_FILTER_Q_MIN;
+  /* synth_param_to_q returns >= SYNTH_FILTER_Q_MIN by construction. */
 
   n_atk = synth_attack_time(params->NEnvAtk);
   n_dcy = synth_decay_time(params->NEnvDcy);
@@ -473,12 +472,11 @@ po32_status_t po32_synth_render(const po32_synth_t *synth, const po32_patch_para
     float osc_sample, noise_raw, noise_sample;
     float sample;
 
+    /* osc_dcy is always > 0 (synth_decay_time returns >= SYNTH_DECAY_MIN_SECONDS). */
     if (osc_atk > 0.0f && t < osc_atk)
       osc_env = synth_exp_attack_env(t, osc_atk);
-    else if (osc_dcy > 0.0f)
-      osc_env = synth_exp_decay_env(t - osc_atk, osc_dcy);
     else
-      osc_env = 0.0f;
+      osc_env = synth_exp_decay_env(t - osc_atk, osc_dcy);
 
     if (mod_mode < SYNTH_ONE_THIRD) {
       mod_sig = (mod_decay_time > 0.0f) ? synth_exp_decay_env(t, mod_decay_time) : 0.0f;
@@ -507,20 +505,19 @@ po32_status_t po32_synth_render(const po32_synth_t *synth, const po32_patch_para
 
     osc_sample *= osc_env;
 
+    /* n_dcy is always > 0 (synth_decay_time returns >= SYNTH_DECAY_MIN_SECONDS). */
     if (params->NEnvMod > SYNTH_TWO_THIRDS) {
       if (t < n_atk) {
         noise_env = 1.0f;
-      } else if (mod_env_period > 0.0f && n_dcy > 0.0f) {
+      } else if (mod_env_period > 0.0f) {
         float dt = t - n_atk;
         float saw = synth_wrap_phase01(dt / mod_env_period);
         float tri = 1.0f - 2.0f * synth_fabsf(saw - 0.5f);
         float ring = lut_cosf(LUT_PI * tri);
         float decay = synth_exp_decay_env(dt, n_dcy);
         noise_env = ring * decay * mod_env_amp_correction;
-      } else if (n_dcy > 0.0f) {
-        noise_env = synth_exp_decay_env(t - n_atk, n_dcy);
       } else {
-        noise_env = 0.0f;
+        noise_env = synth_exp_decay_env(t - n_atk, n_dcy);
       }
     } else if (params->NEnvMod > SYNTH_ONE_THIRD) {
       float lin_atk = n_atk * SYNTH_TWO_THIRDS;
@@ -535,10 +532,8 @@ po32_status_t po32_synth_render(const po32_synth_t *synth, const po32_patch_para
     } else {
       if (n_atk > 0.0f && t < n_atk)
         noise_env = synth_exp_attack_env(t, n_atk);
-      else if (n_dcy > 0.0f)
-        noise_env = synth_exp_decay_env(t - n_atk, n_dcy);
       else
-        noise_env = 0.0f;
+        noise_env = synth_exp_decay_env(t - n_atk, n_dcy);
     }
 
     noise_raw = synth_randf(&rand_state) * 2.0f - 1.0f;

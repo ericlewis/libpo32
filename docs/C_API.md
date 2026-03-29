@@ -128,6 +128,23 @@ pairs, repeated four times, followed by reserved bytes and `accent_bits`.
 A trigger is active only when its low nibble is non-zero. A low nibble of
 `0x00` is empty on the wire.
 
+## Patch Text Import
+
+Use `po32_patch_parse_mtdrum_text(...)` to import patch parameters from
+Microtonic `.mtdrum` text format. This is the text representation used by
+Sonic Charge Microtonic's copy/paste and file export features.
+
+## Streaming Modulator
+
+For streaming (chunk-based) rendering, the modulator API provides incremental
+control:
+
+- `po32_modulator_init(...)` — prepare for rendering
+- `po32_modulator_render_f32(...)` — render the next chunk of samples
+- `po32_modulator_reset(...)` — restart rendering from the beginning
+- `po32_modulator_done(...)` — check if all samples have been rendered
+- `po32_modulator_samples_remaining(...)` — query how many samples remain
+
 ## Body Bytes vs Frame Bytes
 
 The C core works with full transmitted frames and encoded packet-body bytes.
@@ -150,6 +167,7 @@ Most C functions return [`po32_status_t`](../include/po32.h):
 - `PO32_ERR_RANGE`
 - `PO32_ERR_BUFFER_TOO_SMALL`
 - `PO32_ERR_FRAME`
+- `PO32_ERR_PARSE`
 
 Common causes:
 
@@ -157,6 +175,7 @@ Common causes:
 - `RANGE`: invalid payload shape or parameter count
 - `BUFFER_TOO_SMALL`: caller-owned output buffer too small
 - `FRAME`: malformed frame or decode failure
+- `PARSE`: text import failed to parse a field value
 
 ## Synth API
 
