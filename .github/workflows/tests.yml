@@ -30,3 +30,26 @@ jobs:
 
       - name: Build and test core
         run: ./scripts/ci-verify.sh core
+
+  go-bindings:
+    name: Go bindings (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Test Go bindings
+        working-directory: bindings/go
+        run: go test -v -race ./...
