@@ -15,9 +15,9 @@ The format is based on Keep a Changelog, and the project follows Semantic Versio
 - `README.md` now lists the `po32_example` command in the examples table.
 
 ### Changed
-- Expanded test coverage across all `src/` and `examples/` files, covering
-  error paths, edge cases, and previously untested branches in the import
-  parser, synth renderer, frame builder, and example programs.
+- Expanded test coverage across all `core/src/` and `core/examples/` files,
+  covering error paths, edge cases, and previously untested branches in the
+  import parser, synth renderer, frame builder, and example programs.
 
 ## [0.2.0] - 2026-03-28
 

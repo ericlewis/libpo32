@@ -57,3 +57,24 @@ jobs:
         with:
           name: coverage-report
           path: coverage/
+
+  go-coverage:
+    name: Go coverage
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Test with coverage
+        working-directory: bindings/go
+        run: go test -race -coverprofile=coverage.out ./...
+
+      - name: Print coverage summary
+        working-directory: bindings/go
+        run: go tool cover -func=coverage.out | tail -1
