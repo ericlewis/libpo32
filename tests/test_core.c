@@ -260,6 +260,9 @@ static void test_patch_parse_mtdrum_text_edge_cases(void) {
                                                    "ModRate: nope\n";
   static const char invalid_mod_rate_noise_text[] = "ModMode: Noise\n"
                                                     "ModRate: -1 Hz\n";
+  static const char exp_plus_number_text[] = "OscFreq: +2.5E+2 Hz\n";
+  static const char exp_minus_number_text[] = "OscFreq: +2.5E-1 Hz\n";
+  static const char incomplete_exp_number_text[] = "OscFreq: 2.5e+ Hz\n";
   static const char invalid_rate_text[] = "OscFreq: nope\n";
   static const char no_fields_text[] = "Name: Example\n";
   static const char exp_number_text[] = "OscFreq: 2.0e3 Hz\n";
@@ -381,6 +384,24 @@ static void test_patch_parse_mtdrum_text_edge_cases(void) {
   status = po32_patch_parse_mtdrum_text(exp_number_text, sizeof(exp_number_text) - 1u, &params);
   assert(status == PO32_OK);
   assert(params.OscFreq > 0.6f);
+
+  memset(&params, 0, sizeof(params));
+  status = po32_patch_parse_mtdrum_text(exp_plus_number_text, sizeof(exp_plus_number_text) - 1u,
+                                        &params);
+  assert(status == PO32_OK);
+  assert(params.OscFreq > 0.35f && params.OscFreq < 0.38f);
+
+  memset(&params, 0, sizeof(params));
+  status = po32_patch_parse_mtdrum_text(exp_minus_number_text, sizeof(exp_minus_number_text) - 1u,
+                                        &params);
+  assert(status == PO32_OK);
+  assert(params.OscFreq == 0.0f);
+
+  memset(&params, 0xFF, sizeof(params));
+  status = po32_patch_parse_mtdrum_text(incomplete_exp_number_text,
+                                        sizeof(incomplete_exp_number_text) - 1u, &params);
+  assert(status == PO32_OK);
+  assert(params.OscFreq == 0.0f);
 
   memset(&params, 0xFF, sizeof(params));
   status = po32_patch_parse_mtdrum_text(invalid_wave_text, sizeof(invalid_wave_text) - 1u, &params);
