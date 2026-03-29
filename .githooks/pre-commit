@@ -3,7 +3,13 @@ set -eu
 
 root_dir=$(git rev-parse --show-toplevel)
 
-: "${CLANG_FORMAT:=clang-format}"
+if [ -z "${CLANG_FORMAT:-}" ]; then
+  if command -v clang-format-18 >/dev/null 2>&1; then
+    CLANG_FORMAT=clang-format-18
+  else
+    CLANG_FORMAT=clang-format
+  fi
+fi
 
 staged_files=$(
   git diff --cached --name-only --diff-filter=ACMR |
