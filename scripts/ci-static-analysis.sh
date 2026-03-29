@@ -12,10 +12,10 @@ cppcheck \
   --error-exitcode=1 \
   --inline-suppr \
   --suppress=missingIncludeSystem \
-  -I "$root_dir/include" \
-  "$root_dir/src" \
-  "$root_dir/tests" \
-  "$root_dir/examples"
+  -I "$root_dir/core/include" \
+  "$root_dir/core/src" \
+  "$root_dir/core/tests" \
+  "$root_dir/core/examples"
 
 scan-build --status-bugs \
   cmake -S "$root_dir" -B "$build_dir" \
