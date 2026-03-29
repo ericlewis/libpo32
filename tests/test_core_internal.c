@@ -172,6 +172,13 @@ static void test_packet_decode_internals(void) {
                                     PO32_PACKET_HEADER_BYTES + PO32_PATCH_PAYLOAD_BYTES - 1u,
                                     &state, &consumed, &packet);
   assert(status == PO32_ERR_FRAME);
+
+  {
+    size_t pos = 0u;
+    status = (po32_status_t)po32_frame_parse_packet_at(
+        frame + PO32_PREAMBLE_BYTES, PO32_PACKET_OVERHEAD_BYTES - 1u, &pos, &state, &packet);
+    assert(status == (po32_status_t)-1);
+  }
 }
 
 static void test_builder_internal_helpers(void) {
@@ -245,6 +252,7 @@ static void test_public_guard_paths(void) {
   assert(po32_frame_parse(mutated, frame_len, NULL, NULL, NULL) == PO32_ERR_FRAME);
 
   po32_builder_reset(NULL);
+  po32_builder_init(NULL, frame, sizeof(frame));
   po32_builder_init(&builder, short_buffer, sizeof(short_buffer));
   assert(builder.length == 0u);
 
@@ -285,6 +293,7 @@ static void test_public_guard_paths(void) {
   assert(po32_builder_append_packet(&builder, PO32_TAG_PATCH, frame, 1u, NULL) == PO32_ERR_FRAME);
 
   po32_builder_init(&builder, frame, sizeof(frame));
+  assert(po32_builder_append(&builder, NULL) == PO32_ERR_INVALID_ARG);
   assert(po32_builder_append_packet(&builder, PO32_TAG_PATCH, NULL, 1u, NULL) ==
          PO32_ERR_INVALID_ARG);
   assert(po32_builder_append_packet(&builder, PO32_TAG_PATCH, frame, 256u, NULL) == PO32_ERR_RANGE);
@@ -317,6 +326,15 @@ static void test_public_guard_paths(void) {
   memset(patch_bytes, 0u, sizeof(patch_bytes));
   status = po32_patch_packet_decode(patch_bytes, sizeof(patch_bytes) - 1u, &patch_packet);
   assert(status == PO32_ERR_FRAME);
+  patch_packet.instrument = 1u;
+  patch_packet.side = PO32_PATCH_RIGHT;
+  po32_patch_params_zero(&patch_packet.params);
+  status = po32_packet_encode(PO32_TAG_PATCH, &patch_packet, &encoded);
+  assert(status == PO32_OK);
+  status = po32_patch_packet_decode(encoded.payload, encoded.payload_len, &patch_packet);
+  assert(status == PO32_OK);
+  assert(patch_packet.side == PO32_PATCH_RIGHT);
+  patch_bytes[0] = 0x00u;
   status = po32_patch_packet_decode(patch_bytes, sizeof(patch_bytes), &patch_packet);
   assert(status == PO32_ERR_FRAME);
 
