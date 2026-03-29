@@ -160,6 +160,33 @@ static void test_decode_helpers(void) {
   }
 
   assert(!ensure_directory("missing-parent/decode_capture_dir"));
+
+  /* load_file with valid file + NULL out pointers */
+  {
+    uint8_t *loaded = NULL;
+    size_t loaded_len = 0u;
+    int result;
+
+    result = load_file("decode_capture.bin", NULL, &loaded_len);
+    assert(!result);
+    result = load_file("decode_capture.bin", &loaded, NULL);
+    assert(!result);
+  }
+
+  /* load_file with empty file (0-byte) */
+  {
+    FILE *fp = fopen("decode_capture_empty.bin", "wb");
+    uint8_t *loaded = NULL;
+    size_t loaded_len = 99u;
+    int result;
+
+    assert(fp != NULL);
+    fclose(fp);
+    result = load_file("decode_capture_empty.bin", &loaded, &loaded_len);
+    assert(result);
+    assert(loaded_len == 0u);
+    free(loaded);
+  }
 }
 
 static void test_decode_wav_formats(void) {
@@ -255,6 +282,205 @@ static void test_decode_wav_formats(void) {
     fclose(fp);
   }
   ok = decode_wav("decode_capture_unsupported.wav", &wav);
+  assert(!ok);
+}
+
+static void write_pcm24_wav(const char *path, const uint8_t *data, size_t frame_count,
+                            uint32_t sample_rate, uint16_t channels) {
+  FILE *fp = fopen(path, "wb");
+  uint16_t bits = 24u;
+  uint16_t audio_format = 1u;
+  uint32_t fmt_size = 16u;
+  size_t bytes_per_sample = 3u;
+  uint32_t data_bytes = (uint32_t)(frame_count * channels * bytes_per_sample);
+  uint32_t file_size = 36u + data_bytes;
+  uint32_t byte_rate = sample_rate * channels * (uint32_t)bytes_per_sample;
+  uint16_t block_align = (uint16_t)(channels * bytes_per_sample);
+
+  assert(fp != NULL);
+  fwrite("RIFF", 1u, 4u, fp);
+  fwrite(&file_size, 4u, 1u, fp);
+  fwrite("WAVEfmt ", 1u, 8u, fp);
+  fwrite(&fmt_size, 4u, 1u, fp);
+  fwrite(&audio_format, 2u, 1u, fp);
+  fwrite(&channels, 2u, 1u, fp);
+  fwrite(&sample_rate, 4u, 1u, fp);
+  fwrite(&byte_rate, 4u, 1u, fp);
+  fwrite(&block_align, 2u, 1u, fp);
+  fwrite(&bits, 2u, 1u, fp);
+  fwrite("data", 1u, 4u, fp);
+  fwrite(&data_bytes, 4u, 1u, fp);
+  fwrite(data, 1u, data_bytes, fp);
+  fclose(fp);
+}
+
+static void write_pcm32_wav(const char *path, const int32_t *samples, size_t sample_count,
+                            uint32_t sample_rate, uint16_t channels) {
+  FILE *fp = fopen(path, "wb");
+  uint16_t bits = 32u;
+  uint16_t audio_format = 1u;
+  uint32_t fmt_size = 16u;
+  uint32_t data_bytes = (uint32_t)(sample_count * sizeof(int32_t));
+  uint32_t file_size = 36u + data_bytes;
+  uint32_t byte_rate = sample_rate * channels * (uint32_t)sizeof(int32_t);
+  uint16_t block_align = (uint16_t)(channels * sizeof(int32_t));
+
+  assert(fp != NULL);
+  fwrite("RIFF", 1u, 4u, fp);
+  fwrite(&file_size, 4u, 1u, fp);
+  fwrite("WAVEfmt ", 1u, 8u, fp);
+  fwrite(&fmt_size, 4u, 1u, fp);
+  fwrite(&audio_format, 2u, 1u, fp);
+  fwrite(&channels, 2u, 1u, fp);
+  fwrite(&sample_rate, 4u, 1u, fp);
+  fwrite(&byte_rate, 4u, 1u, fp);
+  fwrite(&block_align, 2u, 1u, fp);
+  fwrite(&bits, 2u, 1u, fp);
+  fwrite("data", 1u, 4u, fp);
+  fwrite(&data_bytes, 4u, 1u, fp);
+  fwrite(samples, sizeof(int32_t), sample_count, fp);
+  fclose(fp);
+}
+
+static void test_decode_wav_pcm24_and_pcm32(void) {
+  int ok;
+
+  /* 24-bit mono PCM */
+  {
+    wav_data_t wav24;
+    /* Two frames: +0.5 and -0.5 (approx) in 24-bit */
+    uint8_t pcm24[] = {0x00, 0x00, 0x40,  /* +0.5 * 8388608 = 4194304 = 0x400000 */
+                       0x00, 0x00, 0xC0}; /* -0.5 * 8388608 = -4194304 = 0xC00000 (sign-extended) */
+    memset(&wav24, 0, sizeof(wav24));
+    write_pcm24_wav("decode_capture_pcm24.wav", pcm24, 2u, 44100u, 1u);
+    ok = decode_wav("decode_capture_pcm24.wav", &wav24);
+    assert(ok);
+    assert(wav24.sample_count == 2u);
+    assert(wav24.sample_rate == 44100u);
+    assert(wav24.samples[0] > 0.4f && wav24.samples[0] < 0.6f);
+    assert(wav24.samples[1] < -0.4f && wav24.samples[1] > -0.6f);
+    free(wav24.samples);
+  }
+
+  /* 32-bit integer mono PCM */
+  {
+    wav_data_t wav32;
+    int32_t pcm32[] = {1073741824, -1073741824}; /* ~0.5 and ~-0.5 */
+    memset(&wav32, 0, sizeof(wav32));
+    write_pcm32_wav("decode_capture_pcm32.wav", pcm32, 2u, 44100u, 1u);
+    ok = decode_wav("decode_capture_pcm32.wav", &wav32);
+    assert(ok);
+    assert(wav32.sample_count == 2u);
+    assert(wav32.samples[0] > 0.4f && wav32.samples[0] < 0.6f);
+    assert(wav32.samples[1] < -0.4f && wav32.samples[1] > -0.6f);
+    free(wav32.samples);
+  }
+}
+
+static void test_decode_wav_edge_cases(void) {
+  wav_data_t wav;
+  int ok;
+
+  /* WAV with zero channels → should fail */
+  {
+    FILE *fp = fopen("decode_capture_zeroch.wav", "wb");
+    uint32_t sample_rate = 44100u;
+    uint16_t channels = 0u;
+    uint16_t audio_format = 1u;
+    uint16_t bits_per_sample = 16u;
+    uint16_t block_align = 2u;
+    uint32_t byte_rate = 88200u;
+    uint32_t fmt_size = 16u;
+    uint32_t data_bytes = 4u;
+    uint32_t file_size = 36u + data_bytes;
+    int16_t samples[] = {0, 0};
+
+    assert(fp != NULL);
+    fwrite("RIFF", 1u, 4u, fp);
+    fwrite(&file_size, 4u, 1u, fp);
+    fwrite("WAVEfmt ", 1u, 8u, fp);
+    fwrite(&fmt_size, 4u, 1u, fp);
+    fwrite(&audio_format, 2u, 1u, fp);
+    fwrite(&channels, 2u, 1u, fp);
+    fwrite(&sample_rate, 4u, 1u, fp);
+    fwrite(&byte_rate, 4u, 1u, fp);
+    fwrite(&block_align, 2u, 1u, fp);
+    fwrite(&bits_per_sample, 2u, 1u, fp);
+    fwrite("data", 1u, 4u, fp);
+    fwrite(&data_bytes, 4u, 1u, fp);
+    fwrite(samples, sizeof(int16_t), 2u, fp);
+    fclose(fp);
+  }
+  memset(&wav, 0, sizeof(wav));
+  ok = decode_wav("decode_capture_zeroch.wav", &wav);
+  assert(!ok);
+
+  /* Missing file */
+  memset(&wav, 0, sizeof(wav));
+  ok = decode_wav("nonexistent_file.wav", &wav);
+  assert(!ok);
+
+  /* WAV with misaligned data (pcm_len not divisible by bytes_per_sample * channels) */
+  {
+    FILE *fp = fopen("decode_capture_misaligned.wav", "wb");
+    uint32_t sample_rate = 44100u;
+    uint16_t channels = 1u;
+    uint16_t audio_format = 1u;
+    uint16_t bits_per_sample = 16u;
+    uint16_t block_align = 2u;
+    uint32_t byte_rate = sample_rate * block_align;
+    uint32_t fmt_size = 16u;
+    uint32_t data_bytes = 3u;                   /* not divisible by 2 */
+    uint32_t file_size = 36u + data_bytes + 1u; /* +1 for padding */
+    uint8_t data[] = {0, 0, 0, 0};              /* 3 bytes data + 1 pad */
+
+    assert(fp != NULL);
+    fwrite("RIFF", 1u, 4u, fp);
+    fwrite(&file_size, 4u, 1u, fp);
+    fwrite("WAVEfmt ", 1u, 8u, fp);
+    fwrite(&fmt_size, 4u, 1u, fp);
+    fwrite(&audio_format, 2u, 1u, fp);
+    fwrite(&channels, 2u, 1u, fp);
+    fwrite(&sample_rate, 4u, 1u, fp);
+    fwrite(&byte_rate, 4u, 1u, fp);
+    fwrite(&block_align, 2u, 1u, fp);
+    fwrite(&bits_per_sample, 2u, 1u, fp);
+    fwrite("data", 1u, 4u, fp);
+    fwrite(&data_bytes, 4u, 1u, fp);
+    fwrite(data, 1u, 4u, fp);
+    fclose(fp);
+  }
+  memset(&wav, 0, sizeof(wav));
+  ok = decode_wav("decode_capture_misaligned.wav", &wav);
+  assert(!ok);
+
+  /* WAV with no data chunk (only fmt) */
+  {
+    FILE *fp = fopen("decode_capture_nodata.wav", "wb");
+    uint32_t sample_rate = 44100u;
+    uint16_t channels = 1u;
+    uint16_t audio_format = 1u;
+    uint16_t bits_per_sample = 16u;
+    uint16_t block_align = 2u;
+    uint32_t byte_rate = sample_rate * block_align;
+    uint32_t fmt_size = 16u;
+    uint32_t file_size = 28u; /* WAVE + fmt chunk only, no data chunk */
+
+    assert(fp != NULL);
+    fwrite("RIFF", 1u, 4u, fp);
+    fwrite(&file_size, 4u, 1u, fp);
+    fwrite("WAVEfmt ", 1u, 8u, fp);
+    fwrite(&fmt_size, 4u, 1u, fp);
+    fwrite(&audio_format, 2u, 1u, fp);
+    fwrite(&channels, 2u, 1u, fp);
+    fwrite(&sample_rate, 4u, 1u, fp);
+    fwrite(&byte_rate, 4u, 1u, fp);
+    fwrite(&block_align, 2u, 1u, fp);
+    fwrite(&bits_per_sample, 2u, 1u, fp);
+    fclose(fp);
+  }
+  memset(&wav, 0, sizeof(wav));
+  ok = decode_wav("decode_capture_nodata.wav", &wav);
   assert(!ok);
 }
 
@@ -452,6 +678,8 @@ static void test_summary_helpers_direct(void) {
 int main(void) {
   test_decode_helpers();
   test_decode_wav_formats();
+  test_decode_wav_pcm24_and_pcm32();
+  test_decode_wav_edge_cases();
   test_decode_capture_main_paths();
   test_packet_dump_helpers();
   test_summary_helpers_direct();

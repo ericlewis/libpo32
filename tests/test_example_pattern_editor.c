@@ -38,6 +38,10 @@ static void test_editor_helpers(void) {
     assert(!ok);
     ok = parse_int_arg("99", 0, 20, &value);
     assert(!ok);
+    ok = parse_int_arg(NULL, 0, 20, &value);
+    assert(!ok);
+    ok = parse_int_arg("5", 0, 20, NULL);
+    assert(!ok);
   }
 
   assert(find_starter_pattern("four-floor") != NULL);
@@ -59,6 +63,13 @@ static void test_editor_helpers(void) {
 
   assert(add_trigger(&editor, 0, 1));
   assert(editor.pattern.steps[lane_index(0, 0)].instrument == 1u);
+
+  /* set_trigger_slot with instrument=0 clears via po32_pattern_clear_trigger */
+  set_trigger_slot(&editor, 0, 0, 0u);
+  assert(editor.pattern.steps[lane_index(0, 0)].instrument == 0u);
+
+  /* re-add for further tests */
+  assert(add_trigger(&editor, 0, 1));
 
   set_step_accent(&editor, 0, 0);
   assert(!step_has_accent(&editor, 0));
@@ -119,24 +130,47 @@ static void test_editor_repl_script(void) {
   fputs("presets\n", script);
   fputs("preset four-floor\n", script);
   fputs("preset missing\n", script);
+  /* error: add with bad args */
+  fputs("add\n", script);
   fputs("add 2 9\n", script);
   fputs("add 2 1\n", script);
+  /* error: set with bad args and lane mismatch */
+  fputs("set\n", script);
   fputs("set 2 2 1\n", script);
+  fputs("set 2 1 2\n", script); /* instrument 2 belongs to lane 1, not lane 0 (slot 1) */
   fputs("set 2 1 0\n", script);
+  /* error: clear with bad arg */
+  fputs("clear\n", script);
+  fputs("clear 1 99\n", script); /* lane out of range */
   fputs("clear 1 1\n", script);
   fputs("clear 2\n", script);
+  /* accent paths */
+  fputs("accent\n", script); /* missing step */
   fputs("accent 1 on\n", script);
   fputs("accent 1 off\n", script);
   fputs("accent 1 toggle\n", script);
+  fputs("accent 1\n", script);       /* mode=NULL → toggle */
+  fputs("accent 1 bogus\n", script); /* invalid mode */
+  /* bank/pattern/tempo/swing errors */
+  fputs("bank 99\n", script);
   fputs("bank 1\n", script);
+  fputs("set 2 1 1\n", script); /* instrument 1 not in bank 1 */
   fputs("preset electro\n", script);
+  fputs("pattern 99\n", script);
   fputs("pattern 3\n", script);
+  fputs("tempo 999\n", script);
   fputs("tempo 140\n", script);
+  fputs("swing 999\n", script);
   fputs("swing 7\n", script);
+  /* export-frame with missing path */
+  fputs("export-frame\n", script);
   fprintf(script, "export-frame %s\n", frame_path);
+  /* export-wav errors */
+  fputs("export-wav\n", script);
   fputs("export-wav missing.wav nope\n", script);
   fprintf(script, "export-wav %s 8000\n", wav_path);
   fputs("unknown-command\n", script);
+  fputs("\n", script); /* empty line → continue */
   fputs("quit\n", script);
   fclose(script);
 
