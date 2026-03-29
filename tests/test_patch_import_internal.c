@@ -101,10 +101,29 @@ static void test_strtof_overflow_underflow(void) {
   assert(value <= -3.4028235e+38f);
   assert(*endptr == '\0');
 
+  /* p1: zero mantissa with overflowing exponent stays zero */
+  value = po32_import_strtof("0e39", &endptr);
+  assert(value == 0.0f);
+  assert(*endptr == '\0');
+
+  value = po32_import_strtof("0.0e+100", &endptr);
+  assert(value == 0.0f);
+  assert(*endptr == '\0');
+
   /* negative exponent > 45 but < saturation → underflows to 0 */
   value = po32_import_strtof("1.5e-46", &endptr);
   assert(value == 0.0f);
   assert(*endptr == '\0');
+
+  /* p2: negative exponents 39-45 must decrease monotonically, not collapse */
+  {
+    float v39 = po32_import_strtof("1e-39", &endptr);
+    float v42 = po32_import_strtof("1e-42", &endptr);
+    float v45 = po32_import_strtof("1e-45", &endptr);
+    assert(v39 > v42);
+    assert(v42 > v45);
+    assert(v45 > 0.0f);
+  }
 }
 
 static void test_starts_with_nocase_uppercase_literal(void) {
