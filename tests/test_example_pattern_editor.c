@@ -6,7 +6,6 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-#include <unistd.h>
 
 #define main po32_pattern_editor_example_main
 #include "../examples/po32_pattern_editor.c"
@@ -72,7 +71,7 @@ static void test_editor_repl_script(void) {
   const char *wav_path = "pattern_editor_repl.wav";
   FILE *script = fopen(script_path, "w");
   FILE *script_input;
-  int saved_stdin_fd;
+  FILE *saved_stdin;
 
   assert(script != NULL);
   fputs("help\n", script);
@@ -102,14 +101,12 @@ static void test_editor_repl_script(void) {
   fclose(script);
 
   editor_init(&editor);
+  saved_stdin = stdin;
   script_input = fopen(script_path, "r");
   assert(script_input != NULL);
-  saved_stdin_fd = dup(fileno(stdin));
-  assert(saved_stdin_fd >= 0);
-  assert(dup2(fileno(script_input), fileno(stdin)) >= 0);
+  stdin = script_input;
   repl(&editor);
-  assert(dup2(saved_stdin_fd, fileno(stdin)) >= 0);
-  close(saved_stdin_fd);
+  stdin = saved_stdin;
   fclose(script_input);
 
   assert(editor.bank == 1u);
