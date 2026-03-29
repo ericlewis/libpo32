@@ -41,7 +41,7 @@ static int po32_memcmp(const void *a, const void *b, size_t n) {
 #define PO32_TIMING_RECOVERY_GAIN  0.01f
 
 #define PO32_STATE_PAYLOAD_MIN_BYTES ((size_t)PO32_STATE_MORPH_PAIR_COUNT * 2u + 3u)
-#define PO32_PATTERN_LANE_BYTES      ((size_t)PO32_PATTERN_LANE_COUNT * (size_t)PO32_PATTERN_STEP_COUNT)
+#define PO32_PATTERN_LANE_BYTES ((size_t)PO32_PATTERN_LANE_COUNT * (size_t)PO32_PATTERN_STEP_COUNT)
 
 #define PO32_PATCH_SIDE_LEFT_PREFIX  0x10u
 #define PO32_PATCH_SIDE_RIGHT_PREFIX 0x20u
@@ -480,7 +480,7 @@ po32_status_t po32_pattern_clear_trigger(po32_pattern_packet_t *pattern, uint8_t
   po32_pattern_zero_slot(pattern, step_index, lane_index);
   if (!po32_pattern_step_has_trigger(pattern, step_index)) {
     pattern->accent_bits =
-        (uint16_t)(pattern->accent_bits & (uint16_t) ~(uint16_t)(1u << step_index));
+        (uint16_t)(pattern->accent_bits & (uint16_t)~(uint16_t)(1u << step_index));
   }
   return PO32_OK;
 }
@@ -494,8 +494,7 @@ po32_status_t po32_pattern_clear_step(po32_pattern_packet_t *pattern, uint8_t st
   for (uint8_t lane = 0u; lane < PO32_PATTERN_LANE_COUNT; ++lane) {
     po32_pattern_zero_slot(pattern, step_index, lane);
   }
-  pattern->accent_bits =
-      (uint16_t)(pattern->accent_bits & (uint16_t) ~(uint16_t)(1u << step_index));
+  pattern->accent_bits = (uint16_t)(pattern->accent_bits & (uint16_t)~(uint16_t)(1u << step_index));
   return PO32_OK;
 }
 

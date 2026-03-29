@@ -25,29 +25,29 @@ component_management:
     - component_id: public_surface
       name: public surface
       paths:
-        - src/
-        - examples/
+        - core/src/
+        - core/examples/
     - component_id: transfer_core
       name: transfer core
       paths:
-        - src/po32.c
+        - core/src/po32.c
     - component_id: patch_import
       name: patch importer
       paths:
-        - src/po32_patch_import.c
+        - core/src/po32_patch_import.c
     - component_id: synth
       name: synth
       paths:
-        - src/po32_synth.c
+        - core/src/po32_synth.c
     - component_id: lookup_tables
       name: lookup tables
       paths:
-        - src/po32_lut.h
-        - src/po32_synth_tables.h
+        - core/src/po32_lut.h
+        - core/src/po32_synth_tables.h
     - component_id: examples
       name: examples
       paths:
-        - examples/
+        - core/examples/
 
 github_checks:
   annotations: false
