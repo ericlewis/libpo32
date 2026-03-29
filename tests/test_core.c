@@ -251,6 +251,15 @@ static void test_patch_parse_mtdrum_text_edge_cases(void) {
                                              "NVel: 44.393810629844666%\n"
                                              "ModVel: 0.0%\n";
   static const char invalid_wave_text[] = "OscWave: Square\n";
+  static const char invalid_attack_text[] = "OscAtk: nope\n";
+  static const char invalid_decay_text[] = "OscDcy: 0 ms\n";
+  static const char invalid_mod_mode_text[] = "ModMode: Chaos\n";
+  static const char invalid_mod_rate_decay_text[] = "ModMode: Decay\n"
+                                                    "ModRate: 0 ms\n";
+  static const char invalid_mod_rate_sine_text[] = "ModMode: Sine\n"
+                                                   "ModRate: nope\n";
+  static const char invalid_mod_rate_noise_text[] = "ModMode: Noise\n"
+                                                    "ModRate: -1 Hz\n";
   static const char invalid_rate_text[] = "OscFreq: nope\n";
   static const char no_fields_text[] = "Name: Example\n";
   static const char exp_number_text[] = "OscFreq: 2.0e3 Hz\n";
@@ -377,6 +386,42 @@ static void test_patch_parse_mtdrum_text_edge_cases(void) {
   status = po32_patch_parse_mtdrum_text(invalid_wave_text, sizeof(invalid_wave_text) - 1u, &params);
   assert(status == PO32_ERR_PARSE);
   assert(params.OscWave == 0.0f);
+
+  memset(&params, 0xFF, sizeof(params));
+  status =
+      po32_patch_parse_mtdrum_text(invalid_attack_text, sizeof(invalid_attack_text) - 1u, &params);
+  assert(status == PO32_ERR_PARSE);
+  assert(params.OscAtk == 0.0f);
+
+  memset(&params, 0xFF, sizeof(params));
+  status =
+      po32_patch_parse_mtdrum_text(invalid_decay_text, sizeof(invalid_decay_text) - 1u, &params);
+  assert(status == PO32_ERR_PARSE);
+  assert(params.OscDcy == 0.0f);
+
+  memset(&params, 0xFF, sizeof(params));
+  status = po32_patch_parse_mtdrum_text(invalid_mod_mode_text, sizeof(invalid_mod_mode_text) - 1u,
+                                        &params);
+  assert(status == PO32_ERR_PARSE);
+  assert(params.ModMode == 0.0f);
+
+  memset(&params, 0xFF, sizeof(params));
+  status = po32_patch_parse_mtdrum_text(invalid_mod_rate_decay_text,
+                                        sizeof(invalid_mod_rate_decay_text) - 1u, &params);
+  assert(status == PO32_ERR_PARSE);
+  assert(params.ModRate == 0.0f);
+
+  memset(&params, 0xFF, sizeof(params));
+  status = po32_patch_parse_mtdrum_text(invalid_mod_rate_sine_text,
+                                        sizeof(invalid_mod_rate_sine_text) - 1u, &params);
+  assert(status == PO32_ERR_PARSE);
+  assert(params.ModRate == 0.0f);
+
+  memset(&params, 0xFF, sizeof(params));
+  status = po32_patch_parse_mtdrum_text(invalid_mod_rate_noise_text,
+                                        sizeof(invalid_mod_rate_noise_text) - 1u, &params);
+  assert(status == PO32_ERR_PARSE);
+  assert(params.ModRate == 0.0f);
 
   memset(&params, 0xFF, sizeof(params));
   status = po32_patch_parse_mtdrum_text(invalid_rate_text, sizeof(invalid_rate_text) - 1u, &params);
