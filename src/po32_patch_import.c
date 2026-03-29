@@ -47,7 +47,11 @@ static float po32_import_strtof(const char *s, char **endptr) {
   int got_digit = 0;
   int in_frac = 0;
   int exp_sign = 1;
-  int exponent = 0;
+  unsigned exponent = 0u;
+
+#define PO32_IMPORT_EXPONENT_SAT       100u
+#define PO32_IMPORT_POSITIVE_EXP_LIMIT 38u
+#define PO32_IMPORT_NEGATIVE_EXP_LIMIT 45u
 
   if (*p == '-') {
     sign = -1;
@@ -74,6 +78,7 @@ static float po32_import_strtof(const char *s, char **endptr) {
   result = (float)sign * (result + frac);
 
   if (got_digit && (*p == 'e' || *p == 'E')) {
+    int exp_has_digit = 0;
     ++p;
     if (*p == '-') {
       exp_sign = -1;
@@ -82,15 +87,28 @@ static float po32_import_strtof(const char *s, char **endptr) {
       ++p;
     }
     while (*p >= '0' && *p <= '9') {
-      exponent = exponent * 10 + (*p - '0');
+      unsigned digit = (unsigned)(*p - '0');
+      exp_has_digit = 1;
+      if (exponent < PO32_IMPORT_EXPONENT_SAT) {
+        unsigned next = exponent * 10u + digit;
+        exponent = next > PO32_IMPORT_EXPONENT_SAT ? PO32_IMPORT_EXPONENT_SAT : next;
+      }
       ++p;
     }
-    {
-      float mul = 1.0f;
-      int i;
-      for (i = 0; i < exponent; ++i)
-        mul *= 10.0f;
-      result = exp_sign > 0 ? result * mul : result / mul;
+    if (exp_has_digit) {
+      if (exp_sign > 0) {
+        if (exponent > PO32_IMPORT_POSITIVE_EXP_LIMIT) {
+          result = result < 0.0f ? -3.4028235e+38f : 3.4028235e+38f;
+        } else {
+          result *= po32_lut_pow10f((float)exponent);
+        }
+      } else {
+        if (exponent > PO32_IMPORT_NEGATIVE_EXP_LIMIT) {
+          result = 0.0f;
+        } else {
+          result /= po32_lut_pow10f((float)exponent);
+        }
+      }
     }
   }
 
@@ -98,6 +116,10 @@ static float po32_import_strtof(const char *s, char **endptr) {
     *endptr = got_digit ? (char *)p : (char *)s;
   (void)in_frac;
   return result;
+
+#undef PO32_IMPORT_EXPONENT_SAT
+#undef PO32_IMPORT_POSITIVE_EXP_LIMIT
+#undef PO32_IMPORT_NEGATIVE_EXP_LIMIT
 }
 
 typedef struct po32_span {
