@@ -394,6 +394,57 @@ static void test_patch_parse_mtdrum_text_edge_cases(void) {
   assert(status == PO32_ERR_INVALID_ARG);
 }
 
+static void test_patch_parse_mtdrum_text_trim_and_clamp(void) {
+  static const char text[] = " \tOscWave: \"  Triangle  \" ,\r\n"
+                             "OscFreq: \"200000 Hz\" ,\r\n"
+                             "OscAtk: \"0 ms\" ,\r\n"
+                             "OscDcy: \"20000 ms\" ,\r\n"
+                             "ModMode: \"Decay\" ,\r\n"
+                             "ModRate: \"INF ms\" ,\r\n"
+                             "ModAmt: \"200.0 sm\" ,\r\n"
+                             "NFilMod: \"BP\" ,\r\n"
+                             "NFilFrq: \"500000 Hz\" ,\r\n"
+                             "NFilQ: \"1000000\" ,\r\n"
+                             "NEnvMod: \"Linear\" ,\r\n"
+                             "NEnvAtk: \"66.6666666667 ms\" ,\r\n"
+                             "NEnvDcy: \"66666.6666667 ms\" ,\r\n"
+                             "Mix: \"-20.0 / 120.0\" ,\r\n"
+                             "DistAmt: \"150.0\" ,\r\n"
+                             "EQFreq: \"500000 Hz\" ,\r\n"
+                             "EQGain: \"80.0 dB\" ,\r\n"
+                             "Level: \"-INF  dB\" ,\r\n"
+                             "OscVel: \"250.0%\" ,\r\n"
+                             "NVel: \"250.0%\" ,\r\n"
+                             "ModVel: \"250.0%\" ,\r\n";
+  po32_patch_params_t params;
+  po32_status_t status;
+
+  memset(&params, 0, sizeof(params));
+  status = po32_patch_parse_mtdrum_text(text, sizeof(text) - 1u, &params);
+  assert(status == PO32_OK);
+  assert(fabsf(params.OscWave - 0.5f) < 0.0001f);
+  assert(fabsf(params.OscFreq - 1.0f) < 0.0001f);
+  assert(fabsf(params.OscAtk - 0.0f) < 0.0001f);
+  assert(fabsf(params.OscDcy - 1.0f) < 0.0001f);
+  assert(fabsf(params.ModMode - 0.0f) < 0.0001f);
+  assert(fabsf(params.ModRate - 0.0f) < 0.0001f);
+  assert(fabsf(params.ModAmt - 1.0f) < 0.0001f);
+  assert(fabsf(params.NFilMod - 0.5f) < 0.0001f);
+  assert(fabsf(params.NFilFrq - 1.0f) < 0.0001f);
+  assert(fabsf(params.NFilQ - 1.0f) < 0.0001f);
+  assert(fabsf(params.NEnvMod - 0.5f) < 0.0001f);
+  assert(params.NEnvAtk > 0.0f);
+  assert(fabsf(params.NEnvDcy - 1.0f) < 0.0001f);
+  assert(fabsf(params.Mix - 1.0f) < 0.0001f);
+  assert(fabsf(params.DistAmt - 1.0f) < 0.0001f);
+  assert(fabsf(params.EQFreq - 1.0f) < 0.0001f);
+  assert(fabsf(params.EQGain - 1.0f) < 0.0001f);
+  assert(fabsf(params.Level - 0.0f) < 0.0001f);
+  assert(fabsf(params.OscVel - 1.0f) < 0.0001f);
+  assert(fabsf(params.NVel - 1.0f) < 0.0001f);
+  assert(fabsf(params.ModVel - 1.0f) < 0.0001f);
+}
+
 static void test_builder_guards(void) {
   po32_builder_t builder;
   uint8_t tiny_buffer[32];
@@ -1094,6 +1145,7 @@ int main(void) {
   test_patch_encode_decode();
   test_patch_parse_mtdrum_text();
   test_patch_parse_mtdrum_text_edge_cases();
+  test_patch_parse_mtdrum_text_trim_and_clamp();
   test_builder_guards();
   test_null_payload_rejected();
   test_frame_build_and_parse();
