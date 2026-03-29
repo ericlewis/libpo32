@@ -359,21 +359,24 @@ static void test_packet_dump_helpers(void) {
   fclose(pattern_summary);
 
   {
-    FILE *fp = fopen("decode_capture_dump/packet_01_pattern/packet.txt", "rb");
+    FILE *fp = fopen("decode_capture_dump/packet_04_pattern/packet.txt", "rb");
     FILE *summary = fopen("decode_capture_dump/pattern_summary.txt", "rb");
     FILE *patch_info = fopen("decode_capture_dump/packet_01_patch/packet.txt", "rb");
     FILE *knob_info = fopen("decode_capture_dump/packet_02_knob/packet.txt", "rb");
     FILE *reset_info = fopen("decode_capture_dump/packet_03_reset/packet.txt", "rb");
+    FILE *state_info = fopen("decode_capture_dump/packet_05_state/packet.txt", "rb");
     assert(fp != NULL);
     assert(summary != NULL);
     assert(patch_info != NULL);
     assert(knob_info != NULL);
     assert(reset_info != NULL);
+    assert(state_info != NULL);
     fclose(fp);
     fclose(summary);
     fclose(patch_info);
     fclose(knob_info);
     fclose(reset_info);
+    fclose(state_info);
   }
 
   ctx.output_dir = "decode_capture_file";
