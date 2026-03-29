@@ -1,7 +1,7 @@
 # libpo32
 
 [![Tests](https://github.com/ericlewis/libpo32/actions/workflows/tests.yml/badge.svg?branch=main&event=push)](https://github.com/ericlewis/libpo32/actions/workflows/tests.yml)
-[![Codecov](https://codecov.io/gh/ericlewis/libpo32/graph/badge.svg?component=public_surface)](https://codecov.io/gh/ericlewis/libpo32)
+[![Codecov](https://codecov.io/gh/ericlewis/libpo32/branch/main/graph/badge.svg)](https://codecov.io/gh/ericlewis/libpo32)
 [![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fericlewis%2Flibpo32.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2Fericlewis%2Flibpo32?ref=badge_shield)
 
 A small C99 library for Teenage Engineering PO-32 acoustic data transfers
