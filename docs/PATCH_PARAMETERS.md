@@ -5,6 +5,10 @@ Each of the 8 instruments is a two-layer drum synthesizer: a tonal
 (**Left** and **Right**) that serve as morph endpoints. The PO-32 morph
 knob interpolates linearly between them.
 
+The `.mtdrum` importer accepts full quoted `MicrotonicDrumPatchV3` exports
+and ignores non-PO-32 metadata fields such as `Name`, `Path`, `NStereo`,
+`Pan`, `Output`, and `Choke`.
+
 ## Transfer Encoding
 
 | Field | Meaning |
@@ -43,7 +47,7 @@ knob interpolates linearly between them.
 | Name | Role | Mapping / Notes |
 | --- | --- | --- |
 | `ModMode` | Oscillator pitch modulation source | Decay = pitch sweep, Sine = vibrato / FM wobble, Noise = random pitch jitter |
-| `ModRate` | Modulation speed or frequency | Decay mode: pitch-mod decay time in ms, approximately `pow(10, 3x-2)` seconds, with `param=0` displayed as `inf ms` on-device<br/>Sine mode: LFO frequency in Hz, approximately `2000 * x`<br/>Noise mode: noise filter cutoff in Hz, `20 * pow(1000, x)` |
+| `ModRate` | Modulation speed or frequency | Decay mode: pitch-mod decay time in ms, approximately `pow(10, 3x-2)` seconds, with `param=0` often exported by Microtonic as `inf ms`<br/>Sine mode: LFO frequency in Hz, approximately `2000 * x`<br/>Noise mode: noise filter cutoff in Hz, `20 * pow(1000, x)` |
 | `ModAmt` | Pitch modulation depth | `semitones = (param - 0.5) * 192`<br/>Range `-96` to `+96` semitones |
 
 ### Noise (7-12)
@@ -62,7 +66,7 @@ knob interpolates linearly between them.
 | `NFilMod` | Noise filter type | LP = dark brushed-snare style noise, BP = focused band noise, HP = bright hi-hat style hiss |
 | `NFilFrq` | Noise filter cutoff / center frequency | `Hz = 20 * pow(1000, x)`<br/>Low = dark rumble, high = bright sizzle |
 | `NFilQ` | Noise filter resonance | `Q = 0.1 * pow(10, 5x)`<br/>Range `0.1` to `10000`<br/>Low = broad natural noise, high = narrow metallic emphasis |
-| `NEnvMod` | Noise envelope shape | `Exp`: exponential attack/decay<br/>`Lin`: linear ramps with times scaled by `2/3`<br/>`Mod`: damped cosine tremolo with short-period audio-rate ring-mod behavior |
+| `NEnvMod` | Noise envelope shape | `Exp`: exponential attack/decay<br/>`Lin`: linear ramps with times scaled by `2/3` (Microtonic exports the displayed attack/decay values already scaled, so importers need to invert that display scaling)<br/>`Mod`: damped cosine tremolo with short-period audio-rate ring-mod behavior |
 | `NEnvAtk` | Noise attack time | Same curve as `OscAtk`<br/>Usually near `0` for percussive sounds |
 | `NEnvDcy` | Noise decay time | Same curve as `OscDcy`<br/>Short = closed hat, long = open hat or crash |
 
@@ -93,7 +97,7 @@ knob interpolates linearly between them.
 
 | Name | Role | Mapping / Notes |
 | --- | --- | --- |
-| `Level` | Final instrument output gain | `dB = 60x - 49 - 1/x`<br/>`x=0` = silence, `x≈0.836` = unity, `x=1` = `+10 dB` |
+| `Level` | Final instrument output gain | `dB = 60x - 49 - 1/x`<br/>`x=0` = silence, `x≈0.836` = unity, `x=1` = `+10 dB`<br/>Microtonic may export silence as `-inf dB` |
 | `OscVel` | Velocity sensitivity for oscillator level | `0%` = fixed hits, `100%` = normal dynamics, `200%` = exaggerated dynamics<br/>Stored as `val / 200` |
 | `NVel` | Velocity sensitivity for noise level | Lets softer hits keep noise while reducing tone independently of the oscillator |
 | `ModVel` | Velocity sensitivity for modulation depth | High values reduce sweep on soft hits and keep full sweep on hard hits |
