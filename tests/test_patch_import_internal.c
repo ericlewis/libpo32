@@ -50,6 +50,14 @@ static void test_import_strtof_edges(void) {
   value = po32_import_strtof("2.5e+", &endptr);
   assert(abs_diff(value, 2.5f) < 0.0001f);
   assert(*endptr == '\0');
+
+  value = po32_import_strtof("1e9999999999", &endptr);
+  assert(value > 1.0e30f);
+  assert(*endptr == '\0');
+
+  value = po32_import_strtof("1e-9999999999", &endptr);
+  assert(value == 0.0f);
+  assert(*endptr == '\0');
 }
 
 static void test_trim_and_match_helpers(void) {
