@@ -187,6 +187,69 @@ static void test_patch_parse_mtdrum_text_edge_cases(void) {
                                                  "NEnvDcy: 66.66666666666667 ms\n";
   static const char exp_decay_text[] = "NEnvMod: Exp\n"
                                        "NEnvDcy: 100.0 ms\n";
+  static const char preset_patch_sine_text[] = "OscWave: Saw\n"
+                                               "OscFreq: 20.0 Hz\n"
+                                               "OscAtk: 0.0 ms\n"
+                                               "OscDcy: 10.0 ms\n"
+                                               "ModMode: Sine\n"
+                                               "ModRate: 0 Hz\n"
+                                               "ModAmt: -48.0 sm\n"
+                                               "NFilMod: HP\n"
+                                               "NFilFrq: 20.0 Hz\n"
+                                               "NFilQ: 0.10000000149011612\n"
+                                               "NEnvMod: Mod\n"
+                                               "NEnvAtk: 0.0 ms\n"
+                                               "NEnvDcy: 10.0 ms\n"
+                                               "Mix: 0.0 / 100.0\n"
+                                               "DistAmt: 100.0\n"
+                                               "EQFreq: 20.0 Hz\n"
+                                               "EQGain: 40.0 dB\n"
+                                               "Level: -inf  dB\n"
+                                               "OscVel: 0.0%\n"
+                                               "NVel: 0.0%\n"
+                                               "ModVel: 0.0%\n";
+  static const char preset_patch_triangle_text[] = "OscWave: Triangle\n"
+                                                   "OscFreq: 94.63267334392435 Hz\n"
+                                                   "OscAtk: 0.0 ms\n"
+                                                   "OscDcy: 36.96003796425987 ms\n"
+                                                   "ModMode: Decay\n"
+                                                   "ModRate: 582.2017766078927 ms\n"
+                                                   "ModAmt: 10.274805130757159 sm\n"
+                                                   "NFilMod: LP\n"
+                                                   "NFilFrq: 14022.21901001161 Hz\n"
+                                                   "NFilQ: 0.10000000149011612\n"
+                                                   "NEnvMod: Exp\n"
+                                                   "NEnvAtk: 0.0 ms\n"
+                                                   "NEnvDcy: 25.44035842163315 ms\n"
+                                                   "Mix: 63.15789222717285 / 36.84210777282715\n"
+                                                   "DistAmt: 17.91369318962097\n"
+                                                   "EQFreq: 502.3622970882911 Hz\n"
+                                                   "EQGain: -12.956383228302002 dB\n"
+                                                   "Level: 3.557599927521694 dB\n"
+                                                   "OscVel: 47.89142608642578%\n"
+                                                   "NVel: 81.46942257881165%\n"
+                                                   "ModVel: 0.0%\n";
+  static const char preset_patch_bp_text[] = "OscWave: Sine\n"
+                                             "OscFreq: 2446.3949656923514 Hz\n"
+                                             "OscAtk: 0.0 ms\n"
+                                             "OscDcy: 20.534844073083867 ms\n"
+                                             "ModMode: Decay\n"
+                                             "ModRate: 501.03115340358914 ms\n"
+                                             "ModAmt: 0.0 sm\n"
+                                             "NFilMod: BP\n"
+                                             "NFilFrq: 2446.3929511637457 Hz\n"
+                                             "NFilQ: 391.99535237809636\n"
+                                             "NEnvMod: Exp\n"
+                                             "NEnvAtk: 9.102097908100871 ms\n"
+                                             "NEnvDcy: 68.87812719131743 ms\n"
+                                             "Mix: 80.0001859664917 / 19.9998140335083\n"
+                                             "DistAmt: 0.0\n"
+                                             "EQFreq: 1549.145116428937 Hz\n"
+                                             "EQGain: 26.66642189025879 dB\n"
+                                             "Level: 3.557599927521694 dB\n"
+                                             "OscVel: 47.732871770858765%\n"
+                                             "NVel: 44.393810629844666%\n"
+                                             "ModVel: 0.0%\n";
   static const char invalid_wave_text[] = "OscWave: Square\n";
   static const char invalid_rate_text[] = "OscFreq: nope\n";
   static const char no_fields_text[] = "Name: Example\n";
@@ -259,6 +322,51 @@ static void test_patch_parse_mtdrum_text_edge_cases(void) {
 
     assert(fabsf(linear_params.NEnvDcy - exp_params.NEnvDcy) < 0.0001f);
   }
+
+  memset(&params, 0, sizeof(params));
+  status = po32_patch_parse_mtdrum_text(preset_patch_sine_text, sizeof(preset_patch_sine_text) - 1u,
+                                        &params);
+  assert(status == PO32_OK);
+  assert(fabsf(params.OscWave - 1.0f) < 0.0001f);
+  assert(fabsf(params.ModMode - 0.5f) < 0.0001f);
+  assert(fabsf(params.ModRate - 0.0f) < 0.0001f);
+  assert(fabsf(params.ModAmt - 0.25f) < 0.0001f);
+  assert(fabsf(params.NFilMod - 1.0f) < 0.0001f);
+  assert(fabsf(params.NEnvMod - 1.0f) < 0.0001f);
+  assert(fabsf(params.Mix - 1.0f) < 0.0001f);
+  assert(fabsf(params.DistAmt - 1.0f) < 0.0001f);
+  assert(fabsf(params.EQGain - 1.0f) < 0.0001f);
+  assert(params.Level == 0.0f);
+
+  memset(&params, 0, sizeof(params));
+  status = po32_patch_parse_mtdrum_text(preset_patch_triangle_text,
+                                        sizeof(preset_patch_triangle_text) - 1u, &params);
+  assert(status == PO32_OK);
+  assert(fabsf(params.OscWave - 0.5f) < 0.0001f);
+  assert(fabsf(params.ModMode - 0.0f) < 0.0001f);
+  assert(params.ModRate > 0.5f);
+  assert(params.ModAmt > 0.5f);
+  assert(fabsf(params.NFilMod - 0.0f) < 0.0001f);
+  assert(fabsf(params.NEnvMod - 0.0f) < 0.0001f);
+  assert(params.DistAmt > 0.1f);
+  assert(params.EQFreq > 0.4f);
+  assert(params.EQGain < 0.5f);
+  assert(params.Level > 0.8f);
+  assert(params.OscVel > 0.2f);
+  assert(params.NVel > 0.4f);
+
+  memset(&params, 0, sizeof(params));
+  status = po32_patch_parse_mtdrum_text(preset_patch_bp_text, sizeof(preset_patch_bp_text) - 1u,
+                                        &params);
+  assert(status == PO32_OK);
+  assert(fabsf(params.OscWave - 0.0f) < 0.0001f);
+  assert(fabsf(params.NFilMod - 0.5f) < 0.0001f);
+  assert(params.NFilQ > 0.6f);
+  assert(params.NEnvAtk > 0.0f);
+  assert(params.EQGain > 0.8f);
+  assert(params.Level > 0.8f);
+  assert(params.OscVel > 0.2f);
+  assert(params.NVel > 0.2f);
 
   memset(&params, 0, sizeof(params));
   status = po32_patch_parse_mtdrum_text(exp_number_text, sizeof(exp_number_text) - 1u, &params);

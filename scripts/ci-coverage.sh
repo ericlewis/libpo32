@@ -7,6 +7,7 @@ report_dir=${1:-"$root_dir/coverage"}
 
 : "${CC:=gcc}"
 
+rm -rf "$build_dir"
 mkdir -p "$report_dir"
 
 cmake -S "$root_dir" -B "$build_dir" \
