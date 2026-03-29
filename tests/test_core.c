@@ -511,6 +511,162 @@ static void test_patch_parse_mtdrum_text_trim_and_clamp(void) {
   assert(fabsf(params.ModVel - 1.0f) < 0.0001f);
 }
 
+static void test_tag_names_all_variants(void) {
+  assert(strcmp(po32_tag_name(PO32_TAG_PATCH), "patch") == 0);
+  assert(strcmp(po32_tag_name(PO32_TAG_RESET), "reset") == 0);
+  assert(strcmp(po32_tag_name(PO32_TAG_PATTERN), "pattern") == 0);
+  assert(strcmp(po32_tag_name(PO32_TAG_ERASE), "erase") == 0);
+  assert(strcmp(po32_tag_name(PO32_TAG_STATE), "state") == 0);
+  assert(strcmp(po32_tag_name(PO32_TAG_KNOB), "knob") == 0);
+  assert(strcmp(po32_tag_name(0xFFFFu), "unknown") == 0);
+}
+
+static void test_encode_decode_patch_guards(void) {
+  po32_patch_params_t params;
+  uint8_t buf[(PO32_PARAM_COUNT * 2u)];
+  size_t out_len = 0u;
+  po32_status_t status;
+
+  memset(&params, 0, sizeof(params));
+
+  status = po32_encode_patch(&params, NULL, sizeof(buf), &out_len);
+  assert(status == PO32_ERR_INVALID_ARG);
+  status = po32_encode_patch(&params, buf, sizeof(buf), NULL);
+  assert(status == PO32_ERR_INVALID_ARG);
+  status = po32_encode_patch(&params, buf, sizeof(buf), &out_len);
+  assert(status == PO32_OK);
+  assert(out_len == (PO32_PARAM_COUNT * 2u));
+
+  status = po32_decode_patch(buf, sizeof(buf), NULL);
+  assert(status == PO32_ERR_INVALID_ARG);
+  status = po32_decode_patch(buf, sizeof(buf), &params);
+  assert(status == PO32_OK);
+}
+
+static void test_import_field_parse_errors(void) {
+  po32_patch_params_t params;
+  po32_status_t status;
+
+  /* Invalid float for ModAmt */
+  static const char modamt_bad[] = "ModAmt: nope\n";
+  memset(&params, 0xFF, sizeof(params));
+  status = po32_patch_parse_mtdrum_text(modamt_bad, sizeof(modamt_bad) - 1u, &params);
+  assert(status == PO32_ERR_PARSE);
+
+  /* Invalid NFilMod (not LP/BP/HP) */
+  static const char nfilmod_bad[] = "NFilMod: XX\n";
+  memset(&params, 0xFF, sizeof(params));
+  status = po32_patch_parse_mtdrum_text(nfilmod_bad, sizeof(nfilmod_bad) - 1u, &params);
+  assert(status == PO32_ERR_PARSE);
+
+  /* NFilFrq negative */
+  static const char nfilfrq_bad[] = "NFilFrq: -100 Hz\n";
+  memset(&params, 0xFF, sizeof(params));
+  status = po32_patch_parse_mtdrum_text(nfilfrq_bad, sizeof(nfilfrq_bad) - 1u, &params);
+  assert(status == PO32_ERR_PARSE);
+
+  /* NFilFrq unparseable */
+  static const char nfilfrq_bad2[] = "NFilFrq: nope\n";
+  memset(&params, 0xFF, sizeof(params));
+  status = po32_patch_parse_mtdrum_text(nfilfrq_bad2, sizeof(nfilfrq_bad2) - 1u, &params);
+  assert(status == PO32_ERR_PARSE);
+
+  /* NFilQ negative */
+  static const char nfilq_bad[] = "NFilQ: -10\n";
+  memset(&params, 0xFF, sizeof(params));
+  status = po32_patch_parse_mtdrum_text(nfilq_bad, sizeof(nfilq_bad) - 1u, &params);
+  assert(status == PO32_ERR_PARSE);
+
+  /* NEnvMod invalid */
+  static const char nenvmod_bad[] = "NEnvMod: Chaos\n";
+  memset(&params, 0xFF, sizeof(params));
+  status = po32_patch_parse_mtdrum_text(nenvmod_bad, sizeof(nenvmod_bad) - 1u, &params);
+  assert(status == PO32_ERR_PARSE);
+
+  /* NEnvAtk unparseable */
+  static const char nenvatk_bad[] = "NEnvAtk: nope\n";
+  memset(&params, 0xFF, sizeof(params));
+  status = po32_patch_parse_mtdrum_text(nenvatk_bad, sizeof(nenvatk_bad) - 1u, &params);
+  assert(status == PO32_ERR_PARSE);
+
+  /* NEnvDcy negative */
+  static const char nenvdcy_bad[] = "NEnvDcy: -100 ms\n";
+  memset(&params, 0xFF, sizeof(params));
+  status = po32_patch_parse_mtdrum_text(nenvdcy_bad, sizeof(nenvdcy_bad) - 1u, &params);
+  assert(status == PO32_ERR_PARSE);
+
+  /* NEnvDcy unparseable */
+  static const char nenvdcy_bad2[] = "NEnvDcy: nope\n";
+  memset(&params, 0xFF, sizeof(params));
+  status = po32_patch_parse_mtdrum_text(nenvdcy_bad2, sizeof(nenvdcy_bad2) - 1u, &params);
+  assert(status == PO32_ERR_PARSE);
+
+  /* Mix unparseable */
+  static const char mix_bad[] = "Mix: nope\n";
+  memset(&params, 0xFF, sizeof(params));
+  status = po32_patch_parse_mtdrum_text(mix_bad, sizeof(mix_bad) - 1u, &params);
+  assert(status == PO32_ERR_PARSE);
+
+  /* DistAmt unparseable */
+  static const char dist_bad[] = "DistAmt: nope\n";
+  memset(&params, 0xFF, sizeof(params));
+  status = po32_patch_parse_mtdrum_text(dist_bad, sizeof(dist_bad) - 1u, &params);
+  assert(status == PO32_ERR_PARSE);
+
+  /* EQFreq negative */
+  static const char eqfreq_bad[] = "EQFreq: -100 Hz\n";
+  memset(&params, 0xFF, sizeof(params));
+  status = po32_patch_parse_mtdrum_text(eqfreq_bad, sizeof(eqfreq_bad) - 1u, &params);
+  assert(status == PO32_ERR_PARSE);
+
+  /* EQGain unparseable */
+  static const char eqgain_bad[] = "EQGain: nope\n";
+  memset(&params, 0xFF, sizeof(params));
+  status = po32_patch_parse_mtdrum_text(eqgain_bad, sizeof(eqgain_bad) - 1u, &params);
+  assert(status == PO32_ERR_PARSE);
+
+  /* Level unparseable (not -inf and not a number) */
+  static const char level_bad[] = "Level: nope\n";
+  memset(&params, 0xFF, sizeof(params));
+  status = po32_patch_parse_mtdrum_text(level_bad, sizeof(level_bad) - 1u, &params);
+  assert(status == PO32_ERR_PARSE);
+
+  /* OscVel unparseable */
+  static const char oscvel_bad[] = "OscVel: nope\n";
+  memset(&params, 0xFF, sizeof(params));
+  status = po32_patch_parse_mtdrum_text(oscvel_bad, sizeof(oscvel_bad) - 1u, &params);
+  assert(status == PO32_ERR_PARSE);
+
+  /* NVel unparseable */
+  static const char nvel_bad[] = "NVel: nope\n";
+  memset(&params, 0xFF, sizeof(params));
+  status = po32_patch_parse_mtdrum_text(nvel_bad, sizeof(nvel_bad) - 1u, &params);
+  assert(status == PO32_ERR_PARSE);
+
+  /* ModVel unparseable */
+  static const char modvel_bad[] = "ModVel: nope\n";
+  memset(&params, 0xFF, sizeof(params));
+  status = po32_patch_parse_mtdrum_text(modvel_bad, sizeof(modvel_bad) - 1u, &params);
+  assert(status == PO32_ERR_PARSE);
+}
+
+static void test_patch_decode_invalid_side(void) {
+  uint8_t bad_payload[PO32_PATCH_PAYLOAD_BYTES];
+  po32_patch_packet_t pkt;
+  po32_status_t status;
+
+  /* Valid length but invalid side prefix (upper nibble 0x00, not 0x10 or 0x20) */
+  memset(bad_payload, 0u, sizeof(bad_payload));
+  bad_payload[0] = 0x00u;
+  status = po32_packet_decode(PO32_TAG_PATCH, bad_payload, sizeof(bad_payload), &pkt);
+  assert(status == PO32_ERR_FRAME);
+
+  /* Also invalid: upper nibble 0x30 */
+  bad_payload[0] = 0x30u;
+  status = po32_packet_decode(PO32_TAG_PATCH, bad_payload, sizeof(bad_payload), &pkt);
+  assert(status == PO32_ERR_FRAME);
+}
+
 static void test_builder_guards(void) {
   po32_builder_t builder;
   uint8_t tiny_buffer[32];
@@ -1212,6 +1368,10 @@ int main(void) {
   test_patch_parse_mtdrum_text();
   test_patch_parse_mtdrum_text_edge_cases();
   test_patch_parse_mtdrum_text_trim_and_clamp();
+  test_tag_names_all_variants();
+  test_encode_decode_patch_guards();
+  test_import_field_parse_errors();
+  test_patch_decode_invalid_side();
   test_builder_guards();
   test_null_payload_rejected();
   test_frame_build_and_parse();

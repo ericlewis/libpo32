@@ -338,6 +338,15 @@ static void test_public_guard_paths(void) {
   status = po32_patch_packet_decode(patch_bytes, sizeof(patch_bytes), &patch_packet);
   assert(status == PO32_ERR_FRAME);
 
+  /* Invalid side prefix (upper nibble not 0x10 or 0x20) with valid length */
+  {
+    uint8_t bad_side[PO32_PATCH_PAYLOAD_BYTES];
+    memset(bad_side, 0u, sizeof(bad_side));
+    bad_side[0] = 0x00u;
+    status = po32_patch_packet_decode(bad_side, sizeof(bad_side), &patch_packet);
+    assert(status == PO32_ERR_FRAME);
+  }
+
   knob_packet.instrument = 1u;
   knob_packet.kind = (po32_knob_kind_t)99;
   knob_packet.value = 42u;

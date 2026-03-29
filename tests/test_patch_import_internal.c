@@ -88,6 +88,173 @@ static void test_trim_and_match_helpers(void) {
   assert(status == PO32_ERR_INVALID_ARG);
 }
 
+static void test_strtof_overflow_underflow(void) {
+  char *endptr = NULL;
+  float value;
+
+  /* positive exponent > 38 but < saturation → clamps to FLT_MAX */
+  value = po32_import_strtof("1.5e+39", &endptr);
+  assert(value >= 3.4028235e+38f);
+  assert(*endptr == '\0');
+
+  value = po32_import_strtof("-1.5e+39", &endptr);
+  assert(value <= -3.4028235e+38f);
+  assert(*endptr == '\0');
+
+  /* negative exponent > 45 but < saturation → underflows to 0 */
+  value = po32_import_strtof("1.5e-46", &endptr);
+  assert(value == 0.0f);
+  assert(*endptr == '\0');
+}
+
+static void test_starts_with_nocase_uppercase_literal(void) {
+  int result;
+
+  /* value shorter than literal */
+  result = po32_patch_import_starts_with_nocase(span_from_cstr("in"), "INF");
+  assert(result == 0);
+
+  /* value matches with uppercase literal bytes → lowercase conversion path */
+  result = po32_patch_import_starts_with_nocase(span_from_cstr("INF ms"), "INF");
+  assert(result == 1);
+}
+
+static void test_contains_edge_cases(void) {
+  int result;
+
+  /* literal longer than value */
+  result = po32_patch_import_contains(span_from_cstr("ab"), "abcdef");
+  assert(result == 0);
+
+  /* empty literal */
+  result = po32_patch_import_contains(span_from_cstr("test"), "");
+  assert(result == 0);
+}
+
+static void test_parse_leading_float_non_number(void) {
+  float parsed = 99.0f;
+  po32_status_t status;
+
+  /* completely non-numeric input */
+  status = po32_patch_import_parse_leading_float(span_from_cstr("abc"), &parsed);
+  assert(status == PO32_ERR_PARSE);
+}
+
+static void test_parse_line_field_errors(void) {
+  int mod_mode_hint = 0;
+  int nenv_mode_hint = 0;
+  int recognized_fields = 0;
+  po32_patch_params_t params;
+  po32_status_t status;
+
+  po32_patch_params_zero(&params);
+
+  /* ModAmt unparseable */
+  recognized_fields = 0;
+  status =
+      po32_patch_import_parse_line(span_from_cstr("ModAmt"), span_from_cstr("nope"), &mod_mode_hint,
+                                   &nenv_mode_hint, &recognized_fields, &params);
+  assert(status == PO32_ERR_PARSE);
+
+  /* NFilMod invalid */
+  recognized_fields = 0;
+  status =
+      po32_patch_import_parse_line(span_from_cstr("NFilMod"), span_from_cstr("XX"), &mod_mode_hint,
+                                   &nenv_mode_hint, &recognized_fields, &params);
+  assert(status == PO32_ERR_PARSE);
+
+  /* NFilFrq negative */
+  recognized_fields = 0;
+  status =
+      po32_patch_import_parse_line(span_from_cstr("NFilFrq"), span_from_cstr("-100 Hz"),
+                                   &mod_mode_hint, &nenv_mode_hint, &recognized_fields, &params);
+  assert(status == PO32_ERR_PARSE);
+
+  /* NFilQ negative */
+  recognized_fields = 0;
+  status =
+      po32_patch_import_parse_line(span_from_cstr("NFilQ"), span_from_cstr("-10"), &mod_mode_hint,
+                                   &nenv_mode_hint, &recognized_fields, &params);
+  assert(status == PO32_ERR_PARSE);
+
+  /* NEnvMod invalid */
+  recognized_fields = 0;
+  status =
+      po32_patch_import_parse_line(span_from_cstr("NEnvMod"), span_from_cstr("Chaos"),
+                                   &mod_mode_hint, &nenv_mode_hint, &recognized_fields, &params);
+  assert(status == PO32_ERR_PARSE);
+
+  /* NEnvAtk unparseable */
+  recognized_fields = 0;
+  status =
+      po32_patch_import_parse_line(span_from_cstr("NEnvAtk"), span_from_cstr("nope"),
+                                   &mod_mode_hint, &nenv_mode_hint, &recognized_fields, &params);
+  assert(status == PO32_ERR_PARSE);
+
+  /* NEnvDcy negative */
+  recognized_fields = 0;
+  status =
+      po32_patch_import_parse_line(span_from_cstr("NEnvDcy"), span_from_cstr("-100 ms"),
+                                   &mod_mode_hint, &nenv_mode_hint, &recognized_fields, &params);
+  assert(status == PO32_ERR_PARSE);
+
+  /* Mix unparseable */
+  recognized_fields = 0;
+  status =
+      po32_patch_import_parse_line(span_from_cstr("Mix"), span_from_cstr("nope"), &mod_mode_hint,
+                                   &nenv_mode_hint, &recognized_fields, &params);
+  assert(status == PO32_ERR_PARSE);
+
+  /* DistAmt unparseable */
+  recognized_fields = 0;
+  status =
+      po32_patch_import_parse_line(span_from_cstr("DistAmt"), span_from_cstr("nope"),
+                                   &mod_mode_hint, &nenv_mode_hint, &recognized_fields, &params);
+  assert(status == PO32_ERR_PARSE);
+
+  /* EQFreq negative */
+  recognized_fields = 0;
+  status =
+      po32_patch_import_parse_line(span_from_cstr("EQFreq"), span_from_cstr("-100 Hz"),
+                                   &mod_mode_hint, &nenv_mode_hint, &recognized_fields, &params);
+  assert(status == PO32_ERR_PARSE);
+
+  /* EQGain unparseable */
+  recognized_fields = 0;
+  status =
+      po32_patch_import_parse_line(span_from_cstr("EQGain"), span_from_cstr("nope"), &mod_mode_hint,
+                                   &nenv_mode_hint, &recognized_fields, &params);
+  assert(status == PO32_ERR_PARSE);
+
+  /* Level unparseable */
+  recognized_fields = 0;
+  status =
+      po32_patch_import_parse_line(span_from_cstr("Level"), span_from_cstr("nope"), &mod_mode_hint,
+                                   &nenv_mode_hint, &recognized_fields, &params);
+  assert(status == PO32_ERR_PARSE);
+
+  /* OscVel unparseable */
+  recognized_fields = 0;
+  status =
+      po32_patch_import_parse_line(span_from_cstr("OscVel"), span_from_cstr("nope"), &mod_mode_hint,
+                                   &nenv_mode_hint, &recognized_fields, &params);
+  assert(status == PO32_ERR_PARSE);
+
+  /* NVel unparseable */
+  recognized_fields = 0;
+  status =
+      po32_patch_import_parse_line(span_from_cstr("NVel"), span_from_cstr("nope"), &mod_mode_hint,
+                                   &nenv_mode_hint, &recognized_fields, &params);
+  assert(status == PO32_ERR_PARSE);
+
+  /* ModVel unparseable */
+  recognized_fields = 0;
+  status =
+      po32_patch_import_parse_line(span_from_cstr("ModVel"), span_from_cstr("nope"), &mod_mode_hint,
+                                   &nenv_mode_hint, &recognized_fields, &params);
+  assert(status == PO32_ERR_PARSE);
+}
+
 static void test_parse_line_invalid_args(void) {
   int mod_mode_hint = 0;
   int nenv_mode_hint = 0;
@@ -116,7 +283,12 @@ static void test_parse_line_invalid_args(void) {
 
 int main(void) {
   test_import_strtof_edges();
+  test_strtof_overflow_underflow();
   test_trim_and_match_helpers();
+  test_starts_with_nocase_uppercase_literal();
+  test_contains_edge_cases();
+  test_parse_leading_float_non_number();
+  test_parse_line_field_errors();
   test_parse_line_invalid_args();
   return 0;
 }

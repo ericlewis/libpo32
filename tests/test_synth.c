@@ -496,6 +496,97 @@ static void test_noise_envelopes_have_distinct_shapes(void) {
          lin_early_rms, mod_early_rms);
 }
 
+static void test_zero_envelope_paths(void) {
+  po32_synth_t synth;
+  po32_patch_params_t params;
+  size_t len = 0;
+
+  po32_synth_init(&synth, SR);
+  memset(&params, 0, sizeof(params));
+
+  /* osc_atk = 0 and osc_dcy = 0 → osc_env = 0 branch
+     With Mix = 0.0 (all osc), osc envelope zero means near-silence. */
+  params.OscWave = 0.0f;
+  params.OscFreq = 0.3f;
+  params.OscAtk = 0.0f;
+  params.OscDcy = 0.0f;
+  params.Mix = 0.0f;
+  params.Level = 0.836f;
+  assert(po32_synth_render(&synth, &params, 100, 0.1f, buf, MAX_SAMPLES, &len) == PO32_OK);
+  assert(len > 0);
+
+  /* simple noise env (NEnvMod <= 1/3) with zero atk and dcy → noise_env = 0 */
+  memset(&params, 0, sizeof(params));
+  params.Mix = 1.0f;
+  params.NFilFrq = 0.5f;
+  params.NEnvMod = 0.0f;
+  params.NEnvAtk = 0.0f;
+  params.NEnvDcy = 0.0f;
+  params.Level = 0.836f;
+  assert(po32_synth_render(&synth, &params, 100, 0.1f, buf, MAX_SAMPLES, &len) == PO32_OK);
+  /* Near silence — EQ filter transients may produce small residual */
+  assert(peak(buf, len) < 0.02f);
+
+  /* complex noise env (NEnvMod > 2/3) with dcy > 0 but mod_env_period = 0
+     (NEnvDcy very small → decay_time near 0 → mod_env_period stays 0) */
+  memset(&params, 0, sizeof(params));
+  params.Mix = 1.0f;
+  params.NFilFrq = 0.5f;
+  params.NEnvMod = 0.8f;
+  params.NEnvAtk = 0.01f;
+  params.NEnvDcy = 0.001f; /* very small decay → triggers fallback branch */
+  params.Level = 0.836f;
+  assert(po32_synth_render(&synth, &params, 100, 0.1f, buf, MAX_SAMPLES, &len) == PO32_OK);
+
+  /* complex noise env with zero dcy → noise_env = 0 branch */
+  memset(&params, 0, sizeof(params));
+  params.Mix = 1.0f;
+  params.NFilFrq = 0.5f;
+  params.NEnvMod = 0.8f;
+  params.NEnvAtk = 0.01f;
+  params.NEnvDcy = 0.0f;
+  params.Level = 0.836f;
+  assert(po32_synth_render(&synth, &params, 100, 0.1f, buf, MAX_SAMPLES, &len) == PO32_OK);
+
+  /* render with out_capacity smaller than computed n → clips to capacity */
+  memset(&params, 0, sizeof(params));
+  params.OscFreq = 0.3f;
+  params.OscDcy = 0.5f;
+  params.Level = 0.836f;
+  assert(po32_synth_render(&synth, &params, 100, 1.0f, buf, 8u, &len) == PO32_OK);
+  assert(len == 8u);
+
+  printf("  zero_envelope: all zero-env branches hit OK\n");
+}
+
+static void test_distort_low_drive(void) {
+  po32_synth_t synth;
+  po32_patch_params_t params;
+  size_t len_nodist = 0, len_dist = 0;
+
+  po32_synth_init(&synth, SR);
+  memset(&params, 0, sizeof(params));
+
+  params.OscWave = 0.0f;
+  params.OscFreq = 0.3f;
+  params.OscDcy = 0.5f;
+  params.Mix = 0.0f;
+  params.Level = 0.836f;
+
+  /* No distortion */
+  params.DistAmt = 0.0f;
+  assert(po32_synth_render(&synth, &params, 100, 0.2f, aux_a, MAX_SAMPLES, &len_nodist) == PO32_OK);
+
+  /* Very low distortion (drive < 1) */
+  params.DistAmt = 0.05f;
+  assert(po32_synth_render(&synth, &params, 100, 0.2f, aux_b, MAX_SAMPLES, &len_dist) == PO32_OK);
+
+  /* Should produce different output */
+  assert(rms_diff(aux_a, aux_b, len_nodist) > 0.0f || len_nodist != len_dist);
+
+  printf("  distort_low_drive: OK\n");
+}
+
 int main(void) {
   printf("po32 synth tests\n");
   printf("=================\n");
@@ -512,6 +603,8 @@ int main(void) {
   test_filter_modes_have_distinct_roughness();
   test_pitch_mod_modes_have_distinct_period_behavior();
   test_noise_envelopes_have_distinct_shapes();
+  test_zero_envelope_paths();
+  test_distort_low_drive();
 
   printf("=================\n");
   printf("all synth tests passed\n");

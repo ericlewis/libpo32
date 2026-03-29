@@ -108,6 +108,18 @@ static void test_public_helper_guards(void) {
     assert(status == PO32_OK);
   }
   assert(out_len == 8u);
+
+  /* synth_distort: low drive path (drive < 1.0) */
+  {
+    float d = synth_distort(0.5f, 0.05f);
+    assert(d != 0.5f); /* should apply soft clipping */
+  }
+
+  /* synth_distort: strong drive path (drive >= 1.0) */
+  {
+    float d = synth_distort(0.5f, 0.5f);
+    assert(d != 0.5f);
+  }
 }
 
 int main(void) {
