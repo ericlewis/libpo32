@@ -105,6 +105,10 @@ int main(void) {
 
   size_t modem_count = po32_render_sample_count(frame_len, sample_rate);
   float *modem = malloc(modem_count * sizeof(float));
+  if (modem == NULL) {
+    fputs("failed to allocate modem buffer\n", stderr);
+    return 1;
+  }
   po32_render_dpsk_f32(frame_buf, frame_len, sample_rate, modem, modem_count);
 
   printf("modem audio: %zu samples (%.2f s)\n", modem_count,
@@ -131,6 +135,11 @@ int main(void) {
 
   size_t hit_count = po32_synth_samples_for_duration(&synth, 0.5f);
   float *hit = malloc(hit_count * sizeof(float));
+  if (hit == NULL) {
+    fputs("failed to allocate synth buffer\n", stderr);
+    free(modem);
+    return 1;
+  }
   size_t hit_len = 0;
   po32_synth_render(&synth, &kick, 100, 0.5f, hit, hit_count, &hit_len);
 

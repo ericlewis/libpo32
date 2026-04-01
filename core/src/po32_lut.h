@@ -9,6 +9,7 @@
 #define PO32_LUT_INTERNAL_H
 
 #include "po32_synth_tables.h"
+#include <float.h>
 #include <stdint.h>
 
 #define PO32_LUT_PI         3.14159265358979323846f
@@ -55,7 +56,7 @@ static inline float po32_lut_exp2f(float x) {
   if (x < -126.0f)
     return 0.0f;
   if (x > 127.0f)
-    return 3.4028235e+38f;
+    return FLT_MAX;
 
   int_part = (int)x;
   if (x < (float)int_part)
