@@ -45,6 +45,7 @@ static float po32_import_strtof(const char *s, char **endptr) {
   float frac_div = 1.0f;
   int sign = 1;
   int got_digit = 0;
+  int mantissa_nonzero = 0;
   int in_frac = 0;
   int exp_sign = 1;
   unsigned exponent = 0u;
@@ -61,17 +62,23 @@ static float po32_import_strtof(const char *s, char **endptr) {
   }
 
   while (*p >= '0' && *p <= '9') {
-    result = result * 10.0f + (float)(*p - '0');
+    unsigned digit = (unsigned)(*p - '0');
+    result = result * 10.0f + (float)digit;
     got_digit = 1;
+    if (digit != 0u)
+      mantissa_nonzero = 1;
     ++p;
   }
   if (*p == '.') {
     ++p;
     in_frac = 1;
     while (*p >= '0' && *p <= '9') {
+      unsigned digit = (unsigned)(*p - '0');
       frac_div *= 10.0f;
-      frac += (float)(*p - '0') / frac_div;
+      frac += (float)digit / frac_div;
       got_digit = 1;
+      if (digit != 0u)
+        mantissa_nonzero = 1;
       ++p;
     }
   }
@@ -98,10 +105,10 @@ static float po32_import_strtof(const char *s, char **endptr) {
     if (exp_has_digit) {
       if (exp_sign > 0) {
         if (exponent > PO32_IMPORT_POSITIVE_EXP_LIMIT) {
-          if (result == 0.0f) {
+          if (!mantissa_nonzero) {
             /* 0e39 stays zero. */
           } else {
-            result = result < 0.0f ? -3.4028235e+38f : 3.4028235e+38f;
+            result = sign < 0 ? -3.4028235e+38f : 3.4028235e+38f;
           }
         } else {
           result *= po32_lut_pow10f((float)exponent);

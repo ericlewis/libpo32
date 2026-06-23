@@ -101,6 +101,14 @@ static void test_strtof_overflow_underflow(void) {
   assert(value <= -3.4028235e+38f);
   assert(*endptr == '\0');
 
+  value = po32_import_strtof("0.000000000000000000000000000000000000001e39", &endptr);
+  assert(value >= 3.4028235e+38f);
+  assert(*endptr == '\0');
+
+  value = po32_import_strtof("-0.000000000000000000000000000000000000001e39", &endptr);
+  assert(value <= -3.4028235e+38f);
+  assert(*endptr == '\0');
+
   /* p1: zero mantissa with overflowing exponent stays zero */
   value = po32_import_strtof("0e39", &endptr);
   assert(value == 0.0f);
