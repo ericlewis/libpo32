@@ -1424,6 +1424,88 @@ static void test_known_transfer_shapes(void) {
   (void)status;
 }
 
+static int streaming_demod_collect(const po32_packet_t *packet, void *user) {
+  int *count = (int *)user;
+  (void)packet;
+  if (count != NULL)
+    *count += 1;
+  return 0;
+}
+
+static void test_streaming_demodulator(void) {
+  po32_patch_params_t patch;
+  po32_builder_t builder;
+  po32_patch_packet_t pkt;
+  po32_packet_t dpkt;
+  po32_demodulator_t demod;
+  po32_demodulator_t inert_demod;
+  uint8_t frame[512];
+  size_t frame_len = 0u;
+  size_t sample_count;
+  float *samples;
+  float zero_sample = 0.0f;
+  int packet_count = 0;
+  po32_status_t status;
+
+  (void)streaming_demod_collect(NULL, NULL);
+  po32_demodulator_init(NULL, 44100.0f);
+  po32_demodulator_desync(NULL);
+  assert(po32_demodulator_done(NULL) == 0);
+  assert(po32_demodulator_packet_count(NULL) == 0);
+  assert(po32_demodulator_tail(NULL) == NULL);
+  assert(po32_demodulator_push(NULL, &zero_sample, 1u, NULL, NULL) == PO32_ERR_INVALID_ARG);
+
+  memset(&inert_demod, 0xFF, sizeof(inert_demod));
+  po32_demodulator_init(&inert_demod, 0.0f);
+  assert(inert_demod.sample_rate == 0.0f);
+  assert(po32_demodulator_push(&inert_demod, NULL, 0u, NULL, NULL) == PO32_ERR_INVALID_ARG);
+  po32_demodulator_desync(&inert_demod);
+  assert(inert_demod.synced == 0);
+  assert(inert_demod.work_len == 0u);
+
+  memset(&patch, 0, sizeof(patch));
+  patch.OscFreq = 0.28f;
+  patch.OscDcy = 0.42f;
+  patch.Level = 0.88f;
+  pkt.instrument = 1u;
+  pkt.side = PO32_PATCH_LEFT;
+  pkt.params = patch;
+  status = po32_packet_encode(PO32_TAG_PATCH, &pkt, &dpkt);
+  assert(status == PO32_OK);
+
+  po32_builder_init(&builder, frame, sizeof(frame));
+  assert(po32_builder_append(&builder, &dpkt) == PO32_OK);
+  assert(po32_builder_finish(&builder, &frame_len) == PO32_OK);
+
+  sample_count = po32_render_sample_count(frame_len, 44100u);
+  samples = (float *)malloc(sample_count * sizeof(*samples));
+  assert(samples != NULL);
+  assert(po32_render_dpsk_f32(frame, frame_len, 44100u, samples, sample_count) == PO32_OK);
+
+  /* Decode across a split buffer */
+  po32_demodulator_init(&demod, 44100.0f);
+  {
+    size_t split = sample_count / 2u;
+    status = po32_demodulator_push(&demod, samples, split, streaming_demod_collect, &packet_count);
+    assert(status == PO32_OK);
+    assert(!po32_demodulator_done(&demod));
+    status = po32_demodulator_push(&demod, samples + split, sample_count - split,
+                                   streaming_demod_collect, &packet_count);
+    assert(status == PO32_OK);
+  }
+
+  assert(po32_demodulator_done(&demod));
+  assert(po32_demodulator_packet_count(&demod) == 1);
+  assert(po32_demodulator_tail(&demod) != NULL);
+  assert(po32_demodulator_tail(&demod)->marker_c3 == 0xC3u);
+  assert(packet_count == 1);
+  assert(po32_demodulator_push(&demod, samples, sample_count, streaming_demod_collect,
+                               &packet_count) == PO32_OK);
+  assert(packet_count == 1);
+
+  free(samples);
+}
+
 int main(void) {
   printf("po32 core tests\n");
   printf("===============\n");
@@ -1447,6 +1529,8 @@ int main(void) {
   test_builder_exact_capacity_boundary();
   test_state_payload_lengths();
   test_known_transfer_shapes();
+  test_streaming_demodulator();
+
   printf("core tests passed\n");
   return 0;
 }
