@@ -505,6 +505,41 @@ func TestBuilderOverflow(t *testing.T) {
 	}
 }
 
+func TestBuilderInvalidInputs(t *testing.T) {
+	b := NewBuilder(0)
+	if _, err := b.AppendRawPacket(TagPatch, nil); err != ErrInvalidArg {
+		t.Fatalf("AppendRawPacket error = %v, want ErrInvalidArg", err)
+	}
+	if _, err := b.Finish(); err != ErrInvalidArg {
+		t.Fatalf("Finish error = %v, want ErrInvalidArg", err)
+	}
+
+	valid := NewBuilder(2048)
+	defer valid.Close()
+	if err := valid.Append(nil); err != ErrInvalidArg {
+		t.Fatalf("Append nil error = %v, want ErrInvalidArg", err)
+	}
+	pkt := &Packet{TagCode: TagPatch, PayloadLen: MaxPayload + 1}
+	if err := valid.Append(pkt); err != ErrInvalidArg {
+		t.Fatalf("Append oversized packet error = %v, want ErrInvalidArg", err)
+	}
+}
+
+func TestFrameParseInvalidInputs(t *testing.T) {
+	_, err := FrameParse(nil, func(*Packet) bool { return true })
+	if err != ErrInvalidArg {
+		t.Fatalf("FrameParse nil frame error = %v, want ErrInvalidArg", err)
+	}
+	_, err = FrameParse([]byte{}, func(*Packet) bool { return true })
+	if err != ErrInvalidArg {
+		t.Fatalf("FrameParse empty frame error = %v, want ErrInvalidArg", err)
+	}
+	_, err = FrameParse([]byte{0x55}, nil)
+	if err != ErrInvalidArg {
+		t.Fatalf("FrameParse nil callback error = %v, want ErrInvalidArg", err)
+	}
+}
+
 func TestModulatorRenderZero(t *testing.T) {
 	pkt, _ := EncodePatchPacket(&PatchPacket{
 		Instrument: 1, Side: PatchLeft,
@@ -523,5 +558,30 @@ func TestModulatorRenderZero(t *testing.T) {
 	}
 	if samples != nil {
 		t.Fatal("expected nil for zero maxSamples")
+	}
+	if _, err := m.RenderF32(-1); err != ErrInvalidArg {
+		t.Fatalf("RenderF32 negative error = %v, want ErrInvalidArg", err)
+	}
+}
+
+func TestModulatorInvalidInputs(t *testing.T) {
+	m := NewModulator(nil, 44100)
+	defer m.Close()
+	if !m.Done() {
+		t.Fatal("invalid modulator should report done")
+	}
+	if m.SamplesRemaining() != 0 {
+		t.Fatal("invalid modulator should have no remaining samples")
+	}
+	m.Reset()
+	if _, err := m.RenderF32(1); err != ErrInvalidArg {
+		t.Fatalf("RenderF32 invalid modulator error = %v, want ErrInvalidArg", err)
+	}
+
+	if _, err := RenderDPSKF32(nil, 44100); err != ErrInvalidArg {
+		t.Fatalf("RenderDPSKF32 nil frame error = %v, want ErrInvalidArg", err)
+	}
+	if _, err := RenderDPSKF32([]byte{0x55}, 0); err != ErrInvalidArg {
+		t.Fatalf("RenderDPSKF32 zero sample rate error = %v, want ErrInvalidArg", err)
 	}
 }

@@ -22,8 +22,15 @@ type Builder struct {
 
 // NewBuilder creates a frame builder with the given buffer capacity.
 func NewBuilder(capacity int) *Builder {
+	b := &Builder{cap: capacity}
+	if capacity <= 0 {
+		return b
+	}
 	cBuf := (*C.uint8_t)(C.malloc(C.size_t(capacity)))
-	b := &Builder{cBuf: cBuf, cap: capacity}
+	if cBuf == nil {
+		return b
+	}
+	b.cBuf = cBuf
 	C.po32_builder_init(&b.cBld, cBuf, C.size_t(capacity))
 	runtime.SetFinalizer(b, (*Builder).Close)
 	return b
@@ -31,7 +38,7 @@ func NewBuilder(capacity int) *Builder {
 
 // Close releases the C-allocated buffer. Safe to call multiple times.
 func (b *Builder) Close() {
-	if b.cBuf != nil {
+	if b != nil && b.cBuf != nil {
 		C.free(unsafe.Pointer(b.cBuf))
 		b.cBuf = nil
 	}
@@ -39,6 +46,9 @@ func (b *Builder) Close() {
 
 // Reset clears the builder and rewrites the preamble.
 func (b *Builder) Reset() {
+	if b == nil || b.cBuf == nil {
+		return
+	}
 	C.po32_builder_reset(&b.cBld)
 }
 
@@ -46,6 +56,9 @@ func (b *Builder) Reset() {
 // Returns the packet's byte offset within the frame.
 func (b *Builder) AppendRawPacket(tagCode uint16, payload []byte) (int, error) {
 	var offset C.size_t
+	if b == nil || b.cBuf == nil {
+		return 0, ErrInvalidArg
+	}
 	if len(payload) == 0 {
 		s := C.po32_builder_append_packet(&b.cBld, C.uint16_t(tagCode),
 			nil, 0, &offset)
@@ -61,6 +74,9 @@ func (b *Builder) AppendRawPacket(tagCode uint16, payload []byte) (int, error) {
 
 // Append appends an already-encoded Packet to the frame.
 func (b *Builder) Append(pkt *Packet) error {
+	if pkt == nil || pkt.PayloadLen < 0 || pkt.PayloadLen > MaxPayload {
+		return ErrInvalidArg
+	}
 	payload := make([]byte, pkt.PayloadLen)
 	copy(payload, pkt.Payload[:pkt.PayloadLen])
 	_, err := b.AppendRawPacket(pkt.TagCode, payload)
@@ -71,6 +87,9 @@ func (b *Builder) Append(pkt *Packet) error {
 // The returned slice is a Go-owned copy; the builder can be reused or closed.
 func (b *Builder) Finish() ([]byte, error) {
 	var frameLen C.size_t
+	if b == nil || b.cBuf == nil {
+		return nil, ErrInvalidArg
+	}
 	s := C.po32_builder_finish(&b.cBld, &frameLen)
 	if err := statusToError(int(s)); err != nil {
 		return nil, err

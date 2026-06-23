@@ -44,9 +44,12 @@ func lookupCallback(id uintptr) (func(*Packet) bool, bool) {
 
 //export goCallbackBridge
 func goCallbackBridge(packet *C.po32_packet_t, user unsafe.Pointer) C.int {
+	if packet == nil || user == nil {
+		return 1
+	}
 	id := uintptr(*(*C.uintptr_t)(user))
 	fn, ok := lookupCallback(id)
-	if !ok {
+	if !ok || fn == nil {
 		return 1
 	}
 	p := packetFromC(packet)
@@ -59,11 +62,17 @@ func goCallbackBridge(packet *C.po32_packet_t, user unsafe.Pointer) C.int {
 // FrameParse walks the packets in a frame, calling fn for each.
 // Return true from fn to continue, false to stop early.
 func FrameParse(frame []byte, fn func(*Packet) bool) (FinalTail, error) {
+	if len(frame) == 0 || fn == nil {
+		return FinalTail{}, ErrInvalidArg
+	}
 	id := registerCallback(fn)
 	defer unregisterCallback(id)
 
 	// Store the handle in C-allocated memory to satisfy cgo pointer rules.
 	handle := (*C.uintptr_t)(C.malloc(C.size_t(unsafe.Sizeof(id))))
+	if handle == nil {
+		return FinalTail{}, ErrInvalidArg
+	}
 	*handle = C.uintptr_t(id)
 	defer C.free(unsafe.Pointer(handle))
 

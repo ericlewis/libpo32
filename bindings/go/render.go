@@ -19,6 +19,9 @@ func RenderSampleCount(frameLen int, sampleRate uint32) int {
 
 // RenderDPSKF32 renders a transfer frame to mono float32 audio.
 func RenderDPSKF32(frame []byte, sampleRate uint32) ([]float32, error) {
+	if len(frame) == 0 || sampleRate == 0 {
+		return nil, ErrInvalidArg
+	}
 	n := RenderSampleCount(len(frame), sampleRate)
 	if n == 0 {
 		return nil, nil
@@ -48,17 +51,32 @@ type Modulator struct {
 
 // NewModulator creates a streaming modulator over the given frame.
 func NewModulator(frame []byte, sampleRate uint32) *Modulator {
+	m := &Modulator{}
+	if len(frame) == 0 || sampleRate == 0 {
+		return m
+	}
 	cFrame := (*C.uint8_t)(C.malloc(C.size_t(len(frame))))
+	if cFrame == nil {
+		return m
+	}
 	C.memcpy(unsafe.Pointer(cFrame), unsafe.Pointer(&frame[0]), C.size_t(len(frame)))
 	cMod := (*C.po32_modulator_t)(C.malloc(C.size_t(unsafe.Sizeof(C.po32_modulator_t{}))))
+	if cMod == nil {
+		C.free(unsafe.Pointer(cFrame))
+		return m
+	}
 	C.po32_modulator_init(cMod, cFrame, C.size_t(len(frame)), C.uint32_t(sampleRate))
-	m := &Modulator{cMod: cMod, cFrame: cFrame}
+	m.cMod = cMod
+	m.cFrame = cFrame
 	runtime.SetFinalizer(m, (*Modulator).Close)
 	return m
 }
 
 // Close releases C-allocated memory. Safe to call multiple times.
 func (m *Modulator) Close() {
+	if m == nil {
+		return
+	}
 	if m.cMod != nil {
 		C.free(unsafe.Pointer(m.cMod))
 		m.cMod = nil
@@ -71,16 +89,25 @@ func (m *Modulator) Close() {
 
 // Reset restarts the modulator from the beginning.
 func (m *Modulator) Reset() {
+	if m == nil || m.cMod == nil {
+		return
+	}
 	C.po32_modulator_reset(m.cMod)
 }
 
 // SamplesRemaining returns how many samples are left to render.
 func (m *Modulator) SamplesRemaining() int {
+	if m == nil || m.cMod == nil {
+		return 0
+	}
 	return int(C.po32_modulator_samples_remaining(m.cMod))
 }
 
 // Done returns true when all samples have been rendered.
 func (m *Modulator) Done() bool {
+	if m == nil || m.cMod == nil {
+		return true
+	}
 	return C.po32_modulator_done(m.cMod) != 0
 }
 
@@ -88,6 +115,9 @@ func (m *Modulator) Done() bool {
 func (m *Modulator) RenderF32(maxSamples int) ([]float32, error) {
 	if maxSamples == 0 {
 		return nil, nil
+	}
+	if maxSamples < 0 || m == nil || m.cMod == nil {
+		return nil, ErrInvalidArg
 	}
 	out := make([]float32, maxSamples)
 	var outLen C.size_t
