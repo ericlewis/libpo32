@@ -8,15 +8,15 @@ The initial public launch covers the core C library only:
 
 | Path | Role |
 | --- | --- |
-| `include/po32.h` | Transfer builder, packet, render, and decode API |
-| `include/po32_synth.h` | Drum synth API |
-| `src/po32.c` | Core transfer implementation |
-| `src/po32_patch_import.c` | `.mtdrum` patch text importer |
-| `src/po32_synth.c` | Drum synth implementation |
-| `examples/po32_example.c` | Minimal roundtrip example |
-| `examples/po32_demo.c` | End-to-end transfer plus synth demo |
-| `examples/po32_pattern_editor.c` | Interactive pattern editor and exporter |
-| `examples/po32_decode_capture.c` | Transfer WAV decoder and packet dumper |
+| `core/include/po32.h` | Transfer builder, packet, render, and decode API |
+| `core/include/po32_synth.h` | Drum synth API |
+| `core/src/po32.c` | Core transfer implementation |
+| `core/src/po32_patch_import.c` | `.mtdrum` patch text importer |
+| `core/src/po32_synth.c` | Drum synth implementation |
+| `core/examples/po32_example.c` | Minimal roundtrip example |
+| `core/examples/po32_demo.c` | End-to-end transfer plus synth demo |
+| `core/examples/po32_pattern_editor.c` | Interactive pattern editor and exporter |
+| `core/examples/po32_decode_capture.c` | Transfer WAV decoder and packet dumper |
 
 ## Checklist
 
@@ -28,12 +28,12 @@ The initial public launch covers the core C library only:
    `./scripts/ci-verify.sh core`
 5. Review release-facing docs and versions:
    `README.md`
-   `docs/ARCHITECTURE.md`
-   `docs/PROTOCOL.md`
-   `docs/C_API.md`
-   `docs/SYNTH.md`
-   `docs/PATCH_PARAMETERS.md`
-   `examples/README.md`
+   `core/docs/ARCHITECTURE.md`
+   `core/docs/PROTOCOL.md`
+   `core/docs/C_API.md`
+   `core/docs/SYNTH.md`
+   `core/docs/PATCH_PARAMETERS.md`
+   `core/examples/README.md`
    `CHANGELOG.md`
    `VERSION`
    `CMakeLists.txt`

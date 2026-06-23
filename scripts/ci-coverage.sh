@@ -21,39 +21,39 @@ ctest --test-dir "$build_dir" --output-on-failure --output-junit "$report_dir/ju
 
 gcovr \
   --root "$root_dir" \
-  --filter "$root_dir/src/" \
-  --filter "$root_dir/examples/" \
-  --exclude "$root_dir/tests/" \
+  --filter "$root_dir/core/src/" \
+  --filter "$root_dir/core/examples/" \
+  --exclude "$root_dir/core/tests/" \
   --print-summary
 
 gcovr \
   --root "$root_dir" \
-  --filter "$root_dir/src/" \
-  --filter "$root_dir/examples/" \
-  --exclude "$root_dir/tests/" \
+  --filter "$root_dir/core/src/" \
+  --filter "$root_dir/core/examples/" \
+  --exclude "$root_dir/core/tests/" \
   --xml-pretty \
   --output "$report_dir/cobertura.xml"
 
 gcovr \
   --root "$root_dir" \
-  --filter "$root_dir/src/" \
-  --filter "$root_dir/examples/" \
-  --exclude "$root_dir/tests/" \
+  --filter "$root_dir/core/src/" \
+  --filter "$root_dir/core/examples/" \
+  --exclude "$root_dir/core/tests/" \
   --html-details \
   --output "$report_dir/index.html"
 
 gcovr \
   --root "$root_dir" \
-  --filter "$root_dir/src/" \
-  --filter "$root_dir/examples/" \
-  --exclude "$root_dir/tests/" \
+  --filter "$root_dir/core/src/" \
+  --filter "$root_dir/core/examples/" \
+  --exclude "$root_dir/core/tests/" \
   --txt \
   --output "$report_dir/summary.txt"
 
 gcovr \
   --root "$root_dir" \
-  --filter "$root_dir/src/" \
-  --filter "$root_dir/examples/" \
-  --exclude "$root_dir/tests/" \
+  --filter "$root_dir/core/src/" \
+  --filter "$root_dir/core/examples/" \
+  --exclude "$root_dir/core/tests/" \
   --markdown \
   --output "$report_dir/summary.md"

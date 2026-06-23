@@ -101,30 +101,31 @@ WAV files: `demo_modem.wav` and `demo_kick.wav`.
 
 | Header | Responsibility |
 | --- | --- |
-| [`include/po32.h`](include/po32.h) | Transfer builder, packet helpers, renderer, and decoder |
-| [`include/po32_synth.h`](include/po32_synth.h) | Drum synthesizer |
+| [`core/include/po32.h`](core/include/po32.h) | Transfer builder, packet helpers, renderer, and decoder |
+| [`core/include/po32_synth.h`](core/include/po32_synth.h) | Drum synthesizer |
 
 ## Documentation
 
 | Document | Purpose |
 | --- | --- |
-| [Architecture](docs/ARCHITECTURE.md) | How the codec works |
-| [Protocol](docs/PROTOCOL.md) | Wire format details |
-| [C API](docs/C_API.md) | C function reference |
-| [Synth](docs/SYNTH.md) | Synthesizer signal path |
-| [Patch Parameters](docs/PATCH_PARAMETERS.md) | The 21 parameters |
-| [Examples](examples/README.md) | Supported example programs |
+| [Architecture](core/docs/ARCHITECTURE.md) | How the codec works |
+| [Protocol](core/docs/PROTOCOL.md) | Wire format details |
+| [C API](core/docs/C_API.md) | C function reference |
+| [Synth](core/docs/SYNTH.md) | Synthesizer signal path |
+| [Patch Parameters](core/docs/PATCH_PARAMETERS.md) | The 21 parameters |
+| [Examples](core/examples/README.md) | Supported example programs |
 | [Contributing](CONTRIBUTING.md) | Local setup, checks, and commit conventions |
 
 ## Project Layout
 
 | Path | Purpose |
 | --- | --- |
-| [`src`](src) | Core implementation |
-| [`include`](include) | Public headers |
-| [`examples`](examples) | Supported C examples |
-| [`tests`](tests) | Core test coverage |
-| [`docs`](docs) | Architecture, protocol, and API notes |
+| [`core/src`](core/src) | Core C implementation |
+| [`core/include`](core/include) | Public C headers |
+| [`core/examples`](core/examples) | Supported C examples |
+| [`core/tests`](core/tests) | Core test coverage |
+| [`core/docs`](core/docs) | Architecture, protocol, and API notes |
+| [`bindings`](bindings) | Language bindings |
 
 ## Contributing
 
