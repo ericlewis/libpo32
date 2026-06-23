@@ -58,6 +58,11 @@ static int write_wav(const char *path, const float *samples, size_t sample_count
   return 0;
 }
 
+static int should_fail_alloc(int allocation_index) {
+  const char *fail_at = getenv("PO32_DEMO_FAIL_ALLOC");
+  return fail_at != NULL && atoi(fail_at) == allocation_index;
+}
+
 int main(void) {
   const uint32_t sample_rate = 44100;
 
@@ -104,7 +109,7 @@ int main(void) {
   /* ── 2. Render the frame to audio ── */
 
   size_t modem_count = po32_render_sample_count(frame_len, sample_rate);
-  float *modem = malloc(modem_count * sizeof(float));
+  float *modem = should_fail_alloc(1) ? NULL : malloc(modem_count * sizeof(float));
   if (modem == NULL) {
     fputs("failed to allocate modem buffer\n", stderr);
     return 1;
@@ -134,7 +139,7 @@ int main(void) {
   po32_synth_init(&synth, sample_rate);
 
   size_t hit_count = po32_synth_samples_for_duration(&synth, 0.5f);
-  float *hit = malloc(hit_count * sizeof(float));
+  float *hit = should_fail_alloc(2) ? NULL : malloc(hit_count * sizeof(float));
   if (hit == NULL) {
     fputs("failed to allocate synth buffer\n", stderr);
     free(modem);

@@ -95,6 +95,18 @@ add_test(NAME po32_example_cli_tests COMMAND po32_example_cli_tests)
 add_test(NAME po32_example_smoke COMMAND po32_example)
 add_test(NAME po32_demo_smoke COMMAND po32_demo)
 set_tests_properties(po32_demo_smoke PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+add_test(NAME po32_demo_modem_alloc_fail COMMAND po32_demo)
+set_tests_properties(po32_demo_modem_alloc_fail PROPERTIES
+  WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
+  ENVIRONMENT "PO32_DEMO_FAIL_ALLOC=1"
+  WILL_FAIL TRUE
+)
+add_test(NAME po32_demo_synth_alloc_fail COMMAND po32_demo)
+set_tests_properties(po32_demo_synth_alloc_fail PROPERTIES
+  WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
+  ENVIRONMENT "PO32_DEMO_FAIL_ALLOC=2"
+  WILL_FAIL TRUE
+)
 
 add_test(
   NAME po32_pattern_editor_smoke
