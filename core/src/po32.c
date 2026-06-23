@@ -972,30 +972,7 @@ po32_status_t po32_packet_decode(uint16_t tag, const uint8_t *data, size_t len, 
 
 /* ── render and streaming decode ───────────────────────────────── */
 
-#define PO32_DEMOD_WORK_SIZE 280
-
-typedef struct po32_demodulator {
-  float sample_rate;
-  float osc_sin, osc_cos;
-  float rot_sin, rot_cos;
-  float accum_i, accum_q;
-  float prev_i, prev_q;
-  float symbol_phase;
-  float symbols_per_sample;
-  int started;
-  uint64_t sync_window;
-  uint64_t sync_pattern;
-  int synced;
-  uint8_t current_byte;
-  uint8_t bits_in_byte;
-  size_t byte_offset;
-  uint16_t crc_state;
-  uint8_t work[PO32_DEMOD_WORK_SIZE];
-  size_t work_len;
-  int packet_count;
-  int done;
-  po32_final_tail_t tail;
-} po32_demodulator_t;
+/* po32_demodulator_t is defined in po32.h */
 
 size_t po32_render_sample_count(size_t frame_len, uint32_t sample_rate) {
   if (sample_rate == 0u)
@@ -1157,7 +1134,7 @@ po32_status_t po32_render_dpsk_f32(const uint8_t *frame, size_t frame_len, uint3
   return out_len == needed ? PO32_OK : PO32_ERR_FRAME;
 }
 
-static void po32_demodulator_init(po32_demodulator_t *d, float sample_rate) {
+void po32_demodulator_init(po32_demodulator_t *d, float sample_rate) {
   float carrier_step;
   if (d == NULL)
     return;
@@ -1183,7 +1160,7 @@ static void po32_demodulator_init(po32_demodulator_t *d, float sample_rate) {
   }
 }
 
-static void po32_demodulator_desync(po32_demodulator_t *d) {
+void po32_demodulator_desync(po32_demodulator_t *d) {
   if (d == NULL) {
     return;
   }
@@ -1388,8 +1365,20 @@ static po32_status_t po32_demod_run_sample(po32_demod_run_t *run, float sample, 
   return PO32_OK;
 }
 
-static po32_status_t po32_demodulator_push(po32_demodulator_t *d, const float *samples,
-                                           size_t count, po32_packet_callback_t cb, void *user) {
+int po32_demodulator_done(const po32_demodulator_t *d) {
+  return d != NULL && d->done;
+}
+
+int po32_demodulator_packet_count(const po32_demodulator_t *d) {
+  return d != NULL ? d->packet_count : 0;
+}
+
+const po32_final_tail_t *po32_demodulator_tail(const po32_demodulator_t *d) {
+  return d != NULL ? &d->tail : NULL;
+}
+
+po32_status_t po32_demodulator_push(po32_demodulator_t *d, const float *samples, size_t count,
+                                    po32_packet_callback_t cb, void *user) {
   po32_demod_run_t run;
   int stop = 0;
 

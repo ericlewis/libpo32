@@ -145,6 +145,34 @@ control:
 - `po32_modulator_done(...)` — check if all samples have been rendered
 - `po32_modulator_samples_remaining(...)` — query how many samples remain
 
+## Streaming Demodulator
+
+For streaming (chunk-based) decoding, the demodulator API accepts audio in
+arbitrary-sized chunks and invokes a callback on each decoded packet:
+
+- `po32_demodulator_init(...)` — prepare for decoding at a sample rate
+- `po32_demodulator_push(...)` — feed the next chunk of audio samples
+- `po32_demodulator_done(...)` — check if the final tail has been received
+- `po32_demodulator_packet_count(...)` — query how many packets were decoded
+- `po32_demodulator_tail(...)` — access the decoded final tail
+- `po32_demodulator_desync(...)` — reset sync state for error recovery
+
+`po32_decode_f32(...)` is a one-shot convenience wrapper around this API.
+
+## Streaming Synth Voice
+
+For streaming (chunk-based) synthesis, the voice API pre-computes all
+per-render constants at init time and persists DSP state across calls:
+
+- `po32_synth_voice_init(...)` — snapshot parameters and prepare for rendering
+- `po32_synth_voice_render_f32(...)` — render the next chunk of samples
+- `po32_synth_voice_reset(...)` — restart rendering from the beginning
+- `po32_synth_voice_done(...)` — check if all samples have been rendered
+- `po32_synth_voice_samples_remaining(...)` — query how many samples remain
+
+`po32_synth_render(...)` is a one-shot convenience wrapper that renders
+the full duration in a single call.
+
 ## Body Bytes vs Frame Bytes
 
 The C core works with full transmitted frames and encoded packet-body bytes.

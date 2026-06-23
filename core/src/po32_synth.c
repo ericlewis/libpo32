@@ -20,6 +20,12 @@
 
 #include <stdint.h>
 
+static void synth_zero(void *ptr, size_t n) {
+  unsigned char *p = (unsigned char *)ptr;
+  while (n-- > 0u)
+    *p++ = 0u;
+}
+
 /* ── Aliases so the rest of the file reads cleanly ──────────────── */
 
 #define LUT_PI         PO32_LUT_PI
@@ -557,5 +563,255 @@ po32_status_t po32_synth_render(const po32_synth_t *synth, const po32_patch_para
     out[i] = sample;
   }
 
+  return PO32_OK;
+}
+
+/* ── Streaming voice ───────────────────────────────────────────── */
+
+static void synth_biquad_to_flat(const synth_biquad_t *bq, float *flat) {
+  flat[0] = bq->b0;
+  flat[1] = bq->b1;
+  flat[2] = bq->b2;
+  flat[3] = bq->a1;
+  flat[4] = bq->a2;
+  flat[5] = bq->z1;
+  flat[6] = bq->z2;
+}
+
+static void synth_biquad_from_flat(const float *flat, synth_biquad_t *bq) {
+  bq->b0 = flat[0];
+  bq->b1 = flat[1];
+  bq->b2 = flat[2];
+  bq->a1 = flat[3];
+  bq->a2 = flat[4];
+  bq->z1 = flat[5];
+  bq->z2 = flat[6];
+}
+
+void po32_synth_voice_init(po32_synth_voice_t *v, uint32_t sample_rate,
+                           const po32_patch_params_t *params, int velocity, float duration) {
+  float sr, mix, eq_db, eq_freq_hz, mod_rate, mod_vel_g;
+  synth_biquad_t nf, ef;
+
+  if (v == NULL || params == NULL)
+    return;
+
+  synth_zero(v, sizeof(*v));
+  v->sample_rate = sample_rate;
+  sr = (float)sample_rate;
+  v->sr = sr;
+  v->total_samples = (size_t)(sr * duration);
+  v->rand_state = 123456789u;
+
+  v->osc_freq = synth_param_to_hz(params->OscFreq);
+  v->osc_atk = synth_attack_time(params->OscAtk);
+  v->osc_dcy = synth_decay_time(params->OscDcy);
+  v->osc_wave = params->OscWave;
+
+  v->mod_sm = (params->ModAmt - 0.5f) * (2.0f * SYNTH_MOD_MAX_SEMITONES);
+  v->mod_mode = params->ModMode;
+  mod_rate = params->ModRate;
+
+  v->nf_freq = synth_clamp_sr_freq(synth_param_to_hz(params->NFilFrq), sr);
+  v->nf_q = synth_param_to_q(params->NFilQ);
+  v->n_atk = synth_attack_time(params->NEnvAtk);
+  v->n_dcy = synth_decay_time(params->NEnvDcy);
+  v->n_env_mod = params->NEnvMod;
+
+  mix = params->Mix;
+  v->dist_amt = params->DistAmt;
+
+  eq_db = (params->EQGain - 0.5f) * (2.0f * SYNTH_EQ_MAX_ABS_DB);
+  eq_freq_hz = synth_clamp_sr_freq(synth_param_to_hz(params->EQFreq), sr);
+  v->level = synth_level_gain(params->Level);
+
+  v->osc_gain_mix = synth_mix_osc_gain(mix);
+  v->noise_gain_mix = synth_mix_noise_gain(mix);
+  v->osc_vel_g = synth_velocity_gain(velocity, params->OscVel);
+  v->noise_vel_g = synth_velocity_gain(velocity, params->NVel);
+
+  mod_vel_g = synth_velocity_gain(velocity, params->ModVel);
+  v->mod_sm *= mod_vel_g;
+
+  if (params->NFilMod < SYNTH_ONE_THIRD)
+    synth_biquad_design_lp(&nf, v->nf_freq, v->nf_q, sr);
+  else if (params->NFilMod < SYNTH_TWO_THIRDS)
+    synth_biquad_design_bp(&nf, v->nf_freq, v->nf_q, sr);
+  else
+    synth_biquad_design_hp(&nf, v->nf_freq, v->nf_q, sr);
+  synth_biquad_to_flat(&nf, v->noise_filt);
+
+  v->use_eq = (synth_fabsf(eq_db) > SYNTH_EQ_ENABLE_THRESH_DB);
+  if (v->use_eq) {
+    synth_biquad_design_peak(&ef, eq_freq_hz, eq_db, sr);
+    synth_biquad_to_flat(&ef, v->eq_filt);
+  }
+
+  v->mod_decay_time = synth_decay_time(mod_rate);
+  v->mod_rate_hz = (v->mod_mode < SYNTH_TWO_THIRDS) ? (SYNTH_SINE_MOD_MAX_HZ * mod_rate)
+                                                    : synth_param_to_hz(mod_rate);
+
+  v->mod_alpha_precomp = 1.0f - lut_expf(-LUT_TWO_PI * v->mod_rate_hz / sr);
+  v->mod_alpha_precomp = synth_clamp(v->mod_alpha_precomp, SYNTH_MOD_ALPHA_MIN, 1.0f);
+
+  v->mod_env_amp_correction = 1.0f;
+  if (v->n_env_mod > SYNTH_TWO_THIRDS) {
+    float dcy_param = params->NEnvDcy;
+    if (dcy_param > SYNTH_LEVEL_MIN_PARAM) {
+      v->mod_env_period = (dcy_param / sr) * lut_powf(SYNTH_FILTER_Q_MAX, dcy_param);
+      if (v->mod_env_period < SYNTH_MOD_ENV_PERIOD_THRESH_S) {
+        v->mod_env_period *= SYNTH_MOD_ENV_PERIOD_SCALE_FAST;
+        v->mod_env_amp_correction = lut_sqrtf(SYNTH_MOD_ENV_FAST_GAIN_NUM / v->mod_env_period);
+      } else {
+        v->mod_env_period *= SYNTH_MOD_ENV_PERIOD_SCALE_SLOW;
+      }
+    }
+  }
+}
+
+void po32_synth_voice_reset(po32_synth_voice_t *v) {
+  uint32_t sr;
+  if (v == NULL)
+    return;
+  sr = v->sample_rate;
+  /* Re-init preserving precomputed constants by re-zeroing DSP state only. */
+  v->samples_rendered = 0u;
+  v->phase = 0.0f;
+  v->mod_state = 0.0f;
+  v->rand_state = 123456789u;
+  /* Reset filter z1/z2 (indices 5, 6) */
+  v->noise_filt[5] = 0.0f;
+  v->noise_filt[6] = 0.0f;
+  v->eq_filt[5] = 0.0f;
+  v->eq_filt[6] = 0.0f;
+  (void)sr;
+}
+
+size_t po32_synth_voice_samples_remaining(const po32_synth_voice_t *v) {
+  if (v == NULL || v->samples_rendered >= v->total_samples)
+    return 0u;
+  return v->total_samples - v->samples_rendered;
+}
+
+int po32_synth_voice_done(const po32_synth_voice_t *v) {
+  return v == NULL || v->samples_rendered >= v->total_samples;
+}
+
+po32_status_t po32_synth_voice_render_f32(po32_synth_voice_t *v, float *out, size_t out_capacity,
+                                          size_t *out_len) {
+  size_t n, i;
+  float sr;
+  synth_biquad_t nf, ef;
+
+  if (v == NULL || out == NULL || out_len == NULL)
+    return PO32_ERR_INVALID_ARG;
+
+  sr = v->sr;
+  n = v->total_samples - v->samples_rendered;
+  if (n > out_capacity)
+    n = out_capacity;
+  *out_len = n;
+
+  synth_biquad_from_flat(v->noise_filt, &nf);
+  if (v->use_eq)
+    synth_biquad_from_flat(v->eq_filt, &ef);
+
+  for (i = 0; i < n; ++i) {
+    float t = (float)(v->samples_rendered + i) / sr;
+    float osc_env, noise_env;
+    float mod_sig, freq_mult, inst_freq;
+    float osc_sample, noise_raw, noise_sample;
+    float sample;
+
+    if (v->osc_atk > 0.0f && t < v->osc_atk)
+      osc_env = synth_exp_attack_env(t, v->osc_atk);
+    else
+      osc_env = synth_exp_decay_env(t - v->osc_atk, v->osc_dcy);
+
+    if (v->mod_mode < SYNTH_ONE_THIRD) {
+      mod_sig = synth_exp_decay_env(t, v->mod_decay_time);
+    } else if (v->mod_mode < SYNTH_TWO_THIRDS) {
+      float sine_env = synth_exp_decay_env(t, v->mod_decay_time);
+      mod_sig = lut_sinf(LUT_TWO_PI * v->mod_rate_hz * t) * sine_env;
+    } else {
+      float noise_in = synth_randf(&v->rand_state) * 2.0f - 1.0f;
+      v->mod_state = v->mod_state * (1.0f - v->mod_alpha_precomp) + noise_in * v->mod_alpha_precomp;
+      mod_sig = v->mod_state;
+    }
+
+    freq_mult = lut_exp2f(mod_sig * v->mod_sm / SYNTH_SEMITONES_PER_OCTAVE);
+    inst_freq = v->osc_freq * freq_mult;
+    v->phase += inst_freq * (LUT_TWO_PI / sr);
+
+    if (v->osc_wave < SYNTH_ONE_THIRD) {
+      osc_sample = lut_sinf(v->phase);
+    } else if (v->osc_wave < SYNTH_TWO_THIRDS) {
+      float ph = synth_wrap_phase01(v->phase * LUT_INV_TWO_PI);
+      osc_sample = 2.0f * synth_fabsf(2.0f * ph - 1.0f) - 1.0f;
+    } else {
+      float ph = synth_wrap_phase01(v->phase * LUT_INV_TWO_PI);
+      osc_sample = 2.0f * ph - 1.0f;
+    }
+
+    osc_sample *= osc_env;
+
+    if (v->n_env_mod > SYNTH_TWO_THIRDS) {
+      if (t < v->n_atk) {
+        noise_env = 1.0f;
+      } else if (v->mod_env_period > 0.0f) {
+        float dt = t - v->n_atk;
+        float saw = synth_wrap_phase01(dt / v->mod_env_period);
+        float tri = 1.0f - 2.0f * synth_fabsf(saw - 0.5f);
+        float ring = lut_cosf(LUT_PI * tri);
+        float decay = synth_exp_decay_env(dt, v->n_dcy);
+        noise_env = ring * decay * v->mod_env_amp_correction;
+      } else {
+        noise_env = synth_exp_decay_env(t - v->n_atk, v->n_dcy);
+      }
+    } else if (v->n_env_mod > SYNTH_ONE_THIRD) {
+      float lin_atk = v->n_atk * SYNTH_TWO_THIRDS;
+      float lin_dcy = v->n_dcy * SYNTH_TWO_THIRDS;
+
+      if (t < lin_atk)
+        noise_env = t / lin_atk;
+      else if (t < lin_atk + lin_dcy)
+        noise_env = 1.0f - (t - lin_atk) / lin_dcy;
+      else
+        noise_env = 0.0f;
+    } else {
+      if (v->n_atk > 0.0f && t < v->n_atk)
+        noise_env = synth_exp_attack_env(t, v->n_atk);
+      else
+        noise_env = synth_exp_decay_env(t - v->n_atk, v->n_dcy);
+    }
+
+    noise_raw = synth_randf(&v->rand_state) * 2.0f - 1.0f;
+    noise_sample = synth_biquad_process(&nf, noise_raw) * noise_env;
+
+    sample = osc_sample * v->osc_gain_mix * v->osc_vel_g +
+             noise_sample * v->noise_gain_mix * v->noise_vel_g;
+
+    if (v->dist_amt > SYNTH_DISTORT_MIN_AMOUNT) {
+      sample = synth_distort(sample, v->dist_amt);
+    }
+
+    if (v->use_eq) {
+      sample = synth_biquad_process(&ef, sample);
+    }
+
+    sample *= v->level;
+    if (sample > 1.0f)
+      sample = 1.0f;
+    if (sample < -1.0f)
+      sample = -1.0f;
+    out[i] = sample;
+  }
+
+  /* Persist filter state back */
+  synth_biquad_to_flat(&nf, v->noise_filt);
+  if (v->use_eq)
+    synth_biquad_to_flat(&ef, v->eq_filt);
+
+  v->samples_rendered += n;
   return PO32_OK;
 }

@@ -303,6 +303,47 @@ po32_status_t po32_render_dpsk_f32(const uint8_t *frame, size_t frame_len, uint3
  * Decode (RX: audio → normalized frame bytes)
  * ══════════════════════════════════════════════════════════ */
 
+#define PO32_DEMOD_WORK_SIZE 280
+
+typedef struct po32_demodulator {
+  float sample_rate;
+  float osc_sin, osc_cos;
+  float rot_sin, rot_cos;
+  float accum_i, accum_q;
+  float prev_i, prev_q;
+  float symbol_phase;
+  float symbols_per_sample;
+  int started;
+  uint64_t sync_window;
+  uint64_t sync_pattern;
+  int synced;
+  uint8_t current_byte;
+  uint8_t bits_in_byte;
+  size_t byte_offset;
+  uint16_t crc_state;
+  uint8_t work[PO32_DEMOD_WORK_SIZE];
+  size_t work_len;
+  int packet_count;
+  int done;
+  po32_final_tail_t tail;
+} po32_demodulator_t;
+
+/* Initialize streaming demodulator for a sample rate. */
+void po32_demodulator_init(po32_demodulator_t *d, float sample_rate);
+
+/* Reset demodulator sync state. */
+void po32_demodulator_desync(po32_demodulator_t *d);
+
+/* Push a chunk of mono float audio. Callback invoked on each decoded packet.
+   May be called repeatedly with successive chunks. */
+po32_status_t po32_demodulator_push(po32_demodulator_t *d, const float *samples, size_t count,
+                                    po32_packet_callback_t callback, void *user);
+
+/* Query streaming decode progress. */
+int po32_demodulator_done(const po32_demodulator_t *d);
+int po32_demodulator_packet_count(const po32_demodulator_t *d);
+const po32_final_tail_t *po32_demodulator_tail(const po32_demodulator_t *d);
+
 typedef struct po32_decode_result {
   int packet_count;
   int done;
