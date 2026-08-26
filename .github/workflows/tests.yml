@@ -31,6 +31,17 @@ jobs:
       - name: Build and test core
         run: ./scripts/ci-verify.sh core
 
+  sanitizers:
+    name: Sanitizers (ASan+UBSan)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Build and test with sanitizers
+        run: ./scripts/ci-verify.sh sanitize
+
   go-bindings:
     name: Go bindings (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

@@ -1,0 +1,46 @@
+name: Fuzz
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    # Weekly deeper campaign (UTC).
+    - cron: '17 5 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    name: Fuzz smoke
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install Clang with libFuzzer runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang libclang-rt-dev
+
+      - name: Run fuzz harnesses
+        env:
+          # 20s per target on PRs and pushes; 5 min per target weekly.
+          PO32_FUZZ_SECONDS: ${{ github.event_name == 'schedule' && '300' || '20' }}
+        run: ./scripts/ci-fuzz.sh
+
+      - name: Upload findings
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-findings
+          path: |
+            crash-*
+            leak-*
+            timeout-*
+            oom-*
+          if-no-files-found: ignore
