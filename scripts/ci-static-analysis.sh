@@ -15,7 +15,8 @@ cppcheck \
   -I "$root_dir/core/include" \
   "$root_dir/core/src" \
   "$root_dir/core/tests" \
-  "$root_dir/core/examples"
+  "$root_dir/core/examples" \
+  "$root_dir/core/fuzz"
 
 scan-build --status-bugs \
   cmake -S "$root_dir" -B "$build_dir" \
