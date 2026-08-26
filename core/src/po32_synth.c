@@ -500,20 +500,19 @@ po32_status_t po32_synth_render(const po32_synth_t *synth, const po32_patch_para
   nenv_dcy_coeff = lut_powf(SYNTH_ENV_FLOOR_GAIN, inv_sr / n_dcy);
 
   /* Linear noise envelope: reciprocals hoisted out of the loop. The
-   * attack branch is only reachable when lin_atk > 0 (t >= 0), likewise
-   * the decay branch requires lin_dcy > 0. */
+   * attack branch is only reachable when lin_atk > 0 (t >= 0); lin_dcy
+   * is always > 0 (n_dcy >= SYNTH_DECAY_MIN_SECONDS). */
   lin_atk = n_atk * SYNTH_TWO_THIRDS;
   lin_dcy = n_dcy * SYNTH_TWO_THIRDS;
   inv_lin_atk = (lin_atk > 0.0f) ? (1.0f / lin_atk) : 0.0f;
-  inv_lin_dcy = (lin_dcy > 0.0f) ? (1.0f / lin_dcy) : 0.0f;
-  inv_mod_env_period = (mod_env_period > 0.0f) ? (1.0f / mod_env_period) : 0.0f;
+  inv_lin_dcy = 1.0f / lin_dcy;
 
   /* Pitch-mod source: exponential decay is a geometric recursion; the
    * sine LFO is a recursive complex rotation (same scheme as the DPSK
-   * modulator oscillator). */
-  mod_env_v = (mod_decay_time > 0.0f) ? 1.0f : 0.0f;
-  mod_dcy_coeff =
-      (mod_decay_time > 0.0f) ? lut_powf(SYNTH_ENV_FLOOR_GAIN, inv_sr / mod_decay_time) : 1.0f;
+   * modulator oscillator). mod_decay_time is always > 0
+   * (synth_decay_time returns >= SYNTH_DECAY_MIN_SECONDS). */
+  mod_env_v = 1.0f;
+  mod_dcy_coeff = lut_powf(SYNTH_ENV_FLOOR_GAIN, inv_sr / mod_decay_time);
   mod_osc_s = 0.0f;
   mod_osc_c = 1.0f;
   po32_lut_rot_step(LUT_TWO_PI * mod_rate_hz * inv_sr, &mod_rot_s, &mod_rot_c);
@@ -532,6 +531,9 @@ po32_status_t po32_synth_render(const po32_synth_t *synth, const po32_patch_para
       }
     }
   }
+
+  /* Must come after mod_env_period is computed above. */
+  inv_mod_env_period = (mod_env_period > 0.0f) ? (1.0f / mod_env_period) : 0.0f;
 
   /* ── Main render loop ─────────────────────────────────────────
    *
