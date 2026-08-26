@@ -6,6 +6,21 @@ The format is based on Keep a Changelog, and the project follows Semantic Versio
 
 ## [Unreleased]
 
+### Added
+- Six libFuzzer harnesses under `core/fuzz/` covering every untrusted-input
+  surface: the frame parser, typed packet codecs, `.mtdrum` text importer,
+  drum synthesizer, audio decoder, and a differential harness that checks
+  builder → parser and render → decode round trips end to end. Includes a
+  seed-corpus generator, standalone replay builds for non-Clang compilers
+  (`-DPO32_FUZZ_STANDALONE=ON`), and a `Fuzz` CI workflow that smoke-fuzzes
+  each target on every PR and runs a longer weekly campaign.
+- `PO32_SANITIZE` CMake option plus a `sanitize` mode in `ci-verify.sh`;
+  CI now also runs the full test suite under ASan+UBSan.
+- CMake package config: `find_package(LibPO32)` now works against an
+  installed tree and in-tree consumers can link `LibPO32::po32`.
+- Relocatable pkg-config file (`po32.pc`), so `pkg-config --cflags --libs
+  po32` works from any install prefix.
+
 ## [0.2.1] - 2026-03-28
 
 ### Fixed
