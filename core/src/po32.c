@@ -1027,8 +1027,7 @@ void po32_modulator_init(po32_modulator_t *m, const uint8_t *frame, size_t frame
   m->symbol_phase = 1.0f;
   m->symbols_per_sample = (float)PO32_NATIVE_BAUD / (float)sample_rate;
   carrier_step = m->symbols_per_sample * (2.0f * PO32_DPSK_CARRIER_CYCLES_PER_SYMBOL * PO32_PI);
-  m->rot_sin = po32_lut_sinf(carrier_step);
-  m->rot_cos = po32_lut_cosf(carrier_step);
+  po32_lut_rot_step(carrier_step, &m->rot_sin, &m->rot_cos);
   m->osc_cos = 1.0f;
   m->state = 0;
 }
@@ -1169,8 +1168,7 @@ static void po32_demodulator_init(po32_demodulator_t *d, float sample_rate) {
   d->sample_rate = sample_rate;
   d->symbols_per_sample = PO32_NATIVE_BAUD / sample_rate;
   carrier_step = d->symbols_per_sample * (2.0f * PO32_DPSK_CARRIER_CYCLES_PER_SYMBOL * PO32_PI);
-  d->rot_sin = po32_lut_sinf(carrier_step);
-  d->rot_cos = po32_lut_cosf(carrier_step);
+  po32_lut_rot_step(carrier_step, &d->rot_sin, &d->rot_cos);
   d->osc_cos = 1.0f;
   d->symbol_phase = 1.0f;
 

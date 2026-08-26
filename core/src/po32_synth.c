@@ -267,7 +267,7 @@ static float synth_distort(float x, float amount) {
 
 static float synth_randf(uint32_t *state) {
   *state = *state * SYNTH_RAND_MULTIPLIER + SYNTH_RAND_INCREMENT;
-  return (float)(*state & SYNTH_RAND_MASK) / SYNTH_RAND_MAX;
+  return (float)(*state & SYNTH_RAND_MASK) * (1.0f / SYNTH_RAND_MAX);
 }
 
 /* ── Biquad filter ──────────────────────────────────────────────── */
@@ -370,7 +370,7 @@ po32_status_t po32_synth_render(const po32_synth_t *synth, const po32_patch_para
   float nf_freq, nf_q, n_atk, n_dcy;
   float mix, dist_amt, eq_db, eq_freq_hz, level;
   float osc_gain_mix, noise_gain_mix, osc_vel_g, noise_vel_g;
-  float phase, mod_decay_time, mod_rate_hz;
+  float phase01, mod_decay_time, mod_rate_hz;
   float mod_state;
   float mod_vel_g;
   float mod_env_period = 0.0f;
@@ -380,7 +380,31 @@ po32_status_t po32_synth_render(const po32_synth_t *synth, const po32_patch_para
   int use_eq;
 
   /* Precomputed noise mod alpha (constant per render) */
-  float mod_alpha_precomp;
+  float mod_alpha_precomp, mod_one_minus_alpha;
+
+  /* Per-render constants for the sample loop.
+   *
+   * The exponential envelopes are geometric sequences, so each one is
+   * advanced with a single multiply per sample instead of a powf call.
+   * The value is re-seeded from the closed form exactly once, at the
+   * attack -> decay transition, so the emitted values match the direct
+   * evaluation up to float rounding.
+   */
+  float inv_sr;
+  int wave_sel;                     /* 0 = sine, 1 = triangle, 2 = saw */
+  int mod_is_exp, mod_is_sine;      /* pitch-mod source select */
+  int nenv_is_ring, nenv_is_linear; /* noise envelope mode select */
+  float osc_freq_step;              /* base osc step, cycles/sample */
+  float mod_pitch_scale;            /* semitone depth / 12, may be 0 */
+  int mod_pitch_active;
+  int osc_env_in_attack, osc_env_synced;
+  float osc_env_v, osc_atk_coeff, osc_dcy_coeff;
+  int nenv_in_attack, nenv_synced;
+  float nenv_v, nenv_atk_coeff, nenv_dcy_coeff;
+  float mod_env_v, mod_dcy_coeff;
+  float mod_osc_s, mod_osc_c, mod_rot_s, mod_rot_c;
+  float lin_atk, lin_dcy, inv_lin_atk, inv_lin_dcy;
+  float inv_mod_env_period;
 
   if (synth == NULL || params == NULL || out == NULL || out_len == NULL) {
     return PO32_ERR_INVALID_ARG;
@@ -439,11 +463,60 @@ po32_status_t po32_synth_render(const po32_synth_t *synth, const po32_patch_para
   mod_rate_hz = (mod_mode < SYNTH_TWO_THIRDS) ? (SYNTH_SINE_MOD_MAX_HZ * mod_rate)
                                               : synth_param_to_hz(mod_rate);
   mod_state = 0.0f;
-  phase = 0.0f;
+  phase01 = 0.0f;
 
   /* Precompute noise mod alpha (constant for entire render) */
   mod_alpha_precomp = 1.0f - lut_expf(-LUT_TWO_PI * mod_rate_hz / sr);
   mod_alpha_precomp = synth_clamp(mod_alpha_precomp, SYNTH_MOD_ALPHA_MIN, 1.0f);
+  mod_one_minus_alpha = 1.0f - mod_alpha_precomp;
+
+  inv_sr = 1.0f / sr;
+
+  wave_sel = (params->OscWave < SYNTH_ONE_THIRD) ? 0 : (params->OscWave < SYNTH_TWO_THIRDS) ? 1 : 2;
+  mod_is_exp = (mod_mode < SYNTH_ONE_THIRD);
+  mod_is_sine = (!mod_is_exp && mod_mode < SYNTH_TWO_THIRDS);
+  nenv_is_ring = (params->NEnvMod > SYNTH_TWO_THIRDS);
+  nenv_is_linear = (!nenv_is_ring && params->NEnvMod > SYNTH_ONE_THIRD);
+
+  osc_freq_step = osc_freq * inv_sr;
+  mod_pitch_scale = mod_sm * (1.0f / SYNTH_SEMITONES_PER_OCTAVE);
+  mod_pitch_active = (mod_pitch_scale != 0.0f);
+
+  /* Oscillator amplitude envelope recursion.
+   * attack(t) = FLOOR * SPAN^(t/atk), decay(t) = FLOOR^(t/dcy), so each
+   * advances by a constant per-sample ratio. */
+  osc_env_in_attack = (osc_atk > 0.0f);
+  osc_env_synced = 0;
+  osc_env_v = SYNTH_ENV_FLOOR_GAIN;
+  osc_atk_coeff = osc_env_in_attack ? lut_powf(SYNTH_ENV_SPAN, inv_sr / osc_atk) : 1.0f;
+  osc_dcy_coeff = lut_powf(SYNTH_ENV_FLOOR_GAIN, inv_sr / osc_dcy);
+
+  /* Noise envelope: exp mode shares the same recursion; ring mode reuses
+   * the decay recursion for its decay factor. */
+  nenv_in_attack = (n_atk > 0.0f);
+  nenv_synced = 0;
+  nenv_v = SYNTH_ENV_FLOOR_GAIN;
+  nenv_atk_coeff = nenv_in_attack ? lut_powf(SYNTH_ENV_SPAN, inv_sr / n_atk) : 1.0f;
+  nenv_dcy_coeff = lut_powf(SYNTH_ENV_FLOOR_GAIN, inv_sr / n_dcy);
+
+  /* Linear noise envelope: reciprocals hoisted out of the loop. The
+   * attack branch is only reachable when lin_atk > 0 (t >= 0), likewise
+   * the decay branch requires lin_dcy > 0. */
+  lin_atk = n_atk * SYNTH_TWO_THIRDS;
+  lin_dcy = n_dcy * SYNTH_TWO_THIRDS;
+  inv_lin_atk = (lin_atk > 0.0f) ? (1.0f / lin_atk) : 0.0f;
+  inv_lin_dcy = (lin_dcy > 0.0f) ? (1.0f / lin_dcy) : 0.0f;
+  inv_mod_env_period = (mod_env_period > 0.0f) ? (1.0f / mod_env_period) : 0.0f;
+
+  /* Pitch-mod source: exponential decay is a geometric recursion; the
+   * sine LFO is a recursive complex rotation (same scheme as the DPSK
+   * modulator oscillator). */
+  mod_env_v = (mod_decay_time > 0.0f) ? 1.0f : 0.0f;
+  mod_dcy_coeff =
+      (mod_decay_time > 0.0f) ? lut_powf(SYNTH_ENV_FLOOR_GAIN, inv_sr / mod_decay_time) : 1.0f;
+  mod_osc_s = 0.0f;
+  mod_osc_c = 1.0f;
+  po32_lut_rot_step(LUT_TWO_PI * mod_rate_hz * inv_sr, &mod_rot_s, &mod_rot_c);
 
   if (params->NEnvMod > SYNTH_TWO_THIRDS) {
     float dcy_param = params->NEnvDcy;
@@ -462,78 +535,99 @@ po32_status_t po32_synth_render(const po32_synth_t *synth, const po32_patch_para
 
   /* ── Main render loop ─────────────────────────────────────────
    *
-   * Structurally identical to po32_synth.c but every transcendental
-   * call replaced with a LUT equivalent.
+   * Only adds, multiplies, compares, and (for the sine oscillator and
+   * ring envelope) table lookups per sample. Envelopes advance by one
+   * multiply; exp2 runs only while pitch mod is active.
    */
   for (i = 0; i < n; ++i) {
-    float t = (float)i / sr;
+    float t = (float)i * inv_sr;
     float osc_env, noise_env;
-    float mod_sig, freq_mult, inst_freq;
+    float mod_sig, freq_mult;
     float osc_sample, noise_raw, noise_sample;
     float sample;
 
     /* osc_dcy is always > 0 (synth_decay_time returns >= SYNTH_DECAY_MIN_SECONDS). */
-    if (osc_atk > 0.0f && t < osc_atk)
-      osc_env = synth_exp_attack_env(t, osc_atk);
-    else
-      osc_env = synth_exp_decay_env(t - osc_atk, osc_dcy);
+    if (osc_env_in_attack && t < osc_atk) {
+      osc_env = osc_env_v;
+      osc_env_v *= osc_atk_coeff;
+    } else {
+      if (!osc_env_synced) {
+        osc_env_v = synth_exp_decay_env(t - osc_atk, osc_dcy);
+        osc_env_synced = 1;
+      }
+      osc_env = osc_env_v;
+      osc_env_v *= osc_dcy_coeff;
+    }
 
-    if (mod_mode < SYNTH_ONE_THIRD) {
-      mod_sig = (mod_decay_time > 0.0f) ? synth_exp_decay_env(t, mod_decay_time) : 0.0f;
-    } else if (mod_mode < SYNTH_TWO_THIRDS) {
-      float sine_env = (mod_decay_time > 0.0f) ? synth_exp_decay_env(t, mod_decay_time) : 0.0f;
-      mod_sig = lut_sinf(LUT_TWO_PI * mod_rate_hz * t) * sine_env;
+    if (mod_is_exp) {
+      mod_sig = mod_env_v;
+      mod_env_v *= mod_dcy_coeff;
+    } else if (mod_is_sine) {
+      float ms = mod_osc_s * mod_rot_c + mod_osc_c * mod_rot_s;
+      float mc = mod_osc_c * mod_rot_c - mod_osc_s * mod_rot_s;
+      mod_sig = mod_osc_s * mod_env_v;
+      mod_osc_s = ms;
+      mod_osc_c = mc;
+      mod_env_v *= mod_dcy_coeff;
     } else {
       float noise_in = synth_randf(&rand_state) * 2.0f - 1.0f;
-      mod_state = mod_state * (1.0f - mod_alpha_precomp) + noise_in * mod_alpha_precomp;
+      mod_state = mod_state * mod_one_minus_alpha + noise_in * mod_alpha_precomp;
       mod_sig = mod_state;
     }
 
-    freq_mult = lut_exp2f(mod_sig * mod_sm / SYNTH_SEMITONES_PER_OCTAVE);
-    inst_freq = osc_freq * freq_mult;
-    phase += inst_freq * (LUT_TWO_PI / sr);
+    freq_mult = mod_pitch_active ? lut_exp2f(mod_sig * mod_pitch_scale) : 1.0f;
+    phase01 = synth_wrap_phase01(phase01 + osc_freq_step * freq_mult);
 
-    if (params->OscWave < SYNTH_ONE_THIRD) {
-      osc_sample = lut_sinf(phase);
-    } else if (params->OscWave < SYNTH_TWO_THIRDS) {
-      float ph = synth_wrap_phase01(phase * LUT_INV_TWO_PI);
-      osc_sample = 2.0f * synth_fabsf(2.0f * ph - 1.0f) - 1.0f;
+    if (wave_sel == 0) {
+      osc_sample = po32_lut_sinf_turns01(phase01);
+    } else if (wave_sel == 1) {
+      osc_sample = 2.0f * synth_fabsf(2.0f * phase01 - 1.0f) - 1.0f;
     } else {
-      float ph = synth_wrap_phase01(phase * LUT_INV_TWO_PI);
-      osc_sample = 2.0f * ph - 1.0f;
+      osc_sample = 2.0f * phase01 - 1.0f;
     }
 
     osc_sample *= osc_env;
 
     /* n_dcy is always > 0 (synth_decay_time returns >= SYNTH_DECAY_MIN_SECONDS). */
-    if (params->NEnvMod > SYNTH_TWO_THIRDS) {
+    if (nenv_is_ring) {
       if (t < n_atk) {
         noise_env = 1.0f;
-      } else if (mod_env_period > 0.0f) {
-        float dt = t - n_atk;
-        float saw = synth_wrap_phase01(dt / mod_env_period);
-        float tri = 1.0f - 2.0f * synth_fabsf(saw - 0.5f);
-        float ring = lut_cosf(LUT_PI * tri);
-        float decay = synth_exp_decay_env(dt, n_dcy);
-        noise_env = ring * decay * mod_env_amp_correction;
       } else {
-        noise_env = synth_exp_decay_env(t - n_atk, n_dcy);
+        float dt = t - n_atk;
+        float decay;
+        if (!nenv_synced) {
+          nenv_v = synth_exp_decay_env(dt, n_dcy);
+          nenv_synced = 1;
+        }
+        decay = nenv_v;
+        nenv_v *= nenv_dcy_coeff;
+        if (mod_env_period > 0.0f) {
+          float saw = synth_wrap_phase01(dt * inv_mod_env_period);
+          float tri = 1.0f - 2.0f * synth_fabsf(saw - 0.5f);
+          noise_env = lut_cosf(LUT_PI * tri) * decay * mod_env_amp_correction;
+        } else {
+          noise_env = decay;
+        }
       }
-    } else if (params->NEnvMod > SYNTH_ONE_THIRD) {
-      float lin_atk = n_atk * SYNTH_TWO_THIRDS;
-      float lin_dcy = n_dcy * SYNTH_TWO_THIRDS;
-
+    } else if (nenv_is_linear) {
       if (t < lin_atk)
-        noise_env = (lin_atk > 0.0f) ? (t / lin_atk) : 1.0f;
+        noise_env = t * inv_lin_atk;
       else if (t < lin_atk + lin_dcy)
-        noise_env = (lin_dcy > 0.0f) ? (1.0f - (t - lin_atk) / lin_dcy) : 0.0f;
+        noise_env = 1.0f - (t - lin_atk) * inv_lin_dcy;
       else
         noise_env = 0.0f;
     } else {
-      if (n_atk > 0.0f && t < n_atk)
-        noise_env = synth_exp_attack_env(t, n_atk);
-      else
-        noise_env = synth_exp_decay_env(t - n_atk, n_dcy);
+      if (nenv_in_attack && t < n_atk) {
+        noise_env = nenv_v;
+        nenv_v *= nenv_atk_coeff;
+      } else {
+        if (!nenv_synced) {
+          nenv_v = synth_exp_decay_env(t - n_atk, n_dcy);
+          nenv_synced = 1;
+        }
+        noise_env = nenv_v;
+        nenv_v *= nenv_dcy_coeff;
+      }
     }
 
     noise_raw = synth_randf(&rand_state) * 2.0f - 1.0f;
