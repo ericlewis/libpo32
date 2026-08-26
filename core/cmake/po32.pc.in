@@ -1,0 +1,13 @@
+# Relocatable: prefix is derived from this file's installed location
+# (<prefix>/<libdir>/pkgconfig/po32.pc).
+prefix=${pcfiledir}/../..
+libdir=${prefix}/@CMAKE_INSTALL_LIBDIR@
+includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@
+
+Name: libpo32
+Description: PO-32 acoustic transfer codec and drum voice synthesizer
+URL: https://github.com/ericlewis/libpo32
+Version: @PROJECT_VERSION@
+Libs: -L${libdir} -lpo32
+Libs.private: -lm
+Cflags: -I${includedir}

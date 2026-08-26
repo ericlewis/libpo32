@@ -33,6 +33,7 @@ add_library(po32 STATIC
   src/po32_patch_import.c
   src/po32_synth.c
 )
+add_library(LibPO32::po32 ALIAS po32)
 
 set_target_properties(po32 PROPERTIES OUTPUT_NAME po32)
 
@@ -194,4 +195,34 @@ install(EXPORT LibPO32Targets
   FILE LibPO32Targets.cmake
   NAMESPACE LibPO32::
   DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/LibPO32
+)
+
+include(CMakePackageConfigHelpers)
+
+configure_package_config_file(
+  ${CMAKE_CURRENT_SOURCE_DIR}/cmake/LibPO32Config.cmake.in
+  ${CMAKE_CURRENT_BINARY_DIR}/LibPO32Config.cmake
+  INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/LibPO32
+)
+
+write_basic_package_version_file(
+  ${CMAKE_CURRENT_BINARY_DIR}/LibPO32ConfigVersion.cmake
+  VERSION ${PROJECT_VERSION}
+  COMPATIBILITY SameMajorVersion
+)
+
+install(FILES
+  ${CMAKE_CURRENT_BINARY_DIR}/LibPO32Config.cmake
+  ${CMAKE_CURRENT_BINARY_DIR}/LibPO32ConfigVersion.cmake
+  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/LibPO32
+)
+
+configure_file(
+  ${CMAKE_CURRENT_SOURCE_DIR}/cmake/po32.pc.in
+  ${CMAKE_CURRENT_BINARY_DIR}/po32.pc
+  @ONLY
+)
+
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/po32.pc
+  DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig
 )
