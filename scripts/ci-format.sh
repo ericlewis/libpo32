@@ -3,13 +3,7 @@ set -eu
 
 root_dir=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 
-if [ -z "${CLANG_FORMAT:-}" ]; then
-  if command -v clang-format-18 >/dev/null 2>&1; then
-    CLANG_FORMAT=clang-format-18
-  else
-    CLANG_FORMAT=clang-format
-  fi
-fi
+. "$root_dir/scripts/resolve-clang-format.sh"
 
 find "$root_dir" -maxdepth 4 \
   \( -path "$root_dir/.git" -o -path "$root_dir/build*" \) -prune -o \

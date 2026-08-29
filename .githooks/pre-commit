@@ -3,14 +3,6 @@ set -eu
 
 root_dir=$(git rev-parse --show-toplevel)
 
-if [ -z "${CLANG_FORMAT:-}" ]; then
-  if command -v clang-format-18 >/dev/null 2>&1; then
-    CLANG_FORMAT=clang-format-18
-  else
-    CLANG_FORMAT=clang-format
-  fi
-fi
-
 staged_files=$(
   git diff --cached --name-only --diff-filter=ACMR |
     grep -E '\.(c|h)$' || true
@@ -19,6 +11,8 @@ staged_files=$(
 if [ -z "$staged_files" ]; then
   exit 0
 fi
+
+. "$root_dir/scripts/resolve-clang-format.sh"
 
 printf '%s\n' "$staged_files" | while IFS= read -r path; do
   [ -n "$path" ] || continue

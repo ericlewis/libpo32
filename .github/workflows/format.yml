@@ -19,10 +19,14 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v6
 
+      - name: Read pinned clang-format version
+        id: pin
+        run: printf 'major=%s\n' "$(tr -d '[:space:]' < .clang-format-version)" >> "$GITHUB_OUTPUT"
+
       - name: Install clang-format
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang-format-18
+          sudo apt-get install -y clang-format-${{ steps.pin.outputs.major }}
 
       - name: Verify formatting
-        run: CLANG_FORMAT=clang-format-18 ./scripts/ci-format.sh
+        run: CLANG_FORMAT=clang-format-${{ steps.pin.outputs.major }} ./scripts/ci-format.sh
