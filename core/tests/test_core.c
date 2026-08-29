@@ -877,6 +877,93 @@ static void test_streaming_modulator_matches_block_render(void) {
   free(stream_samples);
 }
 
+static void test_long_frame_carrier_does_not_decay(void) {
+  /* The modulator and demodulator both advance their carrier by a recursive
+   * rotation whose rotor comes from the interpolated sine LUT, so its
+   * magnitude is slightly under 1. Without renormalization the carrier fades
+   * ~10x every 2M samples: audio rendered from a long frame goes silent, and
+   * the demodulator's correlation underflows to zero and decodes every bit as
+   * a 1. A 400-packet frame is ~25.4M samples, well past both failure points. */
+  const uint32_t sample_rate = 44100u;
+  const int packet_count = 400;
+  const size_t peak_window = 4096u;
+  /* The DPSK demodulator resolves each symbol against the previous one, so it
+   * needs a little signal past the final bit to emit it. Real captures carry
+   * trailing silence; po32_render_sample_count does not include any. */
+  const size_t trailing_silence = 64u;
+  po32_builder_t builder;
+  po32_packet_t dpkt;
+  po32_decode_result_t result;
+  uint8_t *frame;
+  uint8_t *decoded;
+  float *samples;
+  size_t frame_cap;
+  size_t frame_len = 0u;
+  size_t sample_count;
+  size_t decoded_len = 0u;
+  size_t i;
+  float peak = 0.0f;
+  po32_status_t status;
+
+  frame_cap = PO32_PREAMBLE_BYTES + (size_t)packet_count * (PO32_PATTERN_PAYLOAD_BYTES + 16u) + 64u;
+  frame = (uint8_t *)malloc(frame_cap);
+  decoded = (uint8_t *)malloc(frame_cap);
+  assert(frame != NULL);
+  assert(decoded != NULL);
+
+  po32_builder_init(&builder, frame, frame_cap);
+  for (int p = 0; p < packet_count; ++p) {
+    po32_pattern_packet_t pat;
+    memset(&pat, 0, sizeof(pat));
+    pat.pattern_number = (uint8_t)(p & 0x0F);
+    pat.accent_bits = (uint16_t)(0xA55Au ^ (unsigned)p);
+    for (size_t k = 0; k < (size_t)(PO32_PATTERN_LANE_COUNT * PO32_PATTERN_STEP_COUNT); ++k) {
+      pat.morph_lanes[k].flag = 0x80u;
+      pat.morph_lanes[k].morph = (uint8_t)(1u + (k & 7u));
+    }
+    status = po32_packet_encode(PO32_TAG_PATTERN, &pat, &dpkt);
+    assert(status == PO32_OK);
+    status = po32_builder_append(&builder, &dpkt);
+    assert(status == PO32_OK);
+  }
+  status = po32_builder_finish(&builder, &frame_len);
+  assert(status == PO32_OK);
+
+  sample_count = po32_render_sample_count(frame_len, sample_rate);
+  assert(sample_count > 25000000u);
+  assert(sample_count > peak_window);
+
+  samples = (float *)calloc(sample_count + trailing_silence, sizeof(*samples));
+  assert(samples != NULL);
+
+  status = po32_render_dpsk_f32(frame, frame_len, sample_rate, samples, sample_count);
+  assert(status == PO32_OK);
+
+  /* The carrier must still be at full swing at the end of the frame. */
+  for (i = sample_count - peak_window; i < sample_count; ++i) {
+    float a = fabsf(samples[i]);
+    if (a > peak) {
+      peak = a;
+    }
+  }
+  assert(peak > 0.5f);
+
+  memset(&result, 0, sizeof(result));
+  status = po32_decode_f32(samples, sample_count + trailing_silence, (float)sample_rate, &result,
+                           decoded, frame_cap, &decoded_len);
+  assert(status == PO32_OK);
+  assert(result.packet_count == packet_count);
+  assert(result.done == 1);
+  assert(result.tail.marker_c3 == 0xC3u);
+  assert(result.tail.marker_71 == 0x71u);
+  assert(decoded_len == frame_len);
+  assert(memcmp(decoded, frame, frame_len) == 0);
+
+  free(samples);
+  free(decoded);
+  free(frame);
+}
+
 static void test_extended_payload_encoders(void) {
   po32_morph_pair_t state_pairs[PO32_STATE_MORPH_PAIR_COUNT];
   po32_morph_pair_t pattern_pairs[PO32_PATTERN_LANE_COUNT * PO32_PATTERN_STEP_COUNT];
@@ -1441,6 +1528,7 @@ int main(void) {
   test_builder_finish_null_frame_len();
   test_frame_build_and_parse();
   test_streaming_modulator_matches_block_render();
+  test_long_frame_carrier_does_not_decay();
   test_extended_payload_encoders();
   test_pattern_trigger_helpers();
   test_pattern_builder_helpers();

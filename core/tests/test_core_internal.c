@@ -4,6 +4,7 @@
 
 #include <assert.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "../src/po32.c"
@@ -790,6 +791,94 @@ static void test_decode_internal_helpers(void) {
   assert(status == PO32_ERR_INVALID_ARG);
 }
 
+/*
+ * Both carrier oscillators advance by a recursive rotation whose rotor comes
+ * from the interpolated sine LUT, so |rotor| is ~1 - 1.1e-6 instead of 1. Each
+ * loop rescales to hold the magnitude at unity; without that the oscillator
+ * decays ~10x every 2M samples, which silences long renders and underflows the
+ * demodulator's correlation to zero.
+ *
+ * These two checks look at each oscillator on its own, because an end-to-end
+ * decode only notices a loop that is *still* unscaled once the combined decay
+ * underflows: with either loop fixed, a round trip keeps working until roughly
+ * 773 packets. Checking the invariant directly catches a regression in one
+ * loop, needs no large buffers, and points at which loop broke.
+ */
+#define PO32_OSC_RUN_SAMPLES 30000000u
+
+/* Asserted in each caller so a failure names the loop that regressed. */
+static float osc_magnitude_squared(float osc_sin, float osc_cos) {
+  return osc_sin * osc_sin + osc_cos * osc_cos;
+}
+
+static void test_modulator_carrier_magnitude_holds(void) {
+  po32_modulator_t modulator;
+  float chunk[1024];
+  uint8_t *frame;
+  size_t frame_len = 128u * 1024u;
+  size_t rendered = 0u;
+  float magnitude_squared;
+  float peak = 0.0f;
+  size_t i;
+
+  frame = (uint8_t *)malloc(frame_len);
+  assert(frame != NULL);
+  for (i = 0u; i < frame_len; ++i) {
+    frame[i] = (uint8_t)(i * 31u + (i >> 5));
+  }
+
+  po32_modulator_init(&modulator, frame, frame_len, 44100u);
+  assert(modulator.total_samples > PO32_OSC_RUN_SAMPLES);
+
+  while (rendered < PO32_OSC_RUN_SAMPLES) {
+    size_t chunk_len = 0u;
+    po32_status_t status =
+        po32_modulator_render_f32(&modulator, chunk, sizeof(chunk) / sizeof(chunk[0]), &chunk_len);
+    assert(status == PO32_OK);
+    assert(chunk_len > 0u);
+    rendered += chunk_len;
+    peak = 0.0f;
+    for (i = 0u; i < chunk_len; ++i) {
+      float a = chunk[i] < 0.0f ? -chunk[i] : chunk[i];
+      if (a > peak) {
+        peak = a;
+      }
+    }
+  }
+
+  /* The last chunk spans many carrier cycles, so it must reach full swing. */
+  assert(peak > 0.9f);
+  magnitude_squared = osc_magnitude_squared(modulator.osc_sin, modulator.osc_cos);
+  assert(magnitude_squared > 0.999f);
+  assert(magnitude_squared < 1.001f);
+
+  free(frame);
+}
+
+static void test_demodulator_carrier_magnitude_holds(void) {
+  po32_demodulator_t demod;
+  float silence[1024];
+  size_t pushed = 0u;
+  float magnitude_squared;
+
+  /* The local oscillator advances once per sample whatever the input is, so
+   * silence is enough to run it out to the length under test. */
+  memset(silence, 0, sizeof(silence));
+  po32_demodulator_init(&demod, 44100.0f);
+
+  while (pushed < PO32_OSC_RUN_SAMPLES) {
+    size_t count = sizeof(silence) / sizeof(silence[0]);
+    po32_status_t status = po32_demodulator_push(&demod, silence, count, NULL, NULL);
+    assert(status == PO32_OK);
+    pushed += count;
+  }
+
+  assert(demod.synced == 0);
+  magnitude_squared = osc_magnitude_squared(demod.osc_sin, demod.osc_cos);
+  assert(magnitude_squared > 0.999f);
+  assert(magnitude_squared < 1.001f);
+}
+
 int main(void) {
   test_tag_and_tail_helpers();
   test_packet_decode_internals();
@@ -799,5 +888,7 @@ int main(void) {
   test_public_guard_paths();
   test_decode_internal_helpers();
   test_demod_on_byte_paths();
+  test_modulator_carrier_magnitude_holds();
+  test_demodulator_carrier_magnitude_holds();
   return 0;
 }

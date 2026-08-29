@@ -6,6 +6,17 @@ The format is based on Keep a Changelog, and the project follows Semantic Versio
 
 ## [Unreleased]
 
+### Fixed
+- The DPSK carrier no longer drifts in amplitude over long frames. The
+  modulator and demodulator both advance the carrier by a recursive rotation
+  whose rotor comes from the interpolated sine LUT, so its magnitude was about
+  `1 - 1.1e-6` rather than `1`. Rendered audio faded roughly 10x every 2M
+  samples, and the demodulator's correlation eventually underflowed to zero and
+  decoded every bit as a `1`, desyncing at around 386 packets. At the sample
+  rates where the LUT puts the rotor magnitude above `1` the carrier grew
+  instead, pushing output past the `[-1, 1]` range that `po32_render_dpsk_f32`
+  documents.
+
 ## [0.2.1] - 2026-03-28
 
 ### Fixed
