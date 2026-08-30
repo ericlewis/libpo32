@@ -68,9 +68,18 @@ Additional local checks:
 ./scripts/ci-format.sh
 ./scripts/ci-static-analysis.sh
 ./scripts/ci-coverage.sh
+./scripts/ci-verify.sh sanitize
+./scripts/ci-fuzz.sh
 ```
 
 `ci-coverage.sh` requires `gcovr` on `PATH`.
+
+`ci-verify.sh sanitize` rebuilds and runs the test suite under
+AddressSanitizer and UndefinedBehaviorSanitizer.
+
+`ci-fuzz.sh` requires Clang with the libFuzzer runtime and smoke-fuzzes
+every harness in [`core/fuzz`](core/fuzz/README.md); set
+`PO32_FUZZ_SECONDS` for a longer run.
 
 ## Commit Messages
 

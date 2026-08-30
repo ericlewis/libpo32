@@ -91,6 +91,20 @@ The demo builds a transfer frame, renders it to audio, decodes it back
 (verifying a lossless roundtrip), synthesizes a drum hit, and writes two
 WAV files: `demo_modem.wav` and `demo_kick.wav`.
 
+### Installing and Consuming
+
+`cmake --install` ships the static library, headers, a CMake package, and a
+pkg-config file, so both consumption paths work out of the box:
+
+```cmake
+find_package(LibPO32 0.2 REQUIRED)
+target_link_libraries(app PRIVATE LibPO32::po32)
+```
+
+```sh
+cc app.c $(pkg-config --cflags --libs po32) -lm
+```
+
 ## Examples
 
 | Command | Purpose |
@@ -118,6 +132,7 @@ WAV files: `demo_modem.wav` and `demo_kick.wav`.
 | [Patch Parameters](core/docs/PATCH_PARAMETERS.md) | The 21 parameters |
 | [Bindings](core/docs/BINDINGS.md) | How to write a new language binding |
 | [Examples](core/examples/README.md) | Supported example programs |
+| [Fuzzing](core/fuzz/README.md) | Fuzz harnesses and differential properties |
 | [Contributing](CONTRIBUTING.md) | Local setup, checks, and commit conventions |
 
 ## Project Layout
@@ -128,6 +143,7 @@ WAV files: `demo_modem.wav` and `demo_kick.wav`.
 | [`core/include`](core/include) | Public C headers |
 | [`core/examples`](core/examples) | Supported C examples |
 | [`core/tests`](core/tests) | Core test coverage |
+| [`core/fuzz`](core/fuzz) | libFuzzer harnesses for every untrusted-input surface |
 | [`core/docs`](core/docs) | Architecture, protocol, and API notes |
 | [`bindings/go`](bindings/go) | Go bindings (cgo, wraps full public API) |
 

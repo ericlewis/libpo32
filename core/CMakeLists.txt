@@ -6,6 +6,26 @@ set(CMAKE_C_EXTENSIONS OFF)
 
 enable_testing()
 
+option(PO32_SANITIZE "Build library, tests, and examples with ASan+UBSan" OFF)
+option(PO32_BUILD_FUZZERS "Build libFuzzer harnesses (requires Clang)" OFF)
+option(PO32_FUZZ_STANDALONE "Build fuzz harnesses as file-driven replay binaries" OFF)
+
+if(PO32_SANITIZE)
+  add_compile_options(-fsanitize=address,undefined -fno-sanitize-recover=all
+                      -fno-omit-frame-pointer -g)
+  add_link_options(-fsanitize=address,undefined)
+endif()
+
+if(PO32_BUILD_FUZZERS)
+  if(NOT CMAKE_C_COMPILER_ID MATCHES "Clang")
+    message(FATAL_ERROR "PO32_BUILD_FUZZERS requires Clang (got ${CMAKE_C_COMPILER_ID})")
+  endif()
+  # Instrument everything so libFuzzer coverage guides through the library.
+  add_compile_options(-fsanitize=fuzzer-no-link,address,undefined
+                      -fno-sanitize-recover=all -fno-omit-frame-pointer -g)
+  add_link_options(-fsanitize=address,undefined)
+endif()
+
 # po32 library (pure C, no external dependencies)
 
 add_library(po32 STATIC
@@ -13,6 +33,7 @@ add_library(po32 STATIC
   src/po32_patch_import.c
   src/po32_synth.c
 )
+add_library(LibPO32::po32 ALIAS po32)
 
 set_target_properties(po32 PROPERTIES OUTPUT_NAME po32)
 
@@ -39,6 +60,36 @@ target_link_libraries(po32_pattern_editor PRIVATE po32)
 
 add_executable(po32_decode_capture examples/po32_decode_capture.c)
 target_link_libraries(po32_decode_capture PRIVATE po32)
+
+# fuzz harnesses
+
+set(PO32_FUZZ_TARGETS
+  frame_parse
+  packet_decode
+  patch_import
+  synth_render
+  audio_decode
+  modem_roundtrip
+)
+
+if(PO32_BUILD_FUZZERS OR PO32_FUZZ_STANDALONE)
+  foreach(fuzz_target IN LISTS PO32_FUZZ_TARGETS)
+    add_executable(po32_fuzz_${fuzz_target} fuzz/fuzz_${fuzz_target}.c)
+    target_link_libraries(po32_fuzz_${fuzz_target} PRIVATE po32)
+    target_include_directories(po32_fuzz_${fuzz_target} PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/fuzz
+    )
+    if(PO32_BUILD_FUZZERS)
+      target_compile_options(po32_fuzz_${fuzz_target} PRIVATE -fsanitize=fuzzer)
+      target_link_options(po32_fuzz_${fuzz_target} PRIVATE -fsanitize=fuzzer)
+    else()
+      target_compile_definitions(po32_fuzz_${fuzz_target} PRIVATE PO32_FUZZ_STANDALONE)
+    endif()
+  endforeach()
+
+  add_executable(po32_fuzz_seed_gen fuzz/fuzz_seed_gen.c)
+  target_link_libraries(po32_fuzz_seed_gen PRIVATE po32)
+endif()
 
 # tests
 
@@ -144,4 +195,34 @@ install(EXPORT LibPO32Targets
   FILE LibPO32Targets.cmake
   NAMESPACE LibPO32::
   DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/LibPO32
+)
+
+include(CMakePackageConfigHelpers)
+
+configure_package_config_file(
+  ${CMAKE_CURRENT_SOURCE_DIR}/cmake/LibPO32Config.cmake.in
+  ${CMAKE_CURRENT_BINARY_DIR}/LibPO32Config.cmake
+  INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/LibPO32
+)
+
+write_basic_package_version_file(
+  ${CMAKE_CURRENT_BINARY_DIR}/LibPO32ConfigVersion.cmake
+  VERSION ${PROJECT_VERSION}
+  COMPATIBILITY SameMajorVersion
+)
+
+install(FILES
+  ${CMAKE_CURRENT_BINARY_DIR}/LibPO32Config.cmake
+  ${CMAKE_CURRENT_BINARY_DIR}/LibPO32ConfigVersion.cmake
+  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/LibPO32
+)
+
+configure_file(
+  ${CMAKE_CURRENT_SOURCE_DIR}/cmake/po32.pc.in
+  ${CMAKE_CURRENT_BINARY_DIR}/po32.pc
+  @ONLY
+)
+
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/po32.pc
+  DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig
 )
