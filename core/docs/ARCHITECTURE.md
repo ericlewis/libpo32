@@ -88,12 +88,22 @@ The builder is the frame-construction primitive in the release surface.
 
 ## Receive Path
 
-There is one receive model in the release surface:
+There are two receive models in the release surface:
 
-- call `po32_decode_f32(...)`
+- call `po32_decode_f32(...)` on a whole capture
+- drive `po32_demodulator_t` chunk by chunk
 
 `po32_decode_f32(...)` demodulates mono float audio and rebuilds a normalized
-frame from the recovered packets.
+frame from the recovered packets. It is a one-shot wrapper over the streaming
+demodulator, so both paths share one implementation and agree on packet
+offsets.
+
+The streaming demodulator suits callers that never hold the whole capture:
+`po32_demodulator_push(...)` accepts audio in arbitrarily sized chunks, and
+`po32_demodulator_flush(...)` signals end-of-audio so a symbol still pending at
+the last sample is resolved. The drum synth mirrors this shape, with
+`po32_synth_voice_t` rendering a hit in chunks and `po32_synth_render(...)` as
+its one-shot wrapper.
 
 ## Why The Output Is “Normalized”
 

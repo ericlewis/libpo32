@@ -6,6 +6,59 @@ The format is based on Keep a Changelog, and the project follows Semantic Versio
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-30
+
+### Added
+- Streaming audio is now public API. `po32_demodulator_init(...)`,
+  `po32_demodulator_push(...)`, `po32_demodulator_done(...)`,
+  `po32_demodulator_packet_count(...)`, `po32_demodulator_tail(...)`, and
+  `po32_demodulator_desync(...)` decode a capture in chunks, and
+  `po32_synth_voice_init(...)`, `po32_synth_voice_render_f32(...)`,
+  `po32_synth_voice_reset(...)`, `po32_synth_voice_done(...)`, and
+  `po32_synth_voice_samples_remaining(...)` render a hit in chunks.
+  `po32_decode_f32(...)` and `po32_synth_render(...)` are now one-shot
+  wrappers over them, so both paths share one implementation.
+- `po32_demodulator_stopped(...)` — report that a callback returning nonzero
+  has stopped the stream. The stop is terminal: later pushes are no-ops.
+- `po32_demodulator_flush(...)` — signal end-of-audio to the streaming
+  demodulator so a final pending symbol is resolved without trailing
+  silence.
+- Go: `DecodeF32WithCapacity(...)` decodes with a caller-chosen frame buffer
+  capacity, and `FrameParseTail(...)` reports whether the final tail was
+  decoded — `FrameParse(...)` keeps its signature.
+- Six libFuzzer harnesses under `core/fuzz/` covering every untrusted-input
+  surface: the frame parser, typed packet codecs, `.mtdrum` text importer,
+  drum synthesizer, audio decoder, and a differential harness that checks
+  builder → parser and render → decode round trips end to end. Includes a
+  seed-corpus generator, standalone replay builds for non-Clang compilers
+  (`-DPO32_FUZZ_STANDALONE=ON`), and a `Fuzz` CI workflow that smoke-fuzzes
+  each target on every PR and runs a longer weekly campaign.
+- `PO32_SANITIZE` CMake option plus a `sanitize` mode in `ci-verify.sh`;
+  CI now also runs the full test suite under ASan+UBSan.
+- CMake package config: `find_package(LibPO32)` now works against an
+  installed tree and in-tree consumers can link `LibPO32::po32`.
+- Relocatable pkg-config file (`po32.pc`), so `pkg-config --cflags --libs
+  po32` works from any install prefix.
+
+### Changed
+- The synth render loop no longer calls `powf`, and does no division or LUT
+  range reduction per sample. Exponential envelopes are geometric recursions
+  re-seeded from the closed form once at the attack-to-decay transition, the
+  pitch-mod LFO is a recursive complex rotation, oscillator phase is carried
+  as wrapped `[0, 1)` turns, and `t = i / sr` and the PRNG step became
+  multiplies by precomputed reciprocals.
+- `po32_synth_render(...)` and `po32_synth_voice_render_f32(...)` were two
+  copies of the same render loop. The loop now lives in the voice, with every
+  envelope and LFO recursion carried in `po32_synth_voice_t` so it survives a
+  chunk boundary.
+- Go: `DecodeF32(...)` grows its reconstructed-frame buffer until the frame
+  fits, bounded by the sample count, instead of failing with
+  `ErrBufferTooSmall` on any frame over the fixed 64 KiB.
+- The formatter major version is pinned in `.clang-format-version` and shared
+  by the pre-commit hook, `scripts/ci-format.sh`, and the format CI job. A
+  mismatched major version now refuses to run and reports both the version it
+  found and the one it needs, instead of reformatting untouched lines.
+
 ### Fixed
 - Packets delivered by `po32_demodulator_push(...)` now carry the same
   `offset` as the ones `po32_frame_parse(...)` reports for the same frame.
@@ -30,26 +83,16 @@ The format is based on Keep a Changelog, and the project follows Semantic Versio
   rates where the LUT puts the rotor magnitude above `1` the carrier grew
   instead, pushing output past the `[-1, 1]` range that `po32_render_dpsk_f32`
   documents.
-
-### Added
-- `po32_demodulator_stopped(...)` — report that a callback returning nonzero
-  has stopped the stream. The stop is terminal: later pushes are no-ops.
-- `po32_demodulator_flush(...)` — signal end-of-audio to the streaming
-  demodulator so a final pending symbol is resolved without trailing
-  silence.
-- Six libFuzzer harnesses under `core/fuzz/` covering every untrusted-input
-  surface: the frame parser, typed packet codecs, `.mtdrum` text importer,
-  drum synthesizer, audio decoder, and a differential harness that checks
-  builder → parser and render → decode round trips end to end. Includes a
-  seed-corpus generator, standalone replay builds for non-Clang compilers
-  (`-DPO32_FUZZ_STANDALONE=ON`), and a `Fuzz` CI workflow that smoke-fuzzes
-  each target on every PR and runs a longer weekly campaign.
-- `PO32_SANITIZE` CMake option plus a `sanitize` mode in `ci-verify.sh`;
-  CI now also runs the full test suite under ASan+UBSan.
-- CMake package config: `find_package(LibPO32)` now works against an
-  installed tree and in-tree consumers can link `LibPO32::po32`.
-- Relocatable pkg-config file (`po32.pc`), so `pkg-config --cflags --libs
-  po32` works from any install prefix.
+- Every synth duration is funnelled through one converter, so a negative,
+  NaN, infinite, or enormous duration can no longer reach an out-of-range
+  float-to-`size_t` conversion, and a zero sample rate renders nothing instead
+  of dividing by zero and feeding NaN to the LUT helpers.
+- `po32_synth_voice_init(...)` zeroes the voice before rejecting a null params
+  pointer, so a refused init leaves an inert voice rather than the previous
+  hit's live state.
+- `po32_demodulator_init(...)` and `po32_decode_f32(...)` reject any sample
+  rate that is not positive and finite. A NaN rate previously slipped past a
+  `rate <= 0` guard and reached the same undefined LUT conversions.
 
 ## [0.2.1] - 2026-03-28
 

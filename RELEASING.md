@@ -17,6 +17,7 @@ The release covers the core C library and language bindings:
 | `core/examples/po32_demo.c` | End-to-end transfer plus synth demo |
 | `core/examples/po32_pattern_editor.c` | Interactive pattern editor and exporter |
 | `core/examples/po32_decode_capture.c` | Transfer WAV decoder and packet dumper |
+| `core/fuzz/` | libFuzzer harnesses for every untrusted-input surface |
 | `bindings/go/` | Go language bindings |
 
 ## Checklist
@@ -36,6 +37,7 @@ The release covers the core C library and language bindings:
    `core/docs/C_API.md`
    `core/docs/SYNTH.md`
    `core/docs/PATCH_PARAMETERS.md`
+   `core/docs/BINDINGS.md`
    `core/examples/README.md`
    `CHANGELOG.md`
    `VERSION`
@@ -45,7 +47,9 @@ The release covers the core C library and language bindings:
 
 ## Notes
 
-- The supported surface is builder, parser, renderer, synth, and one decoding
-  path exposed through the C API, plus Go bindings wrapping the full public API.
+- The supported surface is builder, parser, renderer, synth, and two decoding
+  paths exposed through the C API: `po32_decode_f32(...)` for a whole capture
+  and the streaming `po32_demodulator_t`. The Go bindings wrap everything but
+  the streaming demodulator and streaming synth voice.
 - CMake is the authoritative build and test entrypoint for the core C library.
 - Go bindings use cgo and compile the C sources directly; no cmake step needed.
