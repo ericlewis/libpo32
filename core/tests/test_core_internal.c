@@ -633,30 +633,39 @@ static void test_demod_on_byte_paths(void) {
   assert(demod.synced == 0);
   assert(demod.work_len == 0u);
 
+  /* A stopping callback still gets a committed packet: the count, the work
+     buffer and the CRC state end up exactly where a non-stopping callback
+     leaves them, plus the latched stop. */
   po32_demodulator_init(&demod, 44100.0f);
   demod.synced = 1;
   demod.crc_state = PO32_INITIAL_STATE;
   memcpy(demod.work, body, body_len - 1u);
   demod.work_len = body_len - 1u;
+  demod.byte_offset = body_len;
   demod.current_byte = body[body_len - 1u];
   callback_count = 0;
   stop = 0;
   po32_demod_on_byte(&demod, stop_packet_callback, &callback_count, &stop);
   assert(callback_count == 1);
   assert(stop == 1);
-  assert(demod.packet_count == 0);
+  assert(demod.stopped == 1);
+  assert(demod.packet_count == 1);
+  assert(demod.work_len == 0u);
+  assert(demod.crc_state == tail_state);
 
   po32_demodulator_init(&demod, 44100.0f);
   demod.synced = 1;
   demod.crc_state = PO32_INITIAL_STATE;
   memcpy(demod.work, body, body_len - 1u);
   demod.work_len = body_len - 1u;
+  demod.byte_offset = body_len;
   demod.current_byte = body[body_len - 1u];
   callback_count = 0;
   stop = 0;
   po32_demod_on_byte(&demod, count_packet_callback, &callback_count, &stop);
   assert(callback_count == 1);
   assert(stop == 0);
+  assert(demod.stopped == 0);
   assert(demod.packet_count == 1);
   assert(demod.work_len == 0u);
   assert(demod.crc_state == tail_state);
