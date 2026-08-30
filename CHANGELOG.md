@@ -6,7 +6,37 @@ The format is based on Keep a Changelog, and the project follows Semantic Versio
 
 ## [Unreleased]
 
+### Fixed
+- Packets delivered by `po32_demodulator_push(...)` now carry the same
+  `offset` as the ones `po32_frame_parse(...)` reports for the same frame.
+  The streaming path measured from the first byte after the preamble, so
+  every offset was 128 bytes short and pointed inside the preamble when used
+  to index a reconstructed frame.
+- A packet is now committed before its callback runs, so
+  `po32_demodulator_packet_count(...)` counts the packet a callback stops on.
+  Previously the count omitted it and the demodulator resumed mid-packet,
+  desyncing on the next push.
+- Long frames whose audio ends exactly at `po32_render_sample_count(...)`
+  samples now decode completely. The demodulator decides each bit at the
+  symbol boundary that closes its correlation window, which for the final
+  bit lies just past the last rendered sample; `po32_decode_f32(...)` now
+  resolves that pending symbol instead of returning `PO32_ERR_FRAME`.
+- The DPSK carrier no longer drifts in amplitude over long frames. The
+  modulator and demodulator both advance the carrier by a recursive rotation
+  whose rotor comes from the interpolated sine LUT, so its magnitude was about
+  `1 - 1.1e-6` rather than `1`. Rendered audio faded roughly 10x every 2M
+  samples, and the demodulator's correlation eventually underflowed to zero and
+  decoded every bit as a `1`, desyncing at around 386 packets. At the sample
+  rates where the LUT puts the rotor magnitude above `1` the carrier grew
+  instead, pushing output past the `[-1, 1]` range that `po32_render_dpsk_f32`
+  documents.
+
 ### Added
+- `po32_demodulator_stopped(...)` — report that a callback returning nonzero
+  has stopped the stream. The stop is terminal: later pushes are no-ops.
+- `po32_demodulator_flush(...)` — signal end-of-audio to the streaming
+  demodulator so a final pending symbol is resolved without trailing
+  silence.
 - Six libFuzzer harnesses under `core/fuzz/` covering every untrusted-input
   surface: the frame parser, typed packet codecs, `.mtdrum` text importer,
   drum synthesizer, audio decoder, and a differential harness that checks
