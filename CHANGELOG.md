@@ -16,10 +16,18 @@ The format is based on Keep a Changelog, and the project follows Semantic Versio
   `po32_demodulator_packet_count(...)` counts the packet a callback stops on.
   Previously the count omitted it and the demodulator resumed mid-packet,
   desyncing on the next push.
+- Long frames whose audio ends exactly at `po32_render_sample_count(...)`
+  samples now decode completely. The demodulator decides each bit at the
+  symbol boundary that closes its correlation window, which for the final
+  bit lies just past the last rendered sample; `po32_decode_f32(...)` now
+  resolves that pending symbol instead of returning `PO32_ERR_FRAME`.
 
 ### Added
 - `po32_demodulator_stopped(...)` — report that a callback returning nonzero
   has stopped the stream. The stop is terminal: later pushes are no-ops.
+- `po32_demodulator_flush(...)` — signal end-of-audio to the streaming
+  demodulator so a final pending symbol is resolved without trailing
+  silence.
 
 ## [0.2.1] - 2026-03-28
 
