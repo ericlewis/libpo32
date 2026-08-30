@@ -18,6 +18,19 @@ static void po32_memcpy(void *dst, const void *src, size_t n) {
     *d++ = *s++;
 }
 
+/*
+ * A usable audio sample rate: positive and finite.
+ *
+ * Written as a positive test so NaN, which compares false against
+ * everything, is rejected - a NaN rate propagates into the DPSK carrier
+ * step and reaches the LUT helpers, whose float-to-int conversions are
+ * undefined on NaN.  The FLT_MAX bound rejects infinity, which would
+ * otherwise be stored as a nonsense rate.
+ */
+static int po32_sample_rate_is_usable(float sample_rate) {
+  return sample_rate > 0.0f && sample_rate <= FLT_MAX;
+}
+
 static int po32_memcmp(const void *a, const void *b, size_t n) {
   const unsigned char *pa = (const unsigned char *)a;
   const unsigned char *pb = (const unsigned char *)b;
@@ -39,6 +52,11 @@ static int po32_memcmp(const void *a, const void *b, size_t n) {
 #define PO32_PACKET_OVERHEAD_BYTES (PO32_PACKET_HEADER_BYTES + PO32_PACKET_TRAILER_BYTES)
 #define PO32_PATCH_PARAM_BYTES     ((size_t)PO32_PARAM_COUNT * 2u)
 #define PO32_TIMING_RECOVERY_GAIN  0.01f
+/* Smallest fraction of a symbol's correlation window that po32_demodulator_flush
+   will decide a bit from. Exact-length renders needing a flush measure at least
+   0.76 of a symbol; audio cut short by a full symbol measures near 0, where the
+   near-empty accumulator yields dot == 0 and would fabricate a 1 bit. */
+#define PO32_FLUSH_MIN_SYMBOL_PHASE 0.5f
 
 #define PO32_STATE_PAYLOAD_MIN_BYTES ((size_t)PO32_STATE_MORPH_PAIR_COUNT * 2u + 3u)
 #define PO32_PATTERN_LANE_BYTES      ((size_t)PO32_PATTERN_LANE_COUNT * (size_t)PO32_PATTERN_STEP_COUNT)
@@ -972,30 +990,7 @@ po32_status_t po32_packet_decode(uint16_t tag, const uint8_t *data, size_t len, 
 
 /* ── render and streaming decode ───────────────────────────────── */
 
-#define PO32_DEMOD_WORK_SIZE 280
-
-typedef struct po32_demodulator {
-  float sample_rate;
-  float osc_sin, osc_cos;
-  float rot_sin, rot_cos;
-  float accum_i, accum_q;
-  float prev_i, prev_q;
-  float symbol_phase;
-  float symbols_per_sample;
-  int started;
-  uint64_t sync_window;
-  uint64_t sync_pattern;
-  int synced;
-  uint8_t current_byte;
-  uint8_t bits_in_byte;
-  size_t byte_offset;
-  uint16_t crc_state;
-  uint8_t work[PO32_DEMOD_WORK_SIZE];
-  size_t work_len;
-  int packet_count;
-  int done;
-  po32_final_tail_t tail;
-} po32_demodulator_t;
+/* po32_demodulator_t is defined in po32.h */
 
 size_t po32_render_sample_count(size_t frame_len, uint32_t sample_rate) {
   if (sample_rate == 0u)
@@ -1157,13 +1152,13 @@ po32_status_t po32_render_dpsk_f32(const uint8_t *frame, size_t frame_len, uint3
   return out_len == needed ? PO32_OK : PO32_ERR_FRAME;
 }
 
-static void po32_demodulator_init(po32_demodulator_t *d, float sample_rate) {
+void po32_demodulator_init(po32_demodulator_t *d, float sample_rate) {
   float carrier_step;
   if (d == NULL)
     return;
 
   po32_zero(d, sizeof(*d));
-  if (sample_rate <= 0.0f)
+  if (!po32_sample_rate_is_usable(sample_rate))
     return;
 
   d->sample_rate = sample_rate;
@@ -1183,7 +1178,7 @@ static void po32_demodulator_init(po32_demodulator_t *d, float sample_rate) {
   }
 }
 
-static void po32_demodulator_desync(po32_demodulator_t *d) {
+void po32_demodulator_desync(po32_demodulator_t *d) {
   if (d == NULL) {
     return;
   }
@@ -1243,15 +1238,27 @@ static void po32_demod_on_byte(po32_demodulator_t *d, po32_packet_callback_t cb,
       return;
     }
 
-    pkt.offset = d->byte_offset - d->work_len;
-    if (cb != NULL && cb(&pkt, user) != 0) {
-      *stop = 1;
-      return;
-    }
+    /* byte_offset counts bytes decoded since sync, i.e. from the first byte
+       after the preamble. po32_frame_parse() and po32_builder_append_packet()
+       both report offsets into the whole transmitted frame, so add the
+       preamble back to keep one meaning of po32_packet_t.offset. */
+    pkt.offset = (size_t)PO32_PREAMBLE_BYTES + d->byte_offset - d->work_len;
 
+    /* Commit before the callback runs: the packet is fully decoded and
+       verified by this point, so po32_demodulator_packet_count() counts every
+       packet the callback was handed, even the one it stops on. */
     d->crc_state = s;
     d->packet_count++;
     d->work_len = 0u;
+
+    if (cb != NULL && cb(&pkt, user) != 0) {
+      /* Terminal by contract. push() discards the rest of the chunk without
+         reporting how much it consumed, so a resumed stream would silently
+         restart mid-frame; latching the stop makes later pushes no-ops
+         instead. */
+      d->stopped = 1;
+      *stop = 1;
+    }
   }
 }
 
@@ -1317,6 +1324,67 @@ static void po32_demod_run_commit(const po32_demod_run_t *run) {
   d->synced = run->synced;
 }
 
+static void po32_demod_run_boundary(po32_demod_run_t *run, int *stop) {
+  if (run->started) {
+    float dot = run->accum_i * run->prev_i + run->accum_q * run->prev_q;
+    uint8_t bit = (uint8_t)(dot >= 0.0f ? 1u : 0u);
+
+    if ((run->prev_i > 0.0f) != (run->accum_i > 0.0f)) {
+      float ai = run->accum_i < 0.0f ? -run->accum_i : run->accum_i;
+      float pi = run->prev_i < 0.0f ? -run->prev_i : run->prev_i;
+      if (pi + ai > 0.0f) {
+        float err = (ai - pi) / (ai + pi);
+        /* A finite window always normalizes into [-1, 1]; an infinite one
+           divides to Inf / Inf, which is NaN rather than a large number. So
+           rejecting NaN is enough, and it matters: folding NaN into
+           symbol_phase leaves every later boundary test false, wedging the
+           demodulator for good rather than costing it one frame. */
+        if (err == err) {
+          run->symbol_phase += err * PO32_TIMING_RECOVERY_GAIN;
+        }
+      }
+    }
+
+    if (!run->synced) {
+      run->sync_window = (run->sync_window >> 1) | ((uint64_t)bit << 63);
+      if (run->sync_window == run->sync_pattern) {
+        run->synced = 1;
+        run->demod->crc_state = PO32_INITIAL_STATE;
+        run->current_byte = 0u;
+        run->bits_in_byte = 0u;
+        run->byte_offset = 0u;
+        run->demod->work_len = 0u;
+        run->demod->packet_count = 0;
+      }
+    } else {
+      run->current_byte |= (uint8_t)(bit << run->bits_in_byte);
+      run->bits_in_byte++;
+
+      if (run->bits_in_byte == 8u) {
+        run->byte_offset++;
+        run->demod->current_byte = run->current_byte;
+        run->demod->bits_in_byte = run->bits_in_byte;
+        run->demod->byte_offset = run->byte_offset;
+        run->demod->synced = run->synced;
+        po32_demod_on_byte(run->demod, run->cb, run->user, stop);
+        run->synced = run->demod->synced;
+        run->current_byte = 0u;
+        run->bits_in_byte = 0u;
+        if (*stop) {
+          return;
+        }
+      }
+    }
+  } else {
+    run->started = 1;
+  }
+
+  run->prev_i = run->accum_i;
+  run->prev_q = run->accum_q;
+  run->accum_i = 0.0f;
+  run->accum_q = 0.0f;
+}
+
 static po32_status_t po32_demod_run_sample(po32_demod_run_t *run, float sample, int *stop) {
   float ns, nc;
 
@@ -1331,71 +1399,36 @@ static po32_status_t po32_demod_run_sample(po32_demod_run_t *run, float sample, 
   run->symbol_phase += run->symbols_per_sample;
   if (run->symbol_phase >= 1.0f) {
     run->symbol_phase -= 1.0f;
-
-    if (run->started) {
-      float dot = run->accum_i * run->prev_i + run->accum_q * run->prev_q;
-      uint8_t bit = (uint8_t)(dot >= 0.0f ? 1u : 0u);
-
-      if ((run->prev_i > 0.0f) != (run->accum_i > 0.0f)) {
-        float ai = run->accum_i < 0.0f ? -run->accum_i : run->accum_i;
-        float pi = run->prev_i < 0.0f ? -run->prev_i : run->prev_i;
-        if (pi + ai > 0.0f) {
-          float err = (ai - pi) / (ai + pi);
-          run->symbol_phase += err * PO32_TIMING_RECOVERY_GAIN;
-        }
-      }
-
-      if (!run->synced) {
-        run->sync_window = (run->sync_window >> 1) | ((uint64_t)bit << 63);
-        if (run->sync_window == run->sync_pattern) {
-          run->synced = 1;
-          run->demod->crc_state = PO32_INITIAL_STATE;
-          run->current_byte = 0u;
-          run->bits_in_byte = 0u;
-          run->byte_offset = 0u;
-          run->demod->work_len = 0u;
-          run->demod->packet_count = 0;
-        }
-      } else {
-        run->current_byte |= (uint8_t)(bit << run->bits_in_byte);
-        run->bits_in_byte++;
-
-        if (run->bits_in_byte == 8u) {
-          run->byte_offset++;
-          run->demod->current_byte = run->current_byte;
-          run->demod->bits_in_byte = run->bits_in_byte;
-          run->demod->byte_offset = run->byte_offset;
-          run->demod->synced = run->synced;
-          po32_demod_on_byte(run->demod, run->cb, run->user, stop);
-          run->synced = run->demod->synced;
-          run->current_byte = 0u;
-          run->bits_in_byte = 0u;
-          if (*stop) {
-            return PO32_OK;
-          }
-        }
-      }
-    } else {
-      run->started = 1;
-    }
-
-    run->prev_i = run->accum_i;
-    run->prev_q = run->accum_q;
-    run->accum_i = 0.0f;
-    run->accum_q = 0.0f;
+    po32_demod_run_boundary(run, stop);
   }
 
   return PO32_OK;
 }
 
-static po32_status_t po32_demodulator_push(po32_demodulator_t *d, const float *samples,
-                                           size_t count, po32_packet_callback_t cb, void *user) {
+int po32_demodulator_done(const po32_demodulator_t *d) {
+  return d != NULL && d->done;
+}
+
+int po32_demodulator_stopped(const po32_demodulator_t *d) {
+  return d != NULL && d->stopped;
+}
+
+int po32_demodulator_packet_count(const po32_demodulator_t *d) {
+  return d != NULL ? d->packet_count : 0;
+}
+
+const po32_final_tail_t *po32_demodulator_tail(const po32_demodulator_t *d) {
+  return d != NULL ? &d->tail : NULL;
+}
+
+po32_status_t po32_demodulator_push(po32_demodulator_t *d, const float *samples, size_t count,
+                                    po32_packet_callback_t cb, void *user) {
   po32_demod_run_t run;
   int stop = 0;
 
   if (d == NULL || samples == NULL)
     return PO32_ERR_INVALID_ARG;
-  if (d->done)
+  if (d->done || d->stopped)
     return PO32_OK;
 
   po32_demod_run_init(&run, d, cb, user);
@@ -1413,6 +1446,37 @@ static po32_status_t po32_demodulator_push(po32_demodulator_t *d, const float *s
   po32_demod_run_commit(&run);
 
   return PO32_OK;
+}
+
+void po32_demodulator_flush(po32_demodulator_t *d, po32_packet_callback_t callback, void *user) {
+  po32_demod_run_t run;
+  int stop = 0;
+
+  if (d == NULL || d->done || !d->synced)
+    return;
+
+  /* Each bit is decided at the symbol-boundary crossing that closes its
+   * correlation window, and the timing-recovery loop settles with those
+   * crossings lagging the transmitted symbols by a fraction of a symbol
+   * period. Audio that ends exactly at po32_render_sample_count() samples
+   * therefore leaves the final bit's window fully accumulated but not yet
+   * decided. Trailing silence adds nothing to the correlator, so forcing
+   * one boundary decision here is equivalent to the silence a real capture
+   * trails off into.
+   *
+   * A capture cut short mid-symbol is a different case: its window holds only
+   * part of the symbol, and deciding from it would invent a bit the audio
+   * never carried. Leave the frame unfinished instead. */
+  if (d->symbol_phase < PO32_FLUSH_MIN_SYMBOL_PHASE)
+    return;
+
+  po32_demod_run_init(&run, d, callback, user);
+  po32_demod_run_boundary(&run, &stop);
+  /* The forced boundary consumed the pending symbol. Clearing the phase keeps
+     a second flush from deciding the same window again, which would append a
+     1 bit per call from the emptied accumulator. */
+  run.symbol_phase = 0.0f;
+  po32_demod_run_commit(&run);
 }
 
 typedef struct {
@@ -1445,8 +1509,8 @@ static po32_status_t po32_decode_prepare(const float *samples, size_t count, flo
                                          uint8_t *out_frame, size_t out_capacity,
                                          const size_t *out_len, po32_builder_t *builder,
                                          po32_decode_ctx_t *ctx) {
-  if (samples == NULL || count == 0u || sample_rate <= 0.0f || out_frame == NULL ||
-      out_len == NULL || builder == NULL || ctx == NULL) {
+  if (samples == NULL || count == 0u || !po32_sample_rate_is_usable(sample_rate) ||
+      out_frame == NULL || out_len == NULL || builder == NULL || ctx == NULL) {
     return PO32_ERR_INVALID_ARG;
   }
 
@@ -1513,5 +1577,6 @@ po32_status_t po32_decode_f32(const float *samples, size_t count, float sample_r
   if (status != PO32_OK) {
     return status;
   }
+  po32_demodulator_flush(&demod, po32_decode_collect_packet, &ctx);
   return po32_decode_finalize(&demod, &ctx, out_result, out_len);
 }
