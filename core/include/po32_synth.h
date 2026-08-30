@@ -54,26 +54,41 @@ typedef struct po32_synth_voice {
   size_t samples_rendered;
 
   /* persistent DSP state */
-  float phase;
+  float phase01;
   float mod_state;
   uint32_t rand_state;
   float noise_filt[7]; /* biquad: b0 b1 b2 a1 a2 z1 z2 */
   float eq_filt[7];
 
+  /* envelope and LFO recursion state; carried across render calls so a
+     chunked render emits exactly the samples one big render would */
+  float osc_env_v;
+  int osc_env_synced;
+  float nenv_v;
+  int nenv_synced;
+  float mod_env_v;
+  float mod_osc_s, mod_osc_c;
+
   /* precomputed constants */
-  float sr;
-  float osc_freq, osc_atk, osc_dcy;
-  float mod_sm, mod_mode;
-  float nf_freq, nf_q, n_atk, n_dcy;
+  float sr, inv_sr;
+  int wave_sel;                     /* 0 = sine, 1 = triangle, 2 = saw */
+  int mod_is_exp, mod_is_sine;      /* pitch-mod source select */
+  int nenv_is_ring, nenv_is_linear; /* noise envelope mode select */
+  int mod_pitch_active;
+  int osc_env_in_attack, nenv_in_attack;
+  int use_eq;
+  float osc_atk, osc_dcy, n_atk, n_dcy;
+  float osc_freq_step;   /* base osc step, cycles/sample */
+  float mod_pitch_scale; /* semitone depth / 12, may be 0 */
+  float osc_atk_coeff, osc_dcy_coeff;
+  float nenv_atk_coeff, nenv_dcy_coeff;
+  float mod_dcy_coeff, mod_rot_s, mod_rot_c;
+  float mod_alpha_precomp, mod_one_minus_alpha;
+  float lin_atk, lin_dcy, inv_lin_atk, inv_lin_dcy;
+  float mod_env_period, inv_mod_env_period, mod_env_amp_correction;
   float dist_amt, level;
   float osc_gain_mix, noise_gain_mix;
   float osc_vel_g, noise_vel_g;
-  float mod_decay_time, mod_rate_hz;
-  float mod_alpha_precomp;
-  float mod_env_period, mod_env_amp_correction;
-  int use_eq;
-  float osc_wave;
-  float n_env_mod;
 } po32_synth_voice_t;
 
 /*
