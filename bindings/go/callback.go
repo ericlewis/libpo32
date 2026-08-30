@@ -61,17 +61,38 @@ func goCallbackBridge(packet *C.po32_packet_t, user unsafe.Pointer) C.int {
 
 // FrameParse walks the packets in a frame, calling fn for each.
 // Return true from fn to continue, false to stop early.
+//
+// When fn stops parsing early the C core never reaches the final tail and
+// the returned FinalTail is the zero value; use FrameParseTail to tell
+// that apart from a decoded tail.
 func FrameParse(frame []byte, fn func(*Packet) bool) (FinalTail, error) {
+	tail, _, err := FrameParseTail(frame, fn)
+	return tail, err
+}
+
+// FrameParseTail is like FrameParse but additionally reports whether the
+// final tail was decoded. The bool result is false when fn stopped
+// parsing early: the C core then returns success without ever reaching
+// the tail, so the FinalTail is the zero value rather than a decoded
+// terminator.
+func FrameParseTail(frame []byte, fn func(*Packet) bool) (FinalTail, bool, error) {
 	if len(frame) == 0 || fn == nil {
-		return FinalTail{}, ErrInvalidArg
+		return FinalTail{}, false, ErrInvalidArg
 	}
-	id := registerCallback(fn)
+	stopped := false
+	id := registerCallback(func(p *Packet) bool {
+		if fn(p) {
+			return true
+		}
+		stopped = true
+		return false
+	})
 	defer unregisterCallback(id)
 
 	// Store the handle in C-allocated memory to satisfy cgo pointer rules.
 	handle := (*C.uintptr_t)(C.malloc(C.size_t(unsafe.Sizeof(id))))
 	if handle == nil {
-		return FinalTail{}, ErrInvalidArg
+		return FinalTail{}, false, ErrInvalidArg
 	}
 	*handle = C.uintptr_t(id)
 	defer C.free(unsafe.Pointer(handle))
@@ -84,7 +105,10 @@ func FrameParse(frame []byte, fn func(*Packet) bool) (FinalTail, error) {
 		&tail,
 	)
 	if err := statusToError(int(s)); err != nil {
-		return FinalTail{}, err
+		return FinalTail{}, false, err
 	}
-	return finalTailFromC(&tail), nil
+	if stopped {
+		return FinalTail{}, false, nil
+	}
+	return finalTailFromC(&tail), true, nil
 }
