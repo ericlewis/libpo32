@@ -7,6 +7,20 @@ The format is based on Keep a Changelog, and the project follows Semantic Versio
 ## [Unreleased]
 
 ### Fixed
+- Packets delivered by `po32_demodulator_push(...)` now carry the same
+  `offset` as the ones `po32_frame_parse(...)` reports for the same frame.
+  The streaming path measured from the first byte after the preamble, so
+  every offset was 128 bytes short and pointed inside the preamble when used
+  to index a reconstructed frame.
+- A packet is now committed before its callback runs, so
+  `po32_demodulator_packet_count(...)` counts the packet a callback stops on.
+  Previously the count omitted it and the demodulator resumed mid-packet,
+  desyncing on the next push.
+- Long frames whose audio ends exactly at `po32_render_sample_count(...)`
+  samples now decode completely. The demodulator decides each bit at the
+  symbol boundary that closes its correlation window, which for the final
+  bit lies just past the last rendered sample; `po32_decode_f32(...)` now
+  resolves that pending symbol instead of returning `PO32_ERR_FRAME`.
 - The DPSK carrier no longer drifts in amplitude over long frames. The
   modulator and demodulator both advance the carrier by a recursive rotation
   whose rotor comes from the interpolated sine LUT, so its magnitude was about
@@ -16,6 +30,13 @@ The format is based on Keep a Changelog, and the project follows Semantic Versio
   rates where the LUT puts the rotor magnitude above `1` the carrier grew
   instead, pushing output past the `[-1, 1]` range that `po32_render_dpsk_f32`
   documents.
+
+### Added
+- `po32_demodulator_stopped(...)` — report that a callback returning nonzero
+  has stopped the stream. The stop is terminal: later pushes are no-ops.
+- `po32_demodulator_flush(...)` — signal end-of-audio to the streaming
+  demodulator so a final pending symbol is resolved without trailing
+  silence.
 
 ## [0.2.1] - 2026-03-28
 
