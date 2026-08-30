@@ -64,7 +64,6 @@ static void test_synth_helper_functions(void) {
 
   assert(synth_attack_time(0.0f) == 0.0f);
   assert(synth_attack_time(0.5f) > 0.0f);
-  assert(synth_exp_attack_env(0.1f, 0.0f) == 0.0f);
   assert(synth_exp_decay_env(0.1f, 0.0f) == 0.0f);
   assert(synth_level_gain(0.0f) == 0.0f);
   assert(synth_level_gain(0.00011f) == 0.0f);

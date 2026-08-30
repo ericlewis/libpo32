@@ -1022,8 +1022,7 @@ void po32_modulator_init(po32_modulator_t *m, const uint8_t *frame, size_t frame
   m->symbol_phase = 1.0f;
   m->symbols_per_sample = (float)PO32_NATIVE_BAUD / (float)sample_rate;
   carrier_step = m->symbols_per_sample * (2.0f * PO32_DPSK_CARRIER_CYCLES_PER_SYMBOL * PO32_PI);
-  m->rot_sin = po32_lut_sinf(carrier_step);
-  m->rot_cos = po32_lut_cosf(carrier_step);
+  po32_lut_rot_step(carrier_step, &m->rot_sin, &m->rot_cos);
   m->osc_cos = 1.0f;
   m->state = 0;
 }
@@ -1109,10 +1108,10 @@ po32_status_t po32_modulator_render_f32(po32_modulator_t *m, float *out_samples,
     ns = osc_s * rot_c + osc_c * rot_s;
     nc = osc_c * rot_c - osc_s * rot_s;
 
-    /* rot_sin/rot_cos come from the interpolated sine LUT, so the rotor
-     * magnitude is ~1 - 1.1e-6 instead of exactly 1. Left alone, the
-     * recursion decays ~10x every 2M samples. Rescale by a first-order
-     * Taylor step for 1/sqrt(x) about 1 to hold the magnitude at unity. */
+    /* po32_lut_rot_step lands the rotor within ~1e-7 of the unit circle,
+     * not exactly on it, so the recursion still drifts over millions of
+     * samples. Rescale by a first-order Taylor step for 1/sqrt(x) about 1
+     * to hold the magnitude at unity. */
     gain = 1.5f - 0.5f * (ns * ns + nc * nc);
     osc_s = ns * gain;
     osc_c = nc * gain;
@@ -1170,8 +1169,7 @@ void po32_demodulator_init(po32_demodulator_t *d, float sample_rate) {
   d->sample_rate = sample_rate;
   d->symbols_per_sample = PO32_NATIVE_BAUD / sample_rate;
   carrier_step = d->symbols_per_sample * (2.0f * PO32_DPSK_CARRIER_CYCLES_PER_SYMBOL * PO32_PI);
-  d->rot_sin = po32_lut_sinf(carrier_step);
-  d->rot_cos = po32_lut_cosf(carrier_step);
+  po32_lut_rot_step(carrier_step, &d->rot_sin, &d->rot_cos);
   d->osc_cos = 1.0f;
   d->symbol_phase = 1.0f;
 
@@ -1397,8 +1395,8 @@ static po32_status_t po32_demod_run_sample(po32_demod_run_t *run, float sample, 
   ns = run->osc_sin * run->rot_cos + run->osc_cos * run->rot_sin;
   nc = run->osc_cos * run->rot_cos - run->osc_sin * run->rot_sin;
 
-  /* Same LUT-magnitude correction as the modulator: without it the local
-   * oscillator decays until the correlation dot product underflows to zero
+  /* Same magnitude correction as the modulator: without it the local
+   * oscillator drifts until the correlation dot product underflows to zero
    * and every bit decodes as 1. */
   gain = 1.5f - 0.5f * (ns * ns + nc * nc);
   run->osc_sin = ns * gain;

@@ -8,6 +8,34 @@ This repo keeps the contribution path intentionally small:
 
 ## Local Setup
 
+### clang-format
+
+Formatting is pinned to **clang-format 18**, the version recorded in
+`.clang-format-version` and installed by the `clang-format` CI job. Other major
+versions format the same sources differently, so they would rewrite lines your
+change never touched and fail CI on them.
+
+Install it with any of:
+
+```sh
+pip install "clang-format~=18.0"
+sudo apt-get install -y clang-format-18
+brew install llvm@18
+```
+
+The pre-commit hook and `./scripts/ci-format.sh` use `$CLANG_FORMAT` when it is
+set, and otherwise prefer `clang-format-18` from `PATH`. If your install is not
+on `PATH` under that name, point them at it:
+
+```sh
+export CLANG_FORMAT="$(brew --prefix llvm@18)/bin/clang-format"
+```
+
+Both refuse to run against any other major version, and report the version they
+found alongside the one they need.
+
+### Git hooks
+
 From the repo root:
 
 ```sh

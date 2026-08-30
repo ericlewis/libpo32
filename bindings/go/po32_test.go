@@ -1,6 +1,7 @@
 package po32
 
 import (
+	"bytes"
 	"math"
 	"testing"
 )
@@ -286,15 +287,55 @@ func TestFrameParseEarlyStop(t *testing.T) {
 	b := NewBuilder(2048)
 	defer b.Close()
 	b.Append(pkt)
+	b.Append(pkt)
 	frame, _ := b.Finish()
 
+	// Stopping early means the C core never reaches the final tail, so it
+	// is reported as not decoded and left as the zero value.
 	var count int
-	FrameParse(frame, func(p *Packet) bool {
+	tail, ok, err := FrameParseTail(frame, func(p *Packet) bool {
 		count++
 		return false // stop
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if count != 1 {
 		t.Fatalf("count = %d, want 1", count)
+	}
+	if ok {
+		t.Fatal("ok = true after early stop, want false")
+	}
+	if tail != (FinalTail{}) {
+		t.Fatalf("tail = %+v after early stop, want zero value", tail)
+	}
+
+	// FrameParse keeps its signature: early stop yields the zero tail.
+	tail, err = FrameParse(frame, func(p *Packet) bool { return false })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tail != (FinalTail{}) {
+		t.Fatalf("tail = %+v after early stop, want zero value", tail)
+	}
+
+	// A full parse decodes the tail and reports it as such.
+	count = 0
+	tail, ok, err = FrameParseTail(frame, func(p *Packet) bool {
+		count++
+		return true
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 2 {
+		t.Fatalf("count = %d, want 2", count)
+	}
+	if !ok {
+		t.Fatal("ok = false after full parse, want true")
+	}
+	if tail.MarkerC3 != 0xC3 || tail.Marker71 != 0x71 {
+		t.Fatal("bad tail markers")
 	}
 }
 
@@ -341,6 +382,129 @@ func TestFullRoundtrip(t *testing.T) {
 	})
 	if decodedTag != TagPatch {
 		t.Fatalf("decoded tag = 0x%04x, want 0x%04x", decodedTag, TagPatch)
+	}
+}
+
+func TestDecodeF32WithCapacity(t *testing.T) {
+	pkt, err := EncodePatchPacket(&PatchPacket{
+		Instrument: 1, Side: PatchLeft,
+		Params: PatchParams{OscFreq: 0.18, Level: 0.88},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := NewBuilder(2048)
+	defer b.Close()
+	if err := b.Append(pkt); err != nil {
+		t.Fatal(err)
+	}
+	frame, err := b.Finish()
+	if err != nil {
+		t.Fatal(err)
+	}
+	samples, err := RenderDPSKF32(frame, 44100)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// An explicit capacity is honored exactly: too small reports overflow
+	// instead of silently growing.
+	if _, _, err := DecodeF32WithCapacity(samples, 44100, 4); err != ErrBufferTooSmall {
+		t.Fatalf("capacity 4 error = %v, want ErrBufferTooSmall", err)
+	}
+	if _, _, err := DecodeF32WithCapacity(samples, 44100, 0); err != ErrInvalidArg {
+		t.Fatalf("capacity 0 error = %v, want ErrInvalidArg", err)
+	}
+	if _, _, err := DecodeF32WithCapacity(samples, 44100, -1); err != ErrInvalidArg {
+		t.Fatalf("capacity -1 error = %v, want ErrInvalidArg", err)
+	}
+	if _, _, err := DecodeF32WithCapacity(nil, 44100, 4096); err != ErrInvalidArg {
+		t.Fatalf("nil samples error = %v, want ErrInvalidArg", err)
+	}
+	if _, _, err := DecodeF32(nil, 44100); err != ErrInvalidArg {
+		t.Fatalf("DecodeF32 nil samples error = %v, want ErrInvalidArg", err)
+	}
+
+	// A sufficient explicit capacity matches the default decode.
+	defaultResult, defaultFrame, err := DecodeF32(samples, 44100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, sizedFrame, err := DecodeF32WithCapacity(samples, 44100, 4096)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.PacketCount != defaultResult.PacketCount || result.Done != defaultResult.Done {
+		t.Fatalf("result = %+v, want %+v", result, defaultResult)
+	}
+	if !bytes.Equal(sizedFrame, defaultFrame) {
+		t.Fatal("sized decode frame differs from default decode frame")
+	}
+}
+
+func TestDecodeF32LargeFrame(t *testing.T) {
+	// Build a frame larger than the 64 KiB starting buffer; the default
+	// decode path must grow to fit it.
+	const packetCount = 320
+	b := NewBuilder(1 << 17)
+	defer b.Close()
+	for i := 0; i < packetCount; i++ {
+		p := NewPattern(uint8(i % 32))
+		if err := p.SetTrigger(uint8(i%16), uint8(1+i%16), 1); err != nil {
+			t.Fatal(err)
+		}
+		pkt, err := EncodePatternPacket(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := b.Append(pkt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	frame, err := b.Finish()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(frame) <= decodeInitialFrameCapacity {
+		t.Fatalf("frame len = %d, want > %d", len(frame), decodeInitialFrameCapacity)
+	}
+
+	samples, err := RenderDPSKF32(frame, 44100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The demodulator's bit clock drifts slightly over very long frames
+	// and needs a little post-signal audio to find the tail; real
+	// captures always trail off into silence.
+	samples = append(samples, make([]float32, 2048)...)
+
+	result, decodedFrame, err := DecodeF32(samples, 44100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Done {
+		t.Fatal("decode not done")
+	}
+	if result.PacketCount != packetCount {
+		t.Fatalf("decoded %d packets, want %d", result.PacketCount, packetCount)
+	}
+
+	var parsed int
+	_, ok, err := FrameParseTail(decodedFrame, func(p *Packet) bool {
+		if p.TagCode != TagPattern {
+			t.Errorf("packet tag = 0x%04x, want 0x%04x", p.TagCode, TagPattern)
+		}
+		parsed++
+		return true
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("full parse should decode the tail")
+	}
+	if parsed != packetCount {
+		t.Fatalf("parsed %d packets, want %d", parsed, packetCount)
 	}
 }
 
@@ -537,6 +701,14 @@ func TestFrameParseInvalidInputs(t *testing.T) {
 	_, err = FrameParse([]byte{0x55}, nil)
 	if err != ErrInvalidArg {
 		t.Fatalf("FrameParse nil callback error = %v, want ErrInvalidArg", err)
+	}
+	_, _, err = FrameParseTail(nil, func(*Packet) bool { return true })
+	if err != ErrInvalidArg {
+		t.Fatalf("FrameParseTail nil frame error = %v, want ErrInvalidArg", err)
+	}
+	_, _, err = FrameParseTail([]byte{0x55}, nil)
+	if err != ErrInvalidArg {
+		t.Fatalf("FrameParseTail nil callback error = %v, want ErrInvalidArg", err)
 	}
 }
 

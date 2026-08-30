@@ -181,12 +181,6 @@ static float synth_decay_time(float x) {
   return synth_param_exp_range(x, SYNTH_DECAY_MIN_SECONDS, SYNTH_DECAY_MAX_SECONDS);
 }
 
-static float synth_exp_attack_env(float t, float attack_time) {
-  if (attack_time <= 0.0f)
-    return 0.0f;
-  return SYNTH_ENV_FLOOR_GAIN * lut_powf(SYNTH_ENV_SPAN, t / attack_time);
-}
-
 static float synth_exp_decay_env(float t, float decay_time) {
   if (decay_time <= 0.0f)
     return 0.0f;
@@ -280,7 +274,7 @@ static float synth_distort(float x, float amount) {
 
 static float synth_randf(uint32_t *state) {
   *state = *state * SYNTH_RAND_MULTIPLIER + SYNTH_RAND_INCREMENT;
-  return (float)(*state & SYNTH_RAND_MASK) / SYNTH_RAND_MAX;
+  return (float)(*state & SYNTH_RAND_MASK) * (1.0f / SYNTH_RAND_MAX);
 }
 
 /* ── Biquad filter ──────────────────────────────────────────────── */
@@ -398,212 +392,24 @@ size_t po32_synth_samples_for_duration(const po32_synth_t *synth, float seconds)
   return synth_duration_to_samples((float)synth->sample_rate, seconds);
 }
 
+/*
+ * One-shot render.
+ *
+ * A thin wrapper over the streaming voice so there is exactly one render
+ * loop in this file: a duplicate loop here would silently drift out of
+ * step with the voice as either side is optimized.
+ */
 po32_status_t po32_synth_render(const po32_synth_t *synth, const po32_patch_params_t *params,
                                 int velocity, float duration, float *out, size_t out_capacity,
                                 size_t *out_len) {
-  float sr;
-  size_t n, i;
-  float osc_freq, osc_atk, osc_dcy;
-  float mod_sm, mod_mode, mod_rate;
-  float nf_freq, nf_q, n_atk, n_dcy;
-  float mix, dist_amt, eq_db, eq_freq_hz, level;
-  float osc_gain_mix, noise_gain_mix, osc_vel_g, noise_vel_g;
-  float phase, mod_decay_time, mod_rate_hz;
-  float mod_state;
-  float mod_vel_g;
-  float mod_env_period = 0.0f;
-  float mod_env_amp_correction = 1.0f;
-  uint32_t rand_state = 123456789u;
-  synth_biquad_t noise_filt, eq_filt;
-  int use_eq;
-
-  /* Precomputed noise mod alpha (constant per render) */
-  float mod_alpha_precomp;
+  po32_synth_voice_t voice;
 
   if (synth == NULL || params == NULL || out == NULL || out_len == NULL) {
     return PO32_ERR_INVALID_ARG;
   }
 
-  sr = (float)synth->sample_rate;
-  n = synth_duration_to_samples(sr, duration);
-  if (n > out_capacity)
-    n = out_capacity;
-  *out_len = n;
-
-  /*
-   * Nothing to render.  Returning here also keeps a zero sample rate away
-   * from the precomputation below, which would otherwise divide by it and
-   * feed the resulting NaNs to the LUT helpers.
-   */
-  if (n == 0u)
-    return PO32_OK;
-
-  osc_freq = synth_param_to_hz(params->OscFreq);
-  osc_atk = synth_attack_time(params->OscAtk);
-  osc_dcy = synth_decay_time(params->OscDcy);
-
-  mod_sm = (params->ModAmt - 0.5f) * (2.0f * SYNTH_MOD_MAX_SEMITONES);
-  mod_mode = params->ModMode;
-  mod_rate = params->ModRate;
-
-  nf_freq = synth_clamp_sr_freq(synth_param_to_hz(params->NFilFrq), sr);
-  nf_q = synth_param_to_q(params->NFilQ);
-  /* synth_param_to_q returns >= SYNTH_FILTER_Q_MIN by construction. */
-
-  n_atk = synth_attack_time(params->NEnvAtk);
-  n_dcy = synth_decay_time(params->NEnvDcy);
-
-  mix = params->Mix;
-  dist_amt = params->DistAmt;
-
-  eq_db = (params->EQGain - 0.5f) * (2.0f * SYNTH_EQ_MAX_ABS_DB);
-  eq_freq_hz = synth_clamp_sr_freq(synth_param_to_hz(params->EQFreq), sr);
-
-  level = synth_level_gain(params->Level);
-
-  osc_gain_mix = synth_mix_osc_gain(mix);
-  noise_gain_mix = synth_mix_noise_gain(mix);
-  osc_vel_g = synth_velocity_gain(velocity, params->OscVel);
-  noise_vel_g = synth_velocity_gain(velocity, params->NVel);
-
-  mod_vel_g = synth_velocity_gain(velocity, params->ModVel);
-  mod_sm *= mod_vel_g;
-
-  if (params->NFilMod < SYNTH_ONE_THIRD)
-    synth_biquad_design_lp(&noise_filt, nf_freq, nf_q, sr);
-  else if (params->NFilMod < SYNTH_TWO_THIRDS)
-    synth_biquad_design_bp(&noise_filt, nf_freq, nf_q, sr);
-  else
-    synth_biquad_design_hp(&noise_filt, nf_freq, nf_q, sr);
-
-  use_eq = (synth_fabsf(eq_db) > SYNTH_EQ_ENABLE_THRESH_DB);
-  if (use_eq) {
-    synth_biquad_design_peak(&eq_filt, eq_freq_hz, eq_db, sr);
-  }
-
-  mod_decay_time = synth_decay_time(mod_rate);
-  mod_rate_hz = (mod_mode < SYNTH_TWO_THIRDS) ? (SYNTH_SINE_MOD_MAX_HZ * mod_rate)
-                                              : synth_param_to_hz(mod_rate);
-  mod_state = 0.0f;
-  phase = 0.0f;
-
-  /* Precompute noise mod alpha (constant for entire render) */
-  mod_alpha_precomp = 1.0f - lut_expf(-LUT_TWO_PI * mod_rate_hz / sr);
-  mod_alpha_precomp = synth_clamp(mod_alpha_precomp, SYNTH_MOD_ALPHA_MIN, 1.0f);
-
-  if (params->NEnvMod > SYNTH_TWO_THIRDS) {
-    float dcy_param = params->NEnvDcy;
-    if (dcy_param > SYNTH_LEVEL_MIN_PARAM) {
-      mod_env_period = (dcy_param / sr) * lut_powf(SYNTH_FILTER_Q_MAX, dcy_param);
-      if (mod_env_period < SYNTH_MOD_ENV_PERIOD_THRESH_S) {
-        mod_env_period *= SYNTH_MOD_ENV_PERIOD_SCALE_FAST;
-        if (mod_env_period > 0.0f) {
-          mod_env_amp_correction = lut_sqrtf(SYNTH_MOD_ENV_FAST_GAIN_NUM / mod_env_period);
-        }
-      } else {
-        mod_env_period *= SYNTH_MOD_ENV_PERIOD_SCALE_SLOW;
-      }
-    }
-  }
-
-  /* ── Main render loop ─────────────────────────────────────────
-   *
-   * Structurally identical to po32_synth.c but every transcendental
-   * call replaced with a LUT equivalent.
-   */
-  for (i = 0; i < n; ++i) {
-    float t = (float)i / sr;
-    float osc_env, noise_env;
-    float mod_sig, freq_mult, inst_freq;
-    float osc_sample, noise_raw, noise_sample;
-    float sample;
-
-    /* osc_dcy is always > 0 (synth_decay_time returns >= SYNTH_DECAY_MIN_SECONDS). */
-    if (osc_atk > 0.0f && t < osc_atk)
-      osc_env = synth_exp_attack_env(t, osc_atk);
-    else
-      osc_env = synth_exp_decay_env(t - osc_atk, osc_dcy);
-
-    if (mod_mode < SYNTH_ONE_THIRD) {
-      mod_sig = (mod_decay_time > 0.0f) ? synth_exp_decay_env(t, mod_decay_time) : 0.0f;
-    } else if (mod_mode < SYNTH_TWO_THIRDS) {
-      float sine_env = (mod_decay_time > 0.0f) ? synth_exp_decay_env(t, mod_decay_time) : 0.0f;
-      mod_sig = lut_sinf(LUT_TWO_PI * mod_rate_hz * t) * sine_env;
-    } else {
-      float noise_in = synth_randf(&rand_state) * 2.0f - 1.0f;
-      mod_state = mod_state * (1.0f - mod_alpha_precomp) + noise_in * mod_alpha_precomp;
-      mod_sig = mod_state;
-    }
-
-    freq_mult = lut_exp2f(mod_sig * mod_sm / SYNTH_SEMITONES_PER_OCTAVE);
-    inst_freq = osc_freq * freq_mult;
-    phase += inst_freq * (LUT_TWO_PI / sr);
-
-    if (params->OscWave < SYNTH_ONE_THIRD) {
-      osc_sample = lut_sinf(phase);
-    } else if (params->OscWave < SYNTH_TWO_THIRDS) {
-      float ph = synth_wrap_phase01(phase * LUT_INV_TWO_PI);
-      osc_sample = 2.0f * synth_fabsf(2.0f * ph - 1.0f) - 1.0f;
-    } else {
-      float ph = synth_wrap_phase01(phase * LUT_INV_TWO_PI);
-      osc_sample = 2.0f * ph - 1.0f;
-    }
-
-    osc_sample *= osc_env;
-
-    /* n_dcy is always > 0 (synth_decay_time returns >= SYNTH_DECAY_MIN_SECONDS). */
-    if (params->NEnvMod > SYNTH_TWO_THIRDS) {
-      if (t < n_atk) {
-        noise_env = 1.0f;
-      } else if (mod_env_period > 0.0f) {
-        float dt = t - n_atk;
-        float saw = synth_wrap_phase01(dt / mod_env_period);
-        float tri = 1.0f - 2.0f * synth_fabsf(saw - 0.5f);
-        float ring = lut_cosf(LUT_PI * tri);
-        float decay = synth_exp_decay_env(dt, n_dcy);
-        noise_env = ring * decay * mod_env_amp_correction;
-      } else {
-        noise_env = synth_exp_decay_env(t - n_atk, n_dcy);
-      }
-    } else if (params->NEnvMod > SYNTH_ONE_THIRD) {
-      float lin_atk = n_atk * SYNTH_TWO_THIRDS;
-      float lin_dcy = n_dcy * SYNTH_TWO_THIRDS;
-
-      if (t < lin_atk)
-        noise_env = (lin_atk > 0.0f) ? (t / lin_atk) : 1.0f;
-      else if (t < lin_atk + lin_dcy)
-        noise_env = (lin_dcy > 0.0f) ? (1.0f - (t - lin_atk) / lin_dcy) : 0.0f;
-      else
-        noise_env = 0.0f;
-    } else {
-      if (n_atk > 0.0f && t < n_atk)
-        noise_env = synth_exp_attack_env(t, n_atk);
-      else
-        noise_env = synth_exp_decay_env(t - n_atk, n_dcy);
-    }
-
-    noise_raw = synth_randf(&rand_state) * 2.0f - 1.0f;
-    noise_sample = synth_biquad_process(&noise_filt, noise_raw) * noise_env;
-
-    sample = osc_sample * osc_gain_mix * osc_vel_g + noise_sample * noise_gain_mix * noise_vel_g;
-
-    if (dist_amt > SYNTH_DISTORT_MIN_AMOUNT) {
-      sample = synth_distort(sample, dist_amt);
-    }
-
-    if (use_eq) {
-      sample = synth_biquad_process(&eq_filt, sample);
-    }
-
-    sample *= level;
-    if (sample > 1.0f)
-      sample = 1.0f;
-    if (sample < -1.0f)
-      sample = -1.0f;
-    out[i] = sample;
-  }
-
-  return PO32_OK;
+  po32_synth_voice_init(&voice, synth->sample_rate, params, velocity, duration);
+  return po32_synth_voice_render_f32(&voice, out, out_capacity, out_len);
 }
 
 /* ── Streaming voice ───────────────────────────────────────────── */
@@ -630,7 +436,9 @@ static void synth_biquad_from_flat(const float *flat, synth_biquad_t *bq) {
 
 void po32_synth_voice_init(po32_synth_voice_t *v, uint32_t sample_rate,
                            const po32_patch_params_t *params, int velocity, float duration) {
-  float sr, mix, eq_db, eq_freq_hz, mod_rate, mod_vel_g;
+  float sr, inv_sr, mix, eq_db, eq_freq_hz, mod_rate, mod_vel_g;
+  float osc_freq, mod_sm, mod_mode, mod_decay_time, mod_rate_hz;
+  float nf_freq, nf_q;
   synth_biquad_t nf, ef;
 
   if (v == NULL)
@@ -660,22 +468,21 @@ void po32_synth_voice_init(po32_synth_voice_t *v, uint32_t sample_rate,
   if (sample_rate == 0u)
     return;
 
-  v->rand_state = 123456789u;
+  inv_sr = 1.0f / sr;
+  v->inv_sr = inv_sr;
 
-  v->osc_freq = synth_param_to_hz(params->OscFreq);
+  osc_freq = synth_param_to_hz(params->OscFreq);
   v->osc_atk = synth_attack_time(params->OscAtk);
   v->osc_dcy = synth_decay_time(params->OscDcy);
-  v->osc_wave = params->OscWave;
 
-  v->mod_sm = (params->ModAmt - 0.5f) * (2.0f * SYNTH_MOD_MAX_SEMITONES);
-  v->mod_mode = params->ModMode;
+  mod_sm = (params->ModAmt - 0.5f) * (2.0f * SYNTH_MOD_MAX_SEMITONES);
+  mod_mode = params->ModMode;
   mod_rate = params->ModRate;
 
-  v->nf_freq = synth_clamp_sr_freq(synth_param_to_hz(params->NFilFrq), sr);
-  v->nf_q = synth_param_to_q(params->NFilQ);
+  nf_freq = synth_clamp_sr_freq(synth_param_to_hz(params->NFilFrq), sr);
+  nf_q = synth_param_to_q(params->NFilQ);
   v->n_atk = synth_attack_time(params->NEnvAtk);
   v->n_dcy = synth_decay_time(params->NEnvDcy);
-  v->n_env_mod = params->NEnvMod;
 
   mix = params->Mix;
   v->dist_amt = params->DistAmt;
@@ -690,14 +497,14 @@ void po32_synth_voice_init(po32_synth_voice_t *v, uint32_t sample_rate,
   v->noise_vel_g = synth_velocity_gain(velocity, params->NVel);
 
   mod_vel_g = synth_velocity_gain(velocity, params->ModVel);
-  v->mod_sm *= mod_vel_g;
+  mod_sm *= mod_vel_g;
 
   if (params->NFilMod < SYNTH_ONE_THIRD)
-    synth_biquad_design_lp(&nf, v->nf_freq, v->nf_q, sr);
+    synth_biquad_design_lp(&nf, nf_freq, nf_q, sr);
   else if (params->NFilMod < SYNTH_TWO_THIRDS)
-    synth_biquad_design_bp(&nf, v->nf_freq, v->nf_q, sr);
+    synth_biquad_design_bp(&nf, nf_freq, nf_q, sr);
   else
-    synth_biquad_design_hp(&nf, v->nf_freq, v->nf_q, sr);
+    synth_biquad_design_hp(&nf, nf_freq, nf_q, sr);
   synth_biquad_to_flat(&nf, v->noise_filt);
 
   v->use_eq = (synth_fabsf(eq_db) > SYNTH_EQ_ENABLE_THRESH_DB);
@@ -706,15 +513,56 @@ void po32_synth_voice_init(po32_synth_voice_t *v, uint32_t sample_rate,
     synth_biquad_to_flat(&ef, v->eq_filt);
   }
 
-  v->mod_decay_time = synth_decay_time(mod_rate);
-  v->mod_rate_hz = (v->mod_mode < SYNTH_TWO_THIRDS) ? (SYNTH_SINE_MOD_MAX_HZ * mod_rate)
-                                                    : synth_param_to_hz(mod_rate);
+  mod_decay_time = synth_decay_time(mod_rate);
+  mod_rate_hz = (mod_mode < SYNTH_TWO_THIRDS) ? (SYNTH_SINE_MOD_MAX_HZ * mod_rate)
+                                              : synth_param_to_hz(mod_rate);
 
-  v->mod_alpha_precomp = 1.0f - lut_expf(-LUT_TWO_PI * v->mod_rate_hz / sr);
+  v->mod_alpha_precomp = 1.0f - lut_expf(-LUT_TWO_PI * mod_rate_hz / sr);
   v->mod_alpha_precomp = synth_clamp(v->mod_alpha_precomp, SYNTH_MOD_ALPHA_MIN, 1.0f);
+  v->mod_one_minus_alpha = 1.0f - v->mod_alpha_precomp;
+
+  v->wave_sel = (params->OscWave < SYNTH_ONE_THIRD)    ? 0
+                : (params->OscWave < SYNTH_TWO_THIRDS) ? 1
+                                                       : 2;
+  v->mod_is_exp = (mod_mode < SYNTH_ONE_THIRD);
+  v->mod_is_sine = (!v->mod_is_exp && mod_mode < SYNTH_TWO_THIRDS);
+  v->nenv_is_ring = (params->NEnvMod > SYNTH_TWO_THIRDS);
+  v->nenv_is_linear = (!v->nenv_is_ring && params->NEnvMod > SYNTH_ONE_THIRD);
+
+  v->osc_freq_step = osc_freq * inv_sr;
+  v->mod_pitch_scale = mod_sm * (1.0f / SYNTH_SEMITONES_PER_OCTAVE);
+  v->mod_pitch_active = (v->mod_pitch_scale != 0.0f);
+
+  /* Oscillator amplitude envelope recursion.
+   * attack(t) = FLOOR * SPAN^(t/atk), decay(t) = FLOOR^(t/dcy), so each
+   * advances by a constant per-sample ratio. */
+  v->osc_env_in_attack = (v->osc_atk > 0.0f);
+  v->osc_atk_coeff = v->osc_env_in_attack ? lut_powf(SYNTH_ENV_SPAN, inv_sr / v->osc_atk) : 1.0f;
+  v->osc_dcy_coeff = lut_powf(SYNTH_ENV_FLOOR_GAIN, inv_sr / v->osc_dcy);
+
+  /* Noise envelope: exp mode shares the same recursion; ring mode reuses
+   * the decay recursion for its decay factor. */
+  v->nenv_in_attack = (v->n_atk > 0.0f);
+  v->nenv_atk_coeff = v->nenv_in_attack ? lut_powf(SYNTH_ENV_SPAN, inv_sr / v->n_atk) : 1.0f;
+  v->nenv_dcy_coeff = lut_powf(SYNTH_ENV_FLOOR_GAIN, inv_sr / v->n_dcy);
+
+  /* Linear noise envelope: reciprocals hoisted out of the loop. The
+   * attack branch is only reachable when lin_atk > 0 (t >= 0); lin_dcy
+   * is always > 0 (n_dcy >= SYNTH_DECAY_MIN_SECONDS). */
+  v->lin_atk = v->n_atk * SYNTH_TWO_THIRDS;
+  v->lin_dcy = v->n_dcy * SYNTH_TWO_THIRDS;
+  v->inv_lin_atk = (v->lin_atk > 0.0f) ? (1.0f / v->lin_atk) : 0.0f;
+  v->inv_lin_dcy = 1.0f / v->lin_dcy;
+
+  /* Pitch-mod source: exponential decay is a geometric recursion; the
+   * sine LFO is a recursive complex rotation (same scheme as the DPSK
+   * modulator oscillator). mod_decay_time is always > 0
+   * (synth_decay_time returns >= SYNTH_DECAY_MIN_SECONDS). */
+  v->mod_dcy_coeff = lut_powf(SYNTH_ENV_FLOOR_GAIN, inv_sr / mod_decay_time);
+  po32_lut_rot_step(LUT_TWO_PI * mod_rate_hz * inv_sr, &v->mod_rot_s, &v->mod_rot_c);
 
   v->mod_env_amp_correction = 1.0f;
-  if (v->n_env_mod > SYNTH_TWO_THIRDS) {
+  if (v->nenv_is_ring) {
     float dcy_param = params->NEnvDcy;
     if (dcy_param > SYNTH_LEVEL_MIN_PARAM) {
       v->mod_env_period = (dcy_param / sr) * lut_powf(SYNTH_FILTER_Q_MAX, dcy_param);
@@ -726,24 +574,36 @@ void po32_synth_voice_init(po32_synth_voice_t *v, uint32_t sample_rate,
       }
     }
   }
+
+  /* Must come after mod_env_period is computed above. */
+  v->inv_mod_env_period = (v->mod_env_period > 0.0f) ? (1.0f / v->mod_env_period) : 0.0f;
+
+  po32_synth_voice_reset(v);
 }
 
 void po32_synth_voice_reset(po32_synth_voice_t *v) {
-  uint32_t sr;
   if (v == NULL)
     return;
-  sr = v->sample_rate;
-  /* Re-init preserving precomputed constants by re-zeroing DSP state only. */
+
   v->samples_rendered = 0u;
-  v->phase = 0.0f;
+  v->phase01 = 0.0f;
   v->mod_state = 0.0f;
   v->rand_state = 123456789u;
+
+  /* Envelope and LFO recursions restart from their t = 0 seeds. */
+  v->osc_env_v = SYNTH_ENV_FLOOR_GAIN;
+  v->osc_env_synced = 0;
+  v->nenv_v = SYNTH_ENV_FLOOR_GAIN;
+  v->nenv_synced = 0;
+  v->mod_env_v = 1.0f;
+  v->mod_osc_s = 0.0f;
+  v->mod_osc_c = 1.0f;
+
   /* Reset filter z1/z2 (indices 5, 6) */
   v->noise_filt[5] = 0.0f;
   v->noise_filt[6] = 0.0f;
   v->eq_filt[5] = 0.0f;
   v->eq_filt[6] = 0.0f;
-  (void)sr;
 }
 
 size_t po32_synth_voice_samples_remaining(const po32_synth_voice_t *v) {
@@ -756,92 +616,127 @@ int po32_synth_voice_done(const po32_synth_voice_t *v) {
   return v == NULL || v->samples_rendered >= v->total_samples;
 }
 
+/* ── Main render loop ───────────────────────────────────────────
+ *
+ * Only adds, multiplies, compares, and (for the sine oscillator and
+ * ring envelope) table lookups per sample. Envelopes advance by one
+ * multiply; exp2 runs only while pitch mod is active.
+ *
+ * Every envelope and LFO here is a recursion whose state lives in the
+ * voice, so splitting a render across calls emits exactly the samples a
+ * single call would. po32_synth_render() is that single call.
+ */
 po32_status_t po32_synth_voice_render_f32(po32_synth_voice_t *v, float *out, size_t out_capacity,
                                           size_t *out_len) {
   size_t n, i;
-  float sr;
+  float inv_sr;
   synth_biquad_t nf, ef;
 
   if (v == NULL || out == NULL || out_len == NULL)
     return PO32_ERR_INVALID_ARG;
 
-  sr = v->sr;
+  inv_sr = v->inv_sr;
   n = v->total_samples - v->samples_rendered;
   if (n > out_capacity)
     n = out_capacity;
   *out_len = n;
+  if (n == 0u)
+    return PO32_OK;
 
+  /* Loaded unconditionally: seven floats once per call, and it keeps ef
+     provably initialized for the guarded use inside the loop. */
   synth_biquad_from_flat(v->noise_filt, &nf);
-  if (v->use_eq)
-    synth_biquad_from_flat(v->eq_filt, &ef);
+  synth_biquad_from_flat(v->eq_filt, &ef);
 
   for (i = 0; i < n; ++i) {
-    float t = (float)(v->samples_rendered + i) / sr;
+    float t = (float)(v->samples_rendered + i) * inv_sr;
     float osc_env, noise_env;
-    float mod_sig, freq_mult, inst_freq;
+    float mod_sig, freq_mult;
     float osc_sample, noise_raw, noise_sample;
     float sample;
 
-    if (v->osc_atk > 0.0f && t < v->osc_atk)
-      osc_env = synth_exp_attack_env(t, v->osc_atk);
-    else
-      osc_env = synth_exp_decay_env(t - v->osc_atk, v->osc_dcy);
+    /* osc_dcy is always > 0 (synth_decay_time returns >= SYNTH_DECAY_MIN_SECONDS). */
+    if (v->osc_env_in_attack && t < v->osc_atk) {
+      osc_env = v->osc_env_v;
+      v->osc_env_v *= v->osc_atk_coeff;
+    } else {
+      if (!v->osc_env_synced) {
+        v->osc_env_v = synth_exp_decay_env(t - v->osc_atk, v->osc_dcy);
+        v->osc_env_synced = 1;
+      }
+      osc_env = v->osc_env_v;
+      v->osc_env_v *= v->osc_dcy_coeff;
+    }
 
-    if (v->mod_mode < SYNTH_ONE_THIRD) {
-      mod_sig = synth_exp_decay_env(t, v->mod_decay_time);
-    } else if (v->mod_mode < SYNTH_TWO_THIRDS) {
-      float sine_env = synth_exp_decay_env(t, v->mod_decay_time);
-      mod_sig = lut_sinf(LUT_TWO_PI * v->mod_rate_hz * t) * sine_env;
+    if (v->mod_is_exp) {
+      mod_sig = v->mod_env_v;
+      v->mod_env_v *= v->mod_dcy_coeff;
+    } else if (v->mod_is_sine) {
+      float ms = v->mod_osc_s * v->mod_rot_c + v->mod_osc_c * v->mod_rot_s;
+      float mc = v->mod_osc_c * v->mod_rot_c - v->mod_osc_s * v->mod_rot_s;
+      mod_sig = v->mod_osc_s * v->mod_env_v;
+      v->mod_osc_s = ms;
+      v->mod_osc_c = mc;
+      v->mod_env_v *= v->mod_dcy_coeff;
     } else {
       float noise_in = synth_randf(&v->rand_state) * 2.0f - 1.0f;
-      v->mod_state = v->mod_state * (1.0f - v->mod_alpha_precomp) + noise_in * v->mod_alpha_precomp;
+      v->mod_state = v->mod_state * v->mod_one_minus_alpha + noise_in * v->mod_alpha_precomp;
       mod_sig = v->mod_state;
     }
 
-    freq_mult = lut_exp2f(mod_sig * v->mod_sm / SYNTH_SEMITONES_PER_OCTAVE);
-    inst_freq = v->osc_freq * freq_mult;
-    v->phase += inst_freq * (LUT_TWO_PI / sr);
+    freq_mult = v->mod_pitch_active ? lut_exp2f(mod_sig * v->mod_pitch_scale) : 1.0f;
+    v->phase01 = synth_wrap_phase01(v->phase01 + v->osc_freq_step * freq_mult);
 
-    if (v->osc_wave < SYNTH_ONE_THIRD) {
-      osc_sample = lut_sinf(v->phase);
-    } else if (v->osc_wave < SYNTH_TWO_THIRDS) {
-      float ph = synth_wrap_phase01(v->phase * LUT_INV_TWO_PI);
-      osc_sample = 2.0f * synth_fabsf(2.0f * ph - 1.0f) - 1.0f;
+    if (v->wave_sel == 0) {
+      osc_sample = po32_lut_sinf_turns01(v->phase01);
+    } else if (v->wave_sel == 1) {
+      osc_sample = 2.0f * synth_fabsf(2.0f * v->phase01 - 1.0f) - 1.0f;
     } else {
-      float ph = synth_wrap_phase01(v->phase * LUT_INV_TWO_PI);
-      osc_sample = 2.0f * ph - 1.0f;
+      osc_sample = 2.0f * v->phase01 - 1.0f;
     }
 
     osc_sample *= osc_env;
 
-    if (v->n_env_mod > SYNTH_TWO_THIRDS) {
+    /* n_dcy is always > 0 (synth_decay_time returns >= SYNTH_DECAY_MIN_SECONDS). */
+    if (v->nenv_is_ring) {
       if (t < v->n_atk) {
         noise_env = 1.0f;
-      } else if (v->mod_env_period > 0.0f) {
-        float dt = t - v->n_atk;
-        float saw = synth_wrap_phase01(dt / v->mod_env_period);
-        float tri = 1.0f - 2.0f * synth_fabsf(saw - 0.5f);
-        float ring = lut_cosf(LUT_PI * tri);
-        float decay = synth_exp_decay_env(dt, v->n_dcy);
-        noise_env = ring * decay * v->mod_env_amp_correction;
       } else {
-        noise_env = synth_exp_decay_env(t - v->n_atk, v->n_dcy);
+        float dt = t - v->n_atk;
+        float decay;
+        if (!v->nenv_synced) {
+          v->nenv_v = synth_exp_decay_env(dt, v->n_dcy);
+          v->nenv_synced = 1;
+        }
+        decay = v->nenv_v;
+        v->nenv_v *= v->nenv_dcy_coeff;
+        if (v->mod_env_period > 0.0f) {
+          float saw = synth_wrap_phase01(dt * v->inv_mod_env_period);
+          float tri = 1.0f - 2.0f * synth_fabsf(saw - 0.5f);
+          noise_env = lut_cosf(LUT_PI * tri) * decay * v->mod_env_amp_correction;
+        } else {
+          noise_env = decay;
+        }
       }
-    } else if (v->n_env_mod > SYNTH_ONE_THIRD) {
-      float lin_atk = v->n_atk * SYNTH_TWO_THIRDS;
-      float lin_dcy = v->n_dcy * SYNTH_TWO_THIRDS;
-
-      if (t < lin_atk)
-        noise_env = t / lin_atk;
-      else if (t < lin_atk + lin_dcy)
-        noise_env = 1.0f - (t - lin_atk) / lin_dcy;
+    } else if (v->nenv_is_linear) {
+      if (t < v->lin_atk)
+        noise_env = t * v->inv_lin_atk;
+      else if (t < v->lin_atk + v->lin_dcy)
+        noise_env = 1.0f - (t - v->lin_atk) * v->inv_lin_dcy;
       else
         noise_env = 0.0f;
     } else {
-      if (v->n_atk > 0.0f && t < v->n_atk)
-        noise_env = synth_exp_attack_env(t, v->n_atk);
-      else
-        noise_env = synth_exp_decay_env(t - v->n_atk, v->n_dcy);
+      if (v->nenv_in_attack && t < v->n_atk) {
+        noise_env = v->nenv_v;
+        v->nenv_v *= v->nenv_atk_coeff;
+      } else {
+        if (!v->nenv_synced) {
+          v->nenv_v = synth_exp_decay_env(t - v->n_atk, v->n_dcy);
+          v->nenv_synced = 1;
+        }
+        noise_env = v->nenv_v;
+        v->nenv_v *= v->nenv_dcy_coeff;
+      }
     }
 
     noise_raw = synth_randf(&v->rand_state) * 2.0f - 1.0f;
@@ -868,8 +763,7 @@ po32_status_t po32_synth_voice_render_f32(po32_synth_voice_t *v, float *out, siz
 
   /* Persist filter state back */
   synth_biquad_to_flat(&nf, v->noise_filt);
-  if (v->use_eq)
-    synth_biquad_to_flat(&ef, v->eq_filt);
+  synth_biquad_to_flat(&ef, v->eq_filt);
 
   v->samples_rendered += n;
   return PO32_OK;
