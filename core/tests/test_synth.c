@@ -554,6 +554,256 @@ static void test_distort_low_drive(void) {
   printf("  distort_low_drive: OK\n");
 }
 
+static void assert_voice_matches_oneshot(const po32_patch_params_t *params, int velocity,
+                                         float duration, size_t chunk_size) {
+  po32_synth_t synth;
+  po32_synth_voice_t voice;
+  size_t oneshot_len = 0;
+  size_t streamed = 0u;
+  size_t chunk_len = 0u;
+  float diff;
+
+  po32_synth_init(&synth, SR);
+
+  assert(po32_synth_render(&synth, params, velocity, duration, aux_a, MAX_SAMPLES, &oneshot_len) ==
+         PO32_OK);
+  assert(oneshot_len > 0);
+
+  po32_synth_voice_init(&voice, SR, params, velocity, duration);
+  assert(!po32_synth_voice_done(&voice));
+  assert(po32_synth_voice_samples_remaining(&voice) == oneshot_len);
+
+  while (!po32_synth_voice_done(&voice)) {
+    po32_status_t s = po32_synth_voice_render_f32(&voice, aux_b + streamed, chunk_size, &chunk_len);
+    assert(s == PO32_OK);
+    assert(chunk_len > 0u);
+    streamed += chunk_len;
+  }
+
+  assert(streamed == oneshot_len);
+  assert(po32_synth_voice_samples_remaining(&voice) == 0u);
+
+  /* Compare sample-for-sample */
+  diff = rms_diff(aux_a, aux_b, oneshot_len);
+  assert(diff == 0.0f);
+
+  po32_synth_voice_reset(&voice);
+  assert(po32_synth_voice_samples_remaining(&voice) == oneshot_len);
+  assert(po32_synth_voice_render_f32(&voice, aux_c, 17u, &chunk_len) == PO32_OK);
+  assert(chunk_len == 17u);
+  assert(rms_diff(aux_a, aux_c, chunk_len) == 0.0f);
+  assert(po32_synth_voice_samples_remaining(&voice) == oneshot_len - chunk_len);
+}
+
+static void test_voice_streaming_invalid_args(void) {
+  po32_synth_voice_t voice;
+  po32_patch_params_t params;
+  size_t out_len = 99u;
+
+  memset(&params, 0, sizeof(params));
+  params.Level = 0.836f;
+
+  po32_synth_voice_init(NULL, SR, &params, 100, 0.1f);
+  po32_synth_voice_init(&voice, SR, NULL, 100, 0.1f);
+
+  /*
+   * A refused init reports no status, so it must leave an inert voice -
+   * including when it overwrites a voice that was mid-hit.
+   */
+  po32_synth_voice_init(&voice, SR, &params, 100, 0.1f);
+  assert(!po32_synth_voice_done(&voice));
+  assert(po32_synth_voice_samples_remaining(&voice) > 0u);
+  po32_synth_voice_init(&voice, SR, NULL, 100, 0.1f);
+  assert(po32_synth_voice_done(&voice));
+  assert(po32_synth_voice_samples_remaining(&voice) == 0u);
+  out_len = 99u;
+  assert(po32_synth_voice_render_f32(&voice, aux_a, 8u, &out_len) == PO32_OK);
+  assert(out_len == 0u);
+
+  po32_synth_voice_reset(NULL);
+  assert(po32_synth_voice_done(NULL));
+  assert(po32_synth_voice_samples_remaining(NULL) == 0u);
+
+  po32_synth_voice_init(&voice, SR, &params, 100, 0.1f);
+  assert(po32_synth_voice_render_f32(NULL, aux_a, 8u, &out_len) == PO32_ERR_INVALID_ARG);
+  assert(po32_synth_voice_render_f32(&voice, NULL, 8u, &out_len) == PO32_ERR_INVALID_ARG);
+  assert(po32_synth_voice_render_f32(&voice, aux_a, 8u, NULL) == PO32_ERR_INVALID_ARG);
+  assert(po32_synth_voice_render_f32(&voice, aux_a, 0u, &out_len) == PO32_OK);
+  assert(out_len == 0u);
+}
+
+static void test_voice_streaming_matches_oneshot(void) {
+  po32_patch_params_t params;
+
+  memset(&params, 0, sizeof(params));
+  params.OscWave = 0.0f;
+  params.OscFreq = 0.25f;
+  params.OscDcy = 0.55f;
+  params.ModMode = 0.0f;
+  params.ModRate = 0.3f;
+  params.ModAmt = 0.3f;
+  params.NFilFrq = 0.5f;
+  params.NEnvAtk = 0.1f;
+  params.NEnvDcy = 0.4f;
+  params.Mix = 0.3f;
+  params.DistAmt = 0.2f;
+  params.EQFreq = 0.5f;
+  params.EQGain = 0.7f;
+  params.Level = 0.836f;
+  assert_voice_matches_oneshot(&params, 100, 0.5f, 256u);
+
+  memset(&params, 0, sizeof(params));
+  params.OscWave = 0.0f;
+  params.OscFreq = 0.22f;
+  params.OscDcy = 0.4f;
+  params.ModMode = 0.0f;
+  params.ModRate = 0.2f;
+  params.NFilFrq = 0.5f;
+  params.NEnvDcy = 0.3f;
+  params.Mix = 0.4f;
+  params.Level = 0.836f;
+  assert_voice_matches_oneshot(&params, 110, 0.25f, 193u);
+
+  memset(&params, 0, sizeof(params));
+  params.OscWave = 0.5f;
+  params.OscFreq = 0.35f;
+  params.OscAtk = 0.2f;
+  params.OscDcy = 0.45f;
+  params.ModMode = 0.5f;
+  params.ModRate = 0.6f;
+  params.ModAmt = 0.7f;
+  params.NFilMod = 0.5f;
+  params.NFilFrq = 0.65f;
+  params.NFilQ = 0.4f;
+  params.NEnvMod = 0.5f;
+  params.NEnvAtk = 0.1f;
+  params.NEnvDcy = 0.45f;
+  params.Mix = 0.6f;
+  params.EQFreq = 0.5f;
+  params.EQGain = 0.5f;
+  params.Level = 0.836f;
+  assert_voice_matches_oneshot(&params, 90, 0.35f, 113u);
+
+  memset(&params, 0, sizeof(params));
+  params.OscWave = 1.0f;
+  params.OscFreq = 0.55f;
+  params.OscDcy = 0.3f;
+  params.ModMode = 1.0f;
+  params.ModRate = 0.4f;
+  params.ModAmt = 0.8f;
+  params.NFilMod = 1.0f;
+  params.NFilFrq = 0.8f;
+  params.NFilQ = 0.3f;
+  params.NEnvMod = 1.0f;
+  params.NEnvAtk = 0.15f;
+  params.NEnvDcy = 0.02f;
+  params.Mix = 0.75f;
+  params.DistAmt = 0.45f;
+  params.EQFreq = 0.7f;
+  params.EQGain = 0.8f;
+  params.Level = 0.836f;
+  assert_voice_matches_oneshot(&params, 127, 0.4f, 257u);
+
+  memset(&params, 0, sizeof(params));
+  params.OscWave = 0.0f;
+  params.OscFreq = 0.3f;
+  params.OscDcy = 0.5f;
+  params.ModMode = 0.0f;
+  params.ModRate = 0.1f;
+  params.NFilFrq = 0.45f;
+  params.NEnvMod = 1.0f;
+  params.NEnvAtk = 0.01f;
+  params.NEnvDcy = 1.0f;
+  params.Mix = 0.9f;
+  params.Level = 0.836f;
+  assert_voice_matches_oneshot(&params, 100, 0.2f, 128u);
+
+  memset(&params, 0, sizeof(params));
+  params.OscWave = 1.0f;
+  params.OscFreq = 0.2f;
+  params.OscDcy = 0.6f;
+  params.ModMode = 1.0f;
+  params.ModRate = 0.2f;
+  params.ModAmt = 0.55f;
+  params.NFilMod = 1.0f;
+  params.NFilFrq = 0.35f;
+  params.NEnvMod = 1.0f;
+  params.NEnvDcy = 0.0f;
+  params.Mix = 0.5f;
+  params.Level = 0.836f;
+  assert_voice_matches_oneshot(&params, 64, 0.25f, 64u);
+
+  test_voice_streaming_invalid_args();
+  printf("  voice_streaming: exact match and guard paths OK\n");
+}
+
+static void assert_voice_is_inert(po32_synth_voice_t *voice) {
+  size_t out_len = 99u;
+
+  assert(voice->total_samples == 0u);
+  assert(po32_synth_voice_done(voice));
+  assert(po32_synth_voice_samples_remaining(voice) == 0u);
+
+  aux_a[0] = 12345.0f;
+  assert(po32_synth_voice_render_f32(voice, aux_a, MAX_SAMPLES, &out_len) == PO32_OK);
+  assert(out_len == 0u);
+  assert(aux_a[0] == 12345.0f); /* rendered nothing at all */
+
+  /* A reset must not resurrect a voice that has no samples to give. */
+  po32_synth_voice_reset(voice);
+  assert(po32_synth_voice_done(voice));
+  assert(po32_synth_voice_samples_remaining(voice) == 0u);
+}
+
+/*
+ * A zero sample rate or a non-positive/non-finite duration must yield an
+ * inert voice rather than undefined behaviour: the first divides by zero
+ * during precomputation and feeds NaN to the LUT float-to-int conversions,
+ * the second converts an out-of-range float to size_t (C99 6.3.1.4).
+ */
+static void test_degenerate_rate_and_duration(void) {
+  po32_synth_t synth;
+  po32_synth_voice_t voice;
+  po32_patch_params_t params;
+  /* Negative, zero, NaN, both infinities, and a finite value too large for
+     size_t once scaled by the sample rate. */
+  const float bad_durations[] = {-1.0f, 0.0f, NAN, INFINITY, -INFINITY, 1.0e30f};
+  size_t len = 99u;
+  size_t i;
+
+  memset(&params, 0, sizeof(params));
+  params.OscFreq = 0.3f;
+  params.OscDcy = 0.5f;
+  params.NFilFrq = 0.5f;
+  params.Level = 0.836f;
+
+  /* Zero sample rate, otherwise valid duration. */
+  po32_synth_voice_init(&voice, 0u, &params, 100, 0.1f);
+  assert_voice_is_inert(&voice);
+
+  po32_synth_init(&synth, 0u);
+  assert(po32_synth_samples_for_duration(&synth, 1.0f) == 0u);
+  assert(po32_synth_render(&synth, &params, 100, 0.1f, buf, MAX_SAMPLES, &len) == PO32_OK);
+  assert(len == 0u);
+
+  /* Bad durations at a valid sample rate. */
+  po32_synth_init(&synth, SR);
+  for (i = 0; i < sizeof(bad_durations) / sizeof(bad_durations[0]); ++i) {
+    const float duration = bad_durations[i];
+
+    assert(po32_synth_samples_for_duration(&synth, duration) == 0u);
+
+    len = 99u;
+    assert(po32_synth_render(&synth, &params, 100, duration, buf, MAX_SAMPLES, &len) == PO32_OK);
+    assert(len == 0u);
+
+    po32_synth_voice_init(&voice, SR, &params, 100, duration);
+    assert_voice_is_inert(&voice);
+  }
+
+  printf("  degenerate_rate_and_duration: zero rate + bad durations inert OK\n");
+}
+
 int main(void) {
   printf("po32 synth tests\n");
   printf("=================\n");
@@ -572,6 +822,8 @@ int main(void) {
   test_noise_envelopes_have_distinct_shapes();
   test_render_edge_cases();
   test_distort_low_drive();
+  test_voice_streaming_matches_oneshot();
+  test_degenerate_rate_and_duration();
 
   printf("=================\n");
   printf("all synth tests passed\n");
