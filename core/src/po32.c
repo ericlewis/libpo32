@@ -1092,7 +1092,7 @@ po32_status_t po32_modulator_render_f32(po32_modulator_t *m, float *out_samples,
   state = m->state;
 
   for (i = 0; i < count; ++i) {
-    float ns, nc, sample;
+    float ns, nc, gain, sample;
     float sign;
 
     sym_phase += sym_step;
@@ -1108,8 +1108,14 @@ po32_status_t po32_modulator_render_f32(po32_modulator_t *m, float *out_samples,
 
     ns = osc_s * rot_c + osc_c * rot_s;
     nc = osc_c * rot_c - osc_s * rot_s;
-    osc_s = ns;
-    osc_c = nc;
+
+    /* rot_sin/rot_cos come from the interpolated sine LUT, so the rotor
+     * magnitude is ~1 - 1.1e-6 instead of exactly 1. Left alone, the
+     * recursion decays ~10x every 2M samples. Rescale by a first-order
+     * Taylor step for 1/sqrt(x) about 1 to hold the magnitude at unity. */
+    gain = 1.5f - 0.5f * (ns * ns + nc * nc);
+    osc_s = ns * gain;
+    osc_c = nc * gain;
 
     /* Branchless sign flip: state is 0 or 1 */
     sign = (float)(2 * state - 1);
@@ -1386,12 +1392,17 @@ static void po32_demod_run_boundary(po32_demod_run_t *run, int *stop) {
 }
 
 static po32_status_t po32_demod_run_sample(po32_demod_run_t *run, float sample, int *stop) {
-  float ns, nc;
+  float ns, nc, gain;
 
   ns = run->osc_sin * run->rot_cos + run->osc_cos * run->rot_sin;
   nc = run->osc_cos * run->rot_cos - run->osc_sin * run->rot_sin;
-  run->osc_sin = ns;
-  run->osc_cos = nc;
+
+  /* Same LUT-magnitude correction as the modulator: without it the local
+   * oscillator decays until the correlation dot product underflows to zero
+   * and every bit decodes as 1. */
+  gain = 1.5f - 0.5f * (ns * ns + nc * nc);
+  run->osc_sin = ns * gain;
+  run->osc_cos = nc * gain;
 
   run->accum_i += sample * run->osc_sin;
   run->accum_q += sample * run->osc_cos;
