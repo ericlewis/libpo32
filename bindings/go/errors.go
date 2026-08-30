@@ -4,11 +4,11 @@ package po32
 type Status int
 
 const (
-	ErrInvalidArg    Status = -1
-	ErrRange         Status = -2
+	ErrInvalidArg     Status = -1
+	ErrRange          Status = -2
 	ErrBufferTooSmall Status = -3
-	ErrFrame         Status = -4
-	ErrParse         Status = -5
+	ErrFrame          Status = -4
+	ErrParse          Status = -5
 )
 
 func (s Status) Error() string {

@@ -92,7 +92,7 @@ func finalTailFromC(c *C.po32_final_tail_t) FinalTail {
 	return FinalTail{
 		MarkerC3: uint8(c.marker_c3), Marker71: uint8(c.marker_71),
 		SpecialByte: uint8(c.special_byte),
-		FinalLo: uint8(c.final_lo), FinalHi: uint8(c.final_hi),
+		FinalLo:     uint8(c.final_lo), FinalHi: uint8(c.final_hi),
 		StateBeforeSpecial: uint16(c.state_before_special),
 		StateAfterSpecial:  uint16(c.state_after_special),
 		FinalState:         uint16(c.final_state),
