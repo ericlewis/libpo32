@@ -9,11 +9,11 @@ type MorphPair struct {
 // PatchParams holds the 21 normalized drum voice parameters (all 0.0–1.0).
 type PatchParams struct {
 	OscWave, OscFreq, OscAtk, OscDcy float32
-	ModMode, ModRate, ModAmt          float32
-	NFilMod, NFilFrq, NFilQ           float32
-	NEnvMod, NEnvAtk, NEnvDcy         float32
-	Mix, DistAmt, EQFreq, EQGain      float32
-	Level, OscVel, NVel, ModVel       float32
+	ModMode, ModRate, ModAmt         float32
+	NFilMod, NFilFrq, NFilQ          float32
+	NEnvMod, NEnvAtk, NEnvDcy        float32
+	Mix, DistAmt, EQFreq, EQGain     float32
+	Level, OscVel, NVel, ModVel      float32
 }
 
 // PacketTrailer holds CRC trailer state from a decoded packet.
