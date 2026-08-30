@@ -1547,6 +1547,32 @@ static void test_streaming_demodulator(void) {
   assert(inert_demod.synced == 0);
   assert(inert_demod.work_len == 0u);
 
+  /*
+   * A NaN rate slips past a `rate <= 0` guard and propagates into the DPSK
+   * carrier step, reaching the LUT float-to-int conversions, which are
+   * undefined on NaN. Every unusable rate must leave the demodulator inert
+   * and be refused by the one-shot decoder.
+   */
+  {
+    const float bad_rates[] = {NAN, INFINITY, -INFINITY, -1.0f, 0.0f};
+    po32_decode_result_t bad_result;
+    uint8_t bad_frame[256];
+    size_t bad_len = 99u;
+    size_t r;
+
+    for (r = 0u; r < sizeof(bad_rates) / sizeof(bad_rates[0]); ++r) {
+      memset(&inert_demod, 0xFF, sizeof(inert_demod));
+      po32_demodulator_init(&inert_demod, bad_rates[r]);
+      assert(inert_demod.sample_rate == 0.0f);
+      assert(inert_demod.symbols_per_sample == 0.0f);
+      assert(inert_demod.rot_sin == 0.0f); /* LUT was never reached */
+      assert(inert_demod.rot_cos == 0.0f);
+
+      assert(po32_decode_f32(&zero_sample, 1u, bad_rates[r], &bad_result, bad_frame,
+                             sizeof(bad_frame), &bad_len) == PO32_ERR_INVALID_ARG);
+    }
+  }
+
   memset(&patch, 0, sizeof(patch));
   patch.OscFreq = 0.28f;
   patch.OscDcy = 0.42f;

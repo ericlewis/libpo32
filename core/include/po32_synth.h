@@ -28,7 +28,8 @@ size_t po32_synth_samples_for_duration(const po32_synth_t *synth, float seconds)
  *
  * params:   patch parameters (all fields 0.0-1.0)
  * velocity: MIDI velocity 0-127
- * duration: render length in seconds
+ * duration: render length in seconds; a non-positive or non-finite value,
+ *           or a zero sample rate, renders nothing and sets *out_len to 0
  * out:      caller-allocated float buffer, receives samples in [-1, 1]
  * out_capacity: max floats that fit in out
  * out_len:  set to actual number of samples written
@@ -75,6 +76,13 @@ typedef struct po32_synth_voice {
   float n_env_mod;
 } po32_synth_voice_t;
 
+/*
+ * Prepare a voice to render one drum hit.
+ *
+ * A zero sample rate, or a non-positive or non-finite duration, leaves the
+ * voice inert: it reports done immediately, has no samples remaining, and
+ * renders nothing.
+ */
 void po32_synth_voice_init(po32_synth_voice_t *v, uint32_t sample_rate,
                            const po32_patch_params_t *params, int velocity, float duration);
 
