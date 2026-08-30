@@ -972,30 +972,7 @@ po32_status_t po32_packet_decode(uint16_t tag, const uint8_t *data, size_t len, 
 
 /* ── render and streaming decode ───────────────────────────────── */
 
-#define PO32_DEMOD_WORK_SIZE 280
-
-typedef struct po32_demodulator {
-  float sample_rate;
-  float osc_sin, osc_cos;
-  float rot_sin, rot_cos;
-  float accum_i, accum_q;
-  float prev_i, prev_q;
-  float symbol_phase;
-  float symbols_per_sample;
-  int started;
-  uint64_t sync_window;
-  uint64_t sync_pattern;
-  int synced;
-  uint8_t current_byte;
-  uint8_t bits_in_byte;
-  size_t byte_offset;
-  uint16_t crc_state;
-  uint8_t work[PO32_DEMOD_WORK_SIZE];
-  size_t work_len;
-  int packet_count;
-  int done;
-  po32_final_tail_t tail;
-} po32_demodulator_t;
+/* po32_demodulator_t is defined in po32.h */
 
 size_t po32_render_sample_count(size_t frame_len, uint32_t sample_rate) {
   if (sample_rate == 0u)
@@ -1157,7 +1134,7 @@ po32_status_t po32_render_dpsk_f32(const uint8_t *frame, size_t frame_len, uint3
   return out_len == needed ? PO32_OK : PO32_ERR_FRAME;
 }
 
-static void po32_demodulator_init(po32_demodulator_t *d, float sample_rate) {
+void po32_demodulator_init(po32_demodulator_t *d, float sample_rate) {
   float carrier_step;
   if (d == NULL)
     return;
@@ -1183,7 +1160,7 @@ static void po32_demodulator_init(po32_demodulator_t *d, float sample_rate) {
   }
 }
 
-static void po32_demodulator_desync(po32_demodulator_t *d) {
+void po32_demodulator_desync(po32_demodulator_t *d) {
   if (d == NULL) {
     return;
   }
@@ -1243,15 +1220,27 @@ static void po32_demod_on_byte(po32_demodulator_t *d, po32_packet_callback_t cb,
       return;
     }
 
-    pkt.offset = d->byte_offset - d->work_len;
-    if (cb != NULL && cb(&pkt, user) != 0) {
-      *stop = 1;
-      return;
-    }
+    /* byte_offset counts bytes decoded since sync, i.e. from the first byte
+       after the preamble. po32_frame_parse() and po32_builder_append_packet()
+       both report offsets into the whole transmitted frame, so add the
+       preamble back to keep one meaning of po32_packet_t.offset. */
+    pkt.offset = (size_t)PO32_PREAMBLE_BYTES + d->byte_offset - d->work_len;
 
+    /* Commit before the callback runs: the packet is fully decoded and
+       verified by this point, so po32_demodulator_packet_count() counts every
+       packet the callback was handed, even the one it stops on. */
     d->crc_state = s;
     d->packet_count++;
     d->work_len = 0u;
+
+    if (cb != NULL && cb(&pkt, user) != 0) {
+      /* Terminal by contract. push() discards the rest of the chunk without
+         reporting how much it consumed, so a resumed stream would silently
+         restart mid-frame; latching the stop makes later pushes no-ops
+         instead. */
+      d->stopped = 1;
+      *stop = 1;
+    }
   }
 }
 
@@ -1388,14 +1377,30 @@ static po32_status_t po32_demod_run_sample(po32_demod_run_t *run, float sample, 
   return PO32_OK;
 }
 
-static po32_status_t po32_demodulator_push(po32_demodulator_t *d, const float *samples,
-                                           size_t count, po32_packet_callback_t cb, void *user) {
+int po32_demodulator_done(const po32_demodulator_t *d) {
+  return d != NULL && d->done;
+}
+
+int po32_demodulator_stopped(const po32_demodulator_t *d) {
+  return d != NULL && d->stopped;
+}
+
+int po32_demodulator_packet_count(const po32_demodulator_t *d) {
+  return d != NULL ? d->packet_count : 0;
+}
+
+const po32_final_tail_t *po32_demodulator_tail(const po32_demodulator_t *d) {
+  return d != NULL ? &d->tail : NULL;
+}
+
+po32_status_t po32_demodulator_push(po32_demodulator_t *d, const float *samples, size_t count,
+                                    po32_packet_callback_t cb, void *user) {
   po32_demod_run_t run;
   int stop = 0;
 
   if (d == NULL || samples == NULL)
     return PO32_ERR_INVALID_ARG;
-  if (d->done)
+  if (d->done || d->stopped)
     return PO32_OK;
 
   po32_demod_run_init(&run, d, cb, user);

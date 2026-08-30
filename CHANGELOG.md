@@ -6,6 +6,21 @@ The format is based on Keep a Changelog, and the project follows Semantic Versio
 
 ## [Unreleased]
 
+### Fixed
+- Packets delivered by `po32_demodulator_push(...)` now carry the same
+  `offset` as the ones `po32_frame_parse(...)` reports for the same frame.
+  The streaming path measured from the first byte after the preamble, so
+  every offset was 128 bytes short and pointed inside the preamble when used
+  to index a reconstructed frame.
+- A packet is now committed before its callback runs, so
+  `po32_demodulator_packet_count(...)` counts the packet a callback stops on.
+  Previously the count omitted it and the demodulator resumed mid-packet,
+  desyncing on the next push.
+
+### Added
+- `po32_demodulator_stopped(...)` — report that a callback returning nonzero
+  has stopped the stream. The stop is terminal: later pushes are no-ops.
+
 ## [0.2.1] - 2026-03-28
 
 ### Fixed
