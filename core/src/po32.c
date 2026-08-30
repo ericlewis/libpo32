@@ -18,6 +18,19 @@ static void po32_memcpy(void *dst, const void *src, size_t n) {
     *d++ = *s++;
 }
 
+/*
+ * A usable audio sample rate: positive and finite.
+ *
+ * Written as a positive test so NaN, which compares false against
+ * everything, is rejected - a NaN rate propagates into the DPSK carrier
+ * step and reaches the LUT helpers, whose float-to-int conversions are
+ * undefined on NaN.  The FLT_MAX bound rejects infinity, which would
+ * otherwise be stored as a nonsense rate.
+ */
+static int po32_sample_rate_is_usable(float sample_rate) {
+  return sample_rate > 0.0f && sample_rate <= FLT_MAX;
+}
+
 static int po32_memcmp(const void *a, const void *b, size_t n) {
   const unsigned char *pa = (const unsigned char *)a;
   const unsigned char *pb = (const unsigned char *)b;
@@ -1145,7 +1158,7 @@ void po32_demodulator_init(po32_demodulator_t *d, float sample_rate) {
     return;
 
   po32_zero(d, sizeof(*d));
-  if (sample_rate <= 0.0f)
+  if (!po32_sample_rate_is_usable(sample_rate))
     return;
 
   d->sample_rate = sample_rate;
@@ -1496,8 +1509,8 @@ static po32_status_t po32_decode_prepare(const float *samples, size_t count, flo
                                          uint8_t *out_frame, size_t out_capacity,
                                          const size_t *out_len, po32_builder_t *builder,
                                          po32_decode_ctx_t *ctx) {
-  if (samples == NULL || count == 0u || sample_rate <= 0.0f || out_frame == NULL ||
-      out_len == NULL || builder == NULL || ctx == NULL) {
+  if (samples == NULL || count == 0u || !po32_sample_rate_is_usable(sample_rate) ||
+      out_frame == NULL || out_len == NULL || builder == NULL || ctx == NULL) {
     return PO32_ERR_INVALID_ARG;
   }
 
