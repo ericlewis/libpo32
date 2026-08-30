@@ -58,21 +58,26 @@ static inline float po32_lut_sinf_turns01(float turns) {
 /* ── rotation step sin/cos ──────────────────────────────────────── */
 
 /* High-accuracy sin/cos of a per-sample step angle, for seeding
-   recursive rotation oscillators. Uses a quarter-angle Taylor series
-   plus two angle doublings, accurate to ~1e-7 for |angle| <= ~3.2 rad
-   (far better than the interpolated sine table, whose relative error
-   at small angles turns into a frequency offset in the recursion).
+   recursive rotation oscillators. Uses an eighth-angle Taylor series
+   plus three angle doublings, keeping the series argument small enough
+   that both the angle and the magnitude stay accurate to ~1e-7 across
+   the whole usable step range (|angle| <= pi). The interpolated sine
+   table is not good enough here: its relative error turns into a
+   persistent carrier/LFO frequency offset in the recursion, which no
+   amount of magnitude renormalization can correct.
    Setup-only: never called per sample. */
 static inline void po32_lut_rot_step(float angle, float *out_s, float *out_c) {
-  float q = angle * 0.25f;
+  float q = angle * 0.125f;
   float q2 = q * q;
   float s = q * (1.0f + q2 * (-1.0f / 6.0f + q2 * (1.0f / 120.0f + q2 * (-1.0f / 5040.0f))));
   float c = 1.0f + q2 * (-0.5f + q2 * (1.0f / 24.0f + q2 * (-1.0f / 720.0f)));
   float s2 = 2.0f * s * c;
   float c2 = c * c - s * s;
+  float s4 = 2.0f * s2 * c2;
+  float c4 = c2 * c2 - s2 * s2;
 
-  *out_s = 2.0f * s2 * c2;
-  *out_c = c2 * c2 - s2 * s2;
+  *out_s = 2.0f * s4 * c4;
+  *out_c = c4 * c4 - s4 * s4;
 }
 
 /* ── exp2 ───────────────────────────────────────────────────────── */
