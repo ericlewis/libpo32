@@ -1504,6 +1504,20 @@ static void test_streaming_demodulator(void) {
                                &packet_count) == PO32_OK);
   assert(packet_count == 1);
 
+  /* A NULL callback is legal: packets are still decoded, counted, and the
+     tail still completes the frame -- they are simply not delivered. */
+  {
+    po32_demodulator_t silent;
+
+    po32_demodulator_init(&silent, 44100.0f);
+    assert(po32_demodulator_push(&silent, samples, sample_count, NULL, NULL) == PO32_OK);
+    assert(po32_demodulator_done(&silent));
+    assert(po32_demodulator_stopped(&silent) == 0);
+    assert(po32_demodulator_packet_count(&silent) == 1);
+    assert(po32_demodulator_tail(&silent)->marker_c3 == 0xC3u);
+    assert(po32_demodulator_tail(&silent)->marker_71 == 0x71u);
+  }
+
   free(samples);
 }
 
