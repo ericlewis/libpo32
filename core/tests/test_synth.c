@@ -605,6 +605,21 @@ static void test_voice_streaming_invalid_args(void) {
 
   po32_synth_voice_init(NULL, SR, &params, 100, 0.1f);
   po32_synth_voice_init(&voice, SR, NULL, 100, 0.1f);
+
+  /*
+   * A refused init reports no status, so it must leave an inert voice -
+   * including when it overwrites a voice that was mid-hit.
+   */
+  po32_synth_voice_init(&voice, SR, &params, 100, 0.1f);
+  assert(!po32_synth_voice_done(&voice));
+  assert(po32_synth_voice_samples_remaining(&voice) > 0u);
+  po32_synth_voice_init(&voice, SR, NULL, 100, 0.1f);
+  assert(po32_synth_voice_done(&voice));
+  assert(po32_synth_voice_samples_remaining(&voice) == 0u);
+  out_len = 99u;
+  assert(po32_synth_voice_render_f32(&voice, aux_a, 8u, &out_len) == PO32_OK);
+  assert(out_len == 0u);
+
   po32_synth_voice_reset(NULL);
   assert(po32_synth_voice_done(NULL));
   assert(po32_synth_voice_samples_remaining(NULL) == 0u);

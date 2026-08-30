@@ -633,10 +633,19 @@ void po32_synth_voice_init(po32_synth_voice_t *v, uint32_t sample_rate,
   float sr, mix, eq_db, eq_freq_hz, mod_rate, mod_vel_g;
   synth_biquad_t nf, ef;
 
-  if (v == NULL || params == NULL)
+  if (v == NULL)
     return;
 
+  /*
+   * Zero before rejecting the parameters: this initializer reports no
+   * status, so a refused init must still leave an inert voice rather than
+   * an indeterminate one - or, on a reused voice, the still-live state of
+   * the previous hit.
+   */
   synth_zero(v, sizeof(*v));
+  if (params == NULL)
+    return;
+
   v->sample_rate = sample_rate;
   sr = (float)sample_rate;
   v->sr = sr;
