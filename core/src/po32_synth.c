@@ -125,6 +125,13 @@ static float lut_sqrtf(float x) {
 #define SYNTH_RAND_MASK       0x7fffffffu
 #define SYNTH_RAND_MAX        2147483647.0f
 
+/*
+ * Exclusive upper bound for float sample counts.  SIZE_MAX + 1 is always a
+ * power of two, so every float strictly below (float)SIZE_MAX lands inside
+ * size_t's range no matter which way that cast rounds.
+ */
+#define SYNTH_SAMPLES_LIMIT_F ((float)SIZE_MAX)
+
 /* ── Small helpers ──────────────────────────────────────────────── */
 
 static float synth_db_to_gain(float db) {
@@ -352,6 +359,31 @@ static float synth_biquad_process(synth_biquad_t *bq, float in) {
   return out;
 }
 
+/*
+ * Duration (seconds) to sample count, or 0 when the request cannot be
+ * rendered.
+ *
+ * Every public entry point that accepts a duration funnels through this so
+ * the float-to-size_t conversion below stays defined.  Converting a value
+ * outside size_t's range - a negative, infinite, or simply enormous product
+ * - is undefined behaviour (C99 6.3.1.4), and NaN has no integer value at
+ * all.  The comparisons are written negated so NaN, which compares false
+ * against everything, takes the reject branch.  A zero sample rate yields
+ * no samples, which keeps callers from dividing by it downstream.
+ */
+static size_t synth_duration_to_samples(float sample_rate, float seconds) {
+  float samples;
+
+  if (!(sample_rate > 0.0f) || !(seconds > 0.0f))
+    return 0u;
+
+  samples = sample_rate * seconds;
+  if (!(samples < SYNTH_SAMPLES_LIMIT_F))
+    return 0u;
+
+  return (size_t)samples;
+}
+
 /* ── Public API ──────────────────────────────────────────────────── */
 
 void po32_synth_init(po32_synth_t *synth, uint32_t sample_rate) {
@@ -361,9 +393,9 @@ void po32_synth_init(po32_synth_t *synth, uint32_t sample_rate) {
 }
 
 size_t po32_synth_samples_for_duration(const po32_synth_t *synth, float seconds) {
-  if (synth == NULL || seconds <= 0.0f)
+  if (synth == NULL)
     return 0;
-  return (size_t)((float)synth->sample_rate * seconds);
+  return synth_duration_to_samples((float)synth->sample_rate, seconds);
 }
 
 po32_status_t po32_synth_render(const po32_synth_t *synth, const po32_patch_params_t *params,
@@ -393,10 +425,18 @@ po32_status_t po32_synth_render(const po32_synth_t *synth, const po32_patch_para
   }
 
   sr = (float)synth->sample_rate;
-  n = (size_t)(sr * duration);
+  n = synth_duration_to_samples(sr, duration);
   if (n > out_capacity)
     n = out_capacity;
   *out_len = n;
+
+  /*
+   * Nothing to render.  Returning here also keeps a zero sample rate away
+   * from the precomputation below, which would otherwise divide by it and
+   * feed the resulting NaNs to the LUT helpers.
+   */
+  if (n == 0u)
+    return PO32_OK;
 
   osc_freq = synth_param_to_hz(params->OscFreq);
   osc_atk = synth_attack_time(params->OscAtk);
@@ -600,7 +640,17 @@ void po32_synth_voice_init(po32_synth_voice_t *v, uint32_t sample_rate,
   v->sample_rate = sample_rate;
   sr = (float)sample_rate;
   v->sr = sr;
-  v->total_samples = (size_t)(sr * duration);
+  v->total_samples = synth_duration_to_samples(sr, duration);
+
+  /*
+   * A zero sample rate leaves the voice inert: the precomputation below
+   * divides by sr, and the resulting NaNs would reach the LUT helpers,
+   * whose float-to-int conversions are undefined on NaN.  The zeroed
+   * struct already reports done with nothing left to render.
+   */
+  if (sample_rate == 0u)
+    return;
+
   v->rand_state = 123456789u;
 
   v->osc_freq = synth_param_to_hz(params->OscFreq);
