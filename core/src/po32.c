@@ -1220,15 +1220,27 @@ static void po32_demod_on_byte(po32_demodulator_t *d, po32_packet_callback_t cb,
       return;
     }
 
-    pkt.offset = d->byte_offset - d->work_len;
-    if (cb != NULL && cb(&pkt, user) != 0) {
-      *stop = 1;
-      return;
-    }
+    /* byte_offset counts bytes decoded since sync, i.e. from the first byte
+       after the preamble. po32_frame_parse() and po32_builder_append_packet()
+       both report offsets into the whole transmitted frame, so add the
+       preamble back to keep one meaning of po32_packet_t.offset. */
+    pkt.offset = (size_t)PO32_PREAMBLE_BYTES + d->byte_offset - d->work_len;
 
+    /* Commit before the callback runs: the packet is fully decoded and
+       verified by this point, so po32_demodulator_packet_count() counts every
+       packet the callback was handed, even the one it stops on. */
     d->crc_state = s;
     d->packet_count++;
     d->work_len = 0u;
+
+    if (cb != NULL && cb(&pkt, user) != 0) {
+      /* Terminal by contract. push() discards the rest of the chunk without
+         reporting how much it consumed, so a resumed stream would silently
+         restart mid-frame; latching the stop makes later pushes no-ops
+         instead. */
+      d->stopped = 1;
+      *stop = 1;
+    }
   }
 }
 
@@ -1369,6 +1381,10 @@ int po32_demodulator_done(const po32_demodulator_t *d) {
   return d != NULL && d->done;
 }
 
+int po32_demodulator_stopped(const po32_demodulator_t *d) {
+  return d != NULL && d->stopped;
+}
+
 int po32_demodulator_packet_count(const po32_demodulator_t *d) {
   return d != NULL ? d->packet_count : 0;
 }
@@ -1384,7 +1400,7 @@ po32_status_t po32_demodulator_push(po32_demodulator_t *d, const float *samples,
 
   if (d == NULL || samples == NULL)
     return PO32_ERR_INVALID_ARG;
-  if (d->done)
+  if (d->done || d->stopped)
     return PO32_OK;
 
   po32_demod_run_init(&run, d, cb, user);

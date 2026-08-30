@@ -153,11 +153,38 @@ arbitrary-sized chunks and invokes a callback on each decoded packet:
 - `po32_demodulator_init(...)` — prepare for decoding at a sample rate
 - `po32_demodulator_push(...)` — feed the next chunk of audio samples
 - `po32_demodulator_done(...)` — check if the final tail has been received
+- `po32_demodulator_stopped(...)` — check if a callback stopped the stream
 - `po32_demodulator_packet_count(...)` — query how many packets were decoded
 - `po32_demodulator_tail(...)` — access the decoded final tail
 - `po32_demodulator_desync(...)` — reset sync state for error recovery
 
 `po32_decode_f32(...)` is a one-shot convenience wrapper around this API.
+
+### Packet offsets
+
+The callback is the same `po32_packet_callback_t` used by
+`po32_frame_parse(...)`, and `packet->offset` means the same thing on both
+paths: the packet's byte offset within the full transmitted frame, counting
+the 128-byte preamble. It matches the offset `po32_builder_append_packet(...)`
+reports for the same packet, so it can be used to index a reconstructed frame.
+
+### Stopping early
+
+Returning nonzero from the callback stops the stream, and the stop is
+terminal. The unconsumed remainder of the current chunk is discarded, and
+every later `po32_demodulator_push(...)` is a no-op returning `PO32_OK` —
+`po32_demodulator_stopped(...)` reports this state. Stopping has to be
+terminal because `push` reports neither how many samples it consumed nor
+where in the chunk it stopped, so the discarded audio cannot be re-fed; a
+demodulator that simply resumed would restart mid-frame and desync.
+
+A packet is committed before its callback runs, so
+`po32_demodulator_packet_count(...)` counts every packet the callback was
+handed — including the one it stopped on.
+
+To reuse a stopped demodulator, re-initialize it with
+`po32_demodulator_init(...)`. `po32_demodulator_desync(...)` resets sync state
+only; it no more clears the stop than it clears `po32_demodulator_done(...)`.
 
 ## Streaming Synth Voice
 
