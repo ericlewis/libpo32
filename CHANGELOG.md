@@ -6,6 +6,13 @@ The format is based on Keep a Changelog, and the project follows Semantic Versio
 
 ## [Unreleased]
 
+### Fixed
+- Packets delivered by `po32_demodulator_push(...)` now carry the same
+  `offset` as the ones `po32_frame_parse(...)` reports for the same frame.
+  The streaming path measured from the first byte after the preamble, so
+  every offset was 128 bytes short and pointed inside the preamble when used
+  to index a reconstructed frame.
+
 ## [0.2.1] - 2026-03-28
 
 ### Fixed

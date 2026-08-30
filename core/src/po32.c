@@ -1220,7 +1220,11 @@ static void po32_demod_on_byte(po32_demodulator_t *d, po32_packet_callback_t cb,
       return;
     }
 
-    pkt.offset = d->byte_offset - d->work_len;
+    /* byte_offset counts bytes decoded since sync, i.e. from the first byte
+       after the preamble. po32_frame_parse() and po32_builder_append_packet()
+       both report offsets into the whole transmitted frame, so add the
+       preamble back to keep one meaning of po32_packet_t.offset. */
+    pkt.offset = (size_t)PO32_PREAMBLE_BYTES + d->byte_offset - d->work_len;
     if (cb != NULL && cb(&pkt, user) != 0) {
       *stop = 1;
       return;

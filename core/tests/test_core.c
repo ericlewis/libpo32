@@ -1506,6 +1506,103 @@ static void test_streaming_demodulator(void) {
   free(samples);
 }
 
+typedef struct {
+  size_t offsets[8];
+  int count;
+} streaming_offset_log_t;
+
+static int streaming_demod_log_offset(const po32_packet_t *packet, void *user) {
+  streaming_offset_log_t *log = (streaming_offset_log_t *)user;
+
+  assert(log->count < (int)(sizeof(log->offsets) / sizeof(log->offsets[0])));
+  log->offsets[log->count] = packet->offset;
+  log->count += 1;
+  return 0;
+}
+
+/* Build a three-packet frame and render it at 44.1 kHz. */
+static void streaming_build_multi_packet_audio(uint8_t *frame, size_t frame_capacity,
+                                               size_t *out_frame_len, float **out_samples,
+                                               size_t *out_sample_count) {
+  po32_builder_t builder;
+  po32_packet_t dpkt;
+  po32_reset_packet_t reset;
+  po32_knob_packet_t knob;
+  po32_patch_packet_t patch;
+  float *samples;
+  size_t sample_count;
+
+  po32_builder_init(&builder, frame, frame_capacity);
+
+  reset.instrument = 3u;
+  assert(po32_packet_encode(PO32_TAG_RESET, &reset, &dpkt) == PO32_OK);
+  assert(po32_builder_append(&builder, &dpkt) == PO32_OK);
+
+  knob.instrument = 5u;
+  knob.kind = PO32_KNOB_MORPH;
+  knob.value = 0x5Au;
+  assert(po32_packet_encode(PO32_TAG_KNOB, &knob, &dpkt) == PO32_OK);
+  assert(po32_builder_append(&builder, &dpkt) == PO32_OK);
+
+  memset(&patch, 0, sizeof(patch));
+  patch.instrument = 7u;
+  patch.side = PO32_PATCH_RIGHT;
+  patch.params.OscFreq = 0.37f;
+  patch.params.Level = 0.61f;
+  assert(po32_packet_encode(PO32_TAG_PATCH, &patch, &dpkt) == PO32_OK);
+  assert(po32_builder_append(&builder, &dpkt) == PO32_OK);
+
+  assert(po32_builder_finish(&builder, out_frame_len) == PO32_OK);
+
+  sample_count = po32_render_sample_count(*out_frame_len, 44100u);
+  samples = (float *)malloc(sample_count * sizeof(*samples));
+  assert(samples != NULL);
+  assert(po32_render_dpsk_f32(frame, *out_frame_len, 44100u, samples, sample_count) == PO32_OK);
+
+  *out_samples = samples;
+  *out_sample_count = sample_count;
+}
+
+/* po32_packet_t.offset must mean the same thing on both parse paths: a byte
+   offset into the whole transmitted frame, preamble included. */
+static void test_streaming_packet_offsets_match_frame_parse(void) {
+  po32_demodulator_t demod;
+  streaming_offset_log_t parsed;
+  streaming_offset_log_t streamed;
+  uint8_t frame[512];
+  size_t frame_len = 0u;
+  size_t sample_count = 0u;
+  float *samples = NULL;
+  po32_status_t status;
+
+  streaming_build_multi_packet_audio(frame, sizeof(frame), &frame_len, &samples, &sample_count);
+
+  memset(&parsed, 0, sizeof(parsed));
+  status = po32_frame_parse(frame, frame_len, streaming_demod_log_offset, &parsed, NULL);
+  assert(status == PO32_OK);
+
+  memset(&streamed, 0, sizeof(streamed));
+  po32_demodulator_init(&demod, 44100.0f);
+  status =
+      po32_demodulator_push(&demod, samples, sample_count, streaming_demod_log_offset, &streamed);
+  assert(status == PO32_OK);
+
+  assert(po32_demodulator_done(&demod));
+  assert(parsed.count == 3);
+  assert(streamed.count == parsed.count);
+  assert(po32_demodulator_packet_count(&demod) == parsed.count);
+  for (int i = 0; i < parsed.count; ++i) {
+    /* Not merely equal to each other: the first packet starts right after the
+       preamble, so an offset measured from the first post-preamble byte would
+       report 0 here. */
+    assert(streamed.offsets[i] == parsed.offsets[i]);
+    assert(streamed.offsets[i] >= (size_t)PO32_PREAMBLE_BYTES);
+  }
+  assert(parsed.offsets[0] == (size_t)PO32_PREAMBLE_BYTES);
+
+  free(samples);
+}
+
 int main(void) {
   printf("po32 core tests\n");
   printf("===============\n");
@@ -1530,6 +1627,7 @@ int main(void) {
   test_state_payload_lengths();
   test_known_transfer_shapes();
   test_streaming_demodulator();
+  test_streaming_packet_offsets_match_frame_parse();
 
   printf("core tests passed\n");
   return 0;

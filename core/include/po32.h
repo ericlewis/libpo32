@@ -97,8 +97,11 @@ typedef struct po32_final_tail {
 } po32_final_tail_t;
 
 /*
- * Packet callback for po32_frame_parse(). The packet struct (including
- * its payload array) is owned and safe to keep after the callback returns.
+ * Packet callback for po32_frame_parse() and po32_demodulator_push(). The
+ * packet struct (including its payload array) is owned and safe to keep after
+ * the callback returns. packet->offset is the packet's byte offset within the
+ * full transmitted frame, counting the 128-byte preamble, from both callers
+ * and from po32_builder_append_packet().
  * Return 0 to continue parsing, nonzero to stop early.
  */
 typedef int (*po32_packet_callback_t)(const po32_packet_t *packet, void *user);

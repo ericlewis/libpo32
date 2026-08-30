@@ -159,6 +159,14 @@ arbitrary-sized chunks and invokes a callback on each decoded packet:
 
 `po32_decode_f32(...)` is a one-shot convenience wrapper around this API.
 
+### Packet offsets
+
+The callback is the same `po32_packet_callback_t` used by
+`po32_frame_parse(...)`, and `packet->offset` means the same thing on both
+paths: the packet's byte offset within the full transmitted frame, counting
+the 128-byte preamble. It matches the offset `po32_builder_append_packet(...)`
+reports for the same packet, so it can be used to index a reconstructed frame.
+
 ## Streaming Synth Voice
 
 For streaming (chunk-based) synthesis, the voice API pre-computes all
