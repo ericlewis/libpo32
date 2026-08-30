@@ -69,7 +69,9 @@ Organize the wrapper into these areas:
 | Param helpers | `po32_patch_params_zero`, `po32_morph_pairs_default` |
 | DPSK render | `po32_render_sample_count`, `po32_render_dpsk_f32`, streaming modulator |
 | Audio decode | `po32_decode_f32` |
+| Streaming decode | `po32_demodulator_init`, `_push`, `_flush`, `_done`, `_stopped`, `_desync`, `_packet_count`, `_tail` (requires callback bridge) |
 | Drum synth | `po32_synth_init`, `_samples_for_duration`, `_render` |
+| Streaming synth | `po32_synth_voice_init`, `_render_f32`, `_reset`, `_done`, `_samples_remaining` |
 
 ## Type Mapping Conventions
 
