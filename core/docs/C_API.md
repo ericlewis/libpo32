@@ -152,13 +152,28 @@ arbitrary-sized chunks and invokes a callback on each decoded packet:
 
 - `po32_demodulator_init(...)` — prepare for decoding at a sample rate
 - `po32_demodulator_push(...)` — feed the next chunk of audio samples
+- `po32_demodulator_flush(...)` — signal end-of-audio after the final chunk
 - `po32_demodulator_done(...)` — check if the final tail has been received
 - `po32_demodulator_stopped(...)` — check if a callback stopped the stream
 - `po32_demodulator_packet_count(...)` — query how many packets were decoded
 - `po32_demodulator_tail(...)` — access the decoded final tail
 - `po32_demodulator_desync(...)` — reset sync state for error recovery
 
-`po32_decode_f32(...)` is a one-shot convenience wrapper around this API.
+Each bit is decided at the symbol boundary that closes its correlation
+window, which for the frame's final bit lies just past the last rendered
+sample. Call `po32_demodulator_flush(...)` after the last chunk so a capture
+that ends exactly at `po32_render_sample_count(...)` samples (no trailing
+silence) still completes, then query `po32_demodulator_done(...)`. Like
+`po32_demodulator_desync(...)` it returns nothing and is a no-op on a NULL,
+already-done, or not-yet-synced demodulator.
+
+A flush only resolves a symbol whose correlation window is mostly present.
+Audio that stops part-way through a symbol leaves the frame unfinished
+instead, so a truncated capture is still reported as `PO32_ERR_FRAME` rather
+than completed with an invented final bit.
+
+`po32_decode_f32(...)` is a one-shot convenience wrapper around this API and
+flushes internally.
 
 ### Packet offsets
 

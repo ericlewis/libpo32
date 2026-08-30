@@ -39,6 +39,11 @@ static int po32_memcmp(const void *a, const void *b, size_t n) {
 #define PO32_PACKET_OVERHEAD_BYTES (PO32_PACKET_HEADER_BYTES + PO32_PACKET_TRAILER_BYTES)
 #define PO32_PATCH_PARAM_BYTES     ((size_t)PO32_PARAM_COUNT * 2u)
 #define PO32_TIMING_RECOVERY_GAIN  0.01f
+/* Smallest fraction of a symbol's correlation window that po32_demodulator_flush
+   will decide a bit from. Exact-length renders needing a flush measure at least
+   0.76 of a symbol; audio cut short by a full symbol measures near 0, where the
+   near-empty accumulator yields dot == 0 and would fabricate a 1 bit. */
+#define PO32_FLUSH_MIN_SYMBOL_PHASE 0.5f
 
 #define PO32_STATE_PAYLOAD_MIN_BYTES ((size_t)PO32_STATE_MORPH_PAIR_COUNT * 2u + 3u)
 #define PO32_PATTERN_LANE_BYTES      ((size_t)PO32_PATTERN_LANE_COUNT * (size_t)PO32_PATTERN_STEP_COUNT)
@@ -1306,6 +1311,67 @@ static void po32_demod_run_commit(const po32_demod_run_t *run) {
   d->synced = run->synced;
 }
 
+static void po32_demod_run_boundary(po32_demod_run_t *run, int *stop) {
+  if (run->started) {
+    float dot = run->accum_i * run->prev_i + run->accum_q * run->prev_q;
+    uint8_t bit = (uint8_t)(dot >= 0.0f ? 1u : 0u);
+
+    if ((run->prev_i > 0.0f) != (run->accum_i > 0.0f)) {
+      float ai = run->accum_i < 0.0f ? -run->accum_i : run->accum_i;
+      float pi = run->prev_i < 0.0f ? -run->prev_i : run->prev_i;
+      if (pi + ai > 0.0f) {
+        float err = (ai - pi) / (ai + pi);
+        /* A finite window always normalizes into [-1, 1]; an infinite one
+           divides to Inf / Inf, which is NaN rather than a large number. So
+           rejecting NaN is enough, and it matters: folding NaN into
+           symbol_phase leaves every later boundary test false, wedging the
+           demodulator for good rather than costing it one frame. */
+        if (err == err) {
+          run->symbol_phase += err * PO32_TIMING_RECOVERY_GAIN;
+        }
+      }
+    }
+
+    if (!run->synced) {
+      run->sync_window = (run->sync_window >> 1) | ((uint64_t)bit << 63);
+      if (run->sync_window == run->sync_pattern) {
+        run->synced = 1;
+        run->demod->crc_state = PO32_INITIAL_STATE;
+        run->current_byte = 0u;
+        run->bits_in_byte = 0u;
+        run->byte_offset = 0u;
+        run->demod->work_len = 0u;
+        run->demod->packet_count = 0;
+      }
+    } else {
+      run->current_byte |= (uint8_t)(bit << run->bits_in_byte);
+      run->bits_in_byte++;
+
+      if (run->bits_in_byte == 8u) {
+        run->byte_offset++;
+        run->demod->current_byte = run->current_byte;
+        run->demod->bits_in_byte = run->bits_in_byte;
+        run->demod->byte_offset = run->byte_offset;
+        run->demod->synced = run->synced;
+        po32_demod_on_byte(run->demod, run->cb, run->user, stop);
+        run->synced = run->demod->synced;
+        run->current_byte = 0u;
+        run->bits_in_byte = 0u;
+        if (*stop) {
+          return;
+        }
+      }
+    }
+  } else {
+    run->started = 1;
+  }
+
+  run->prev_i = run->accum_i;
+  run->prev_q = run->accum_q;
+  run->accum_i = 0.0f;
+  run->accum_q = 0.0f;
+}
+
 static po32_status_t po32_demod_run_sample(po32_demod_run_t *run, float sample, int *stop) {
   float ns, nc;
 
@@ -1320,58 +1386,7 @@ static po32_status_t po32_demod_run_sample(po32_demod_run_t *run, float sample, 
   run->symbol_phase += run->symbols_per_sample;
   if (run->symbol_phase >= 1.0f) {
     run->symbol_phase -= 1.0f;
-
-    if (run->started) {
-      float dot = run->accum_i * run->prev_i + run->accum_q * run->prev_q;
-      uint8_t bit = (uint8_t)(dot >= 0.0f ? 1u : 0u);
-
-      if ((run->prev_i > 0.0f) != (run->accum_i > 0.0f)) {
-        float ai = run->accum_i < 0.0f ? -run->accum_i : run->accum_i;
-        float pi = run->prev_i < 0.0f ? -run->prev_i : run->prev_i;
-        if (pi + ai > 0.0f) {
-          float err = (ai - pi) / (ai + pi);
-          run->symbol_phase += err * PO32_TIMING_RECOVERY_GAIN;
-        }
-      }
-
-      if (!run->synced) {
-        run->sync_window = (run->sync_window >> 1) | ((uint64_t)bit << 63);
-        if (run->sync_window == run->sync_pattern) {
-          run->synced = 1;
-          run->demod->crc_state = PO32_INITIAL_STATE;
-          run->current_byte = 0u;
-          run->bits_in_byte = 0u;
-          run->byte_offset = 0u;
-          run->demod->work_len = 0u;
-          run->demod->packet_count = 0;
-        }
-      } else {
-        run->current_byte |= (uint8_t)(bit << run->bits_in_byte);
-        run->bits_in_byte++;
-
-        if (run->bits_in_byte == 8u) {
-          run->byte_offset++;
-          run->demod->current_byte = run->current_byte;
-          run->demod->bits_in_byte = run->bits_in_byte;
-          run->demod->byte_offset = run->byte_offset;
-          run->demod->synced = run->synced;
-          po32_demod_on_byte(run->demod, run->cb, run->user, stop);
-          run->synced = run->demod->synced;
-          run->current_byte = 0u;
-          run->bits_in_byte = 0u;
-          if (*stop) {
-            return PO32_OK;
-          }
-        }
-      }
-    } else {
-      run->started = 1;
-    }
-
-    run->prev_i = run->accum_i;
-    run->prev_q = run->accum_q;
-    run->accum_i = 0.0f;
-    run->accum_q = 0.0f;
+    po32_demod_run_boundary(run, stop);
   }
 
   return PO32_OK;
@@ -1418,6 +1433,37 @@ po32_status_t po32_demodulator_push(po32_demodulator_t *d, const float *samples,
   po32_demod_run_commit(&run);
 
   return PO32_OK;
+}
+
+void po32_demodulator_flush(po32_demodulator_t *d, po32_packet_callback_t callback, void *user) {
+  po32_demod_run_t run;
+  int stop = 0;
+
+  if (d == NULL || d->done || !d->synced)
+    return;
+
+  /* Each bit is decided at the symbol-boundary crossing that closes its
+   * correlation window, and the timing-recovery loop settles with those
+   * crossings lagging the transmitted symbols by a fraction of a symbol
+   * period. Audio that ends exactly at po32_render_sample_count() samples
+   * therefore leaves the final bit's window fully accumulated but not yet
+   * decided. Trailing silence adds nothing to the correlator, so forcing
+   * one boundary decision here is equivalent to the silence a real capture
+   * trails off into.
+   *
+   * A capture cut short mid-symbol is a different case: its window holds only
+   * part of the symbol, and deciding from it would invent a bit the audio
+   * never carried. Leave the frame unfinished instead. */
+  if (d->symbol_phase < PO32_FLUSH_MIN_SYMBOL_PHASE)
+    return;
+
+  po32_demod_run_init(&run, d, callback, user);
+  po32_demod_run_boundary(&run, &stop);
+  /* The forced boundary consumed the pending symbol. Clearing the phase keeps
+     a second flush from deciding the same window again, which would append a
+     1 bit per call from the emptied accumulator. */
+  run.symbol_phase = 0.0f;
+  po32_demod_run_commit(&run);
 }
 
 typedef struct {
@@ -1518,5 +1564,6 @@ po32_status_t po32_decode_f32(const float *samples, size_t count, float sample_r
   if (status != PO32_OK) {
     return status;
   }
+  po32_demodulator_flush(&demod, po32_decode_collect_packet, &ctx);
   return po32_decode_finalize(&demod, &ctx, out_result, out_len);
 }

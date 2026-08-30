@@ -355,6 +355,15 @@ void po32_demodulator_desync(po32_demodulator_t *d);
 po32_status_t po32_demodulator_push(po32_demodulator_t *d, const float *samples, size_t count,
                                     po32_packet_callback_t callback, void *user);
 
+/* Signal end-of-audio: resolve a final symbol still pending in the correlator.
+   The last bit of a frame is decided at the symbol boundary just past the last
+   rendered sample, so a capture that ends exactly at po32_render_sample_count()
+   samples needs this to finish. Call once after the final chunk has been
+   pushed, then query po32_demodulator_done(). A no-op when already done, not
+   yet synced, or when the audio stopped part-way through a symbol, so a
+   truncated capture stays unfinished rather than gaining an invented bit. */
+void po32_demodulator_flush(po32_demodulator_t *d, po32_packet_callback_t callback, void *user);
+
 /* Query streaming decode progress. */
 int po32_demodulator_done(const po32_demodulator_t *d);
 int po32_demodulator_stopped(const po32_demodulator_t *d);

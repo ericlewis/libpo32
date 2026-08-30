@@ -1630,6 +1630,162 @@ static void test_streaming_packet_offsets_match_frame_parse(void) {
     assert(streamed.offsets[i] >= (size_t)PO32_PREAMBLE_BYTES);
   }
   assert(parsed.offsets[0] == (size_t)PO32_PREAMBLE_BYTES);
+  free(samples);
+}
+
+static void test_long_frame_decodes_without_trailing_silence(void) {
+  /* A ~69 KB frame (~20.3M samples at 44.1 kHz). The demodulator decides
+     the frame's final bit at the symbol boundary just past the last
+     rendered sample, so decoding audio that ends exactly at
+     po32_render_sample_count() used to return PO32_ERR_FRAME unless the
+     caller appended trailing silence. */
+  enum { LONG_FRAME_PACKETS = 320 };
+  static uint8_t frame[1 << 17];
+  static uint8_t decoded[1 << 17];
+  po32_builder_t builder;
+  po32_demodulator_t demod;
+  po32_decode_result_t result;
+  size_t frame_len = 0u;
+  size_t decoded_len = 0u;
+  size_t sample_count;
+  float *samples;
+  int packet_count = 0;
+
+  po32_builder_init(&builder, frame, sizeof(frame));
+  for (int i = 0; i < LONG_FRAME_PACKETS; ++i) {
+    po32_pattern_packet_t pattern;
+    po32_packet_t dpkt;
+    po32_pattern_init(&pattern, (uint8_t)(i % 32));
+    assert(po32_pattern_set_trigger(&pattern, (uint8_t)(i % 16), (uint8_t)(1 + i % 16), 1u) ==
+           PO32_OK);
+    assert(po32_packet_encode(PO32_TAG_PATTERN, &pattern, &dpkt) == PO32_OK);
+    assert(po32_builder_append(&builder, &dpkt) == PO32_OK);
+  }
+  assert(po32_builder_finish(&builder, &frame_len) == PO32_OK);
+
+  sample_count = po32_render_sample_count(frame_len, 44100u);
+  samples = (float *)malloc(sample_count * sizeof(*samples));
+  assert(samples != NULL);
+  assert(po32_render_dpsk_f32(frame, frame_len, 44100u, samples, sample_count) == PO32_OK);
+
+  /* One-shot decode of exactly the rendered samples, zero trailing padding. */
+  assert(po32_decode_f32(samples, sample_count, 44100.0f, &result, decoded, sizeof(decoded),
+                         &decoded_len) == PO32_OK);
+  assert(result.done == 1);
+  assert(result.packet_count == LONG_FRAME_PACKETS);
+  assert(result.tail.marker_c3 == 0xC3u);
+  assert(result.tail.marker_71 == 0x71u);
+  assert(decoded_len == frame_len);
+  assert(memcmp(decoded, frame, frame_len) == 0);
+
+  /* Streaming path: flush resolves the pending final symbol at end-of-audio. */
+  po32_demodulator_init(&demod, 44100.0f);
+  assert(po32_demodulator_push(&demod, samples, sample_count, streaming_demod_collect,
+                               &packet_count) == PO32_OK);
+  po32_demodulator_flush(&demod, streaming_demod_collect, &packet_count);
+  assert(po32_demodulator_done(&demod));
+  assert(po32_demodulator_packet_count(&demod) == LONG_FRAME_PACKETS);
+  assert(packet_count == LONG_FRAME_PACKETS);
+  assert(po32_demodulator_tail(&demod)->marker_c3 == 0xC3u);
+  assert(po32_demodulator_tail(&demod)->marker_71 == 0x71u);
+
+  /* Flush is idempotent once done, guarded on NULL, and inert before sync. */
+  po32_demodulator_flush(&demod, streaming_demod_collect, &packet_count);
+  assert(packet_count == LONG_FRAME_PACKETS);
+  po32_demodulator_flush(NULL, NULL, NULL);
+  po32_demodulator_init(&demod, 44100.0f);
+  po32_demodulator_flush(&demod, NULL, NULL);
+  assert(!po32_demodulator_done(&demod));
+
+  free(samples);
+}
+
+static void assert_demodulator_survives_poison(const float *samples, size_t sample_count,
+                                               float poison_value) {
+  po32_demodulator_t demod;
+  size_t prefix;
+  int packet_count = 0;
+
+  /* The preamble alone syncs the demodulator, so feeding exactly that many
+     samples leaves it synced with the frame body still to come. */
+  prefix = po32_render_sample_count(PO32_PREAMBLE_BYTES, 44100u) + 128u;
+  assert(prefix < sample_count);
+  po32_demodulator_init(&demod, 44100.0f);
+  assert(po32_demodulator_push(&demod, samples, prefix, streaming_demod_collect, &packet_count) ==
+         PO32_OK);
+  assert(demod.synced);
+  assert(!demod.done);
+
+  /* Stop on a symbol whose correlator window is positive. Both guards only
+     have work to do when exactly one side of the comparison is non-finite, so
+     the burst below must land against a known-positive previous window. */
+  while (demod.prev_i <= 0.0f) {
+    assert(prefix < sample_count);
+    assert(po32_demodulator_push(&demod, samples + prefix, 1u, streaming_demod_collect,
+                                 &packet_count) == PO32_OK);
+    prefix++;
+  }
+
+  /* Exactly one sample is the dangerous shape. A burst of the same infinity
+     accumulates +Inf and -Inf across the window and collapses to NaN, which
+     the divisor test already rejects, so a burst never reaches the phase-error
+     range check that a lone infinity does. */
+  assert(po32_demodulator_push(&demod, &poison_value, 1u, streaming_demod_collect, &packet_count) ==
+         PO32_OK);
+
+  /* symbol_phase must stay finite. A NaN there makes symbol_phase >= 1.0f
+     false forever, so no later sample ever reaches a boundary again. */
+  assert(demod.symbol_phase == demod.symbol_phase);
+
+  /* Feed the rest of the frame. A wedged demodulator never reaches another
+     symbol boundary, so byte_offset stays pinned at zero and the frame never
+     finishes; a healthy one rides out the single bad sample and still
+     completes the transfer. */
+  assert(po32_demodulator_push(&demod, samples + prefix, sample_count - prefix,
+                               streaming_demod_collect, &packet_count) == PO32_OK);
+  assert(demod.symbol_phase == demod.symbol_phase);
+  assert(demod.byte_offset > 0u);
+  assert(po32_demodulator_done(&demod));
+  assert(packet_count == 1);
+}
+
+static void test_demodulator_survives_non_finite_samples(void) {
+  /* Infinity and NaN reach the timing-recovery loop by different routes, and
+     each has its own guard: an infinite window divides to Inf / Inf, a NaN
+     window fails the divisor test. Feeding a mixture hides whichever guard
+     fires second, so each is exercised on its own demodulator. */
+  po32_patch_params_t patch;
+  po32_builder_t builder;
+  po32_patch_packet_t pkt;
+  po32_packet_t dpkt;
+  uint8_t frame[512];
+  size_t frame_len = 0u;
+  size_t sample_count;
+  float *samples;
+
+  memset(&patch, 0, sizeof(patch));
+  patch.OscFreq = 0.28f;
+  patch.Level = 0.88f;
+  pkt.instrument = 1u;
+  pkt.side = PO32_PATCH_LEFT;
+  pkt.params = patch;
+  assert(po32_packet_encode(PO32_TAG_PATCH, &pkt, &dpkt) == PO32_OK);
+
+  po32_builder_init(&builder, frame, sizeof(frame));
+  assert(po32_builder_append(&builder, &dpkt) == PO32_OK);
+  assert(po32_builder_finish(&builder, &frame_len) == PO32_OK);
+
+  sample_count = po32_render_sample_count(frame_len, 44100u);
+  samples = (float *)malloc(sample_count * sizeof(*samples));
+  assert(samples != NULL);
+  assert(po32_render_dpsk_f32(frame, frame_len, 44100u, samples, sample_count) == PO32_OK);
+
+  /* Against a positive window, -Inf is the one that reaches the phase-error
+     range check; +Inf matches the window's sign so the comparison never opens,
+     and NaN is caught earlier by the divisor test. All three must be safe. */
+  assert_demodulator_survives_poison(samples, sample_count, -(float)(1.0 / 0.0));
+  assert_demodulator_survives_poison(samples, sample_count, (float)(1.0 / 0.0));
+  assert_demodulator_survives_poison(samples, sample_count, (float)(0.0 / 0.0));
 
   free(samples);
 }
@@ -1694,6 +1850,50 @@ static void test_streaming_callback_stop_is_terminal(void) {
   assert(status == PO32_OK);
   assert(stop_log.calls == 2);
   assert(po32_demodulator_packet_count(&demod) == 1);
+  free(samples);
+}
+
+static void test_decode_rejects_truncated_audio(void) {
+  /* Flush resolves a pending symbol from its accumulated window. If the audio
+     stops mid-symbol that window is only partly there, and deciding anyway
+     would invent the frame's last bit -- which the tail CRC accepts whenever
+     the invented bit matches, reporting a truncated transfer as complete. */
+  po32_builder_t builder;
+  po32_reset_packet_t rst;
+  po32_packet_t dpkt;
+  po32_decode_result_t result;
+  uint8_t frame[512];
+  uint8_t decoded[512];
+  size_t frame_len = 0u;
+  size_t decoded_len = 0u;
+  size_t sample_count;
+  size_t symbol_samples;
+  float *samples;
+
+  rst.instrument = 1u;
+  assert(po32_packet_encode(PO32_TAG_RESET, &rst, &dpkt) == PO32_OK);
+  po32_builder_init(&builder, frame, sizeof(frame));
+  assert(po32_builder_append(&builder, &dpkt) == PO32_OK);
+  assert(po32_builder_finish(&builder, &frame_len) == PO32_OK);
+
+  sample_count = po32_render_sample_count(frame_len, 44100u);
+  samples = (float *)malloc(sample_count * sizeof(*samples));
+  assert(samples != NULL);
+  assert(po32_render_dpsk_f32(frame, frame_len, 44100u, samples, sample_count) == PO32_OK);
+
+  /* The complete render decodes. */
+  assert(po32_decode_f32(samples, sample_count, 44100.0f, &result, decoded, sizeof(decoded),
+                         &decoded_len) == PO32_OK);
+  assert(result.done == 1);
+  assert(decoded_len == frame_len);
+
+  /* One symbol short does not, however convincing the fabricated bit would be. */
+  symbol_samples = po32_render_sample_count(1u, 44100u) / 8u;
+  assert(symbol_samples > 1u);
+  assert(po32_decode_f32(samples, sample_count - symbol_samples, 44100.0f, &result, decoded,
+                         sizeof(decoded), &decoded_len) == PO32_ERR_FRAME);
+  assert(result.done == 0);
+  assert(decoded_len == 0u);
 
   free(samples);
 }
@@ -1724,6 +1924,9 @@ int main(void) {
   test_streaming_demodulator();
   test_streaming_packet_offsets_match_frame_parse();
   test_streaming_callback_stop_is_terminal();
+  test_long_frame_decodes_without_trailing_silence();
+  test_demodulator_survives_non_finite_samples();
+  test_decode_rejects_truncated_audio();
 
   printf("core tests passed\n");
   return 0;
