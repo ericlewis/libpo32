@@ -1451,6 +1451,7 @@ static void test_streaming_demodulator(void) {
   po32_demodulator_init(NULL, 44100.0f);
   po32_demodulator_desync(NULL);
   assert(po32_demodulator_done(NULL) == 0);
+  assert(po32_demodulator_stopped(NULL) == 0);
   assert(po32_demodulator_packet_count(NULL) == 0);
   assert(po32_demodulator_tail(NULL) == NULL);
   assert(po32_demodulator_push(NULL, &zero_sample, 1u, NULL, NULL) == PO32_ERR_INVALID_ARG);
@@ -1518,6 +1519,22 @@ static int streaming_demod_log_offset(const po32_packet_t *packet, void *user) {
   log->offsets[log->count] = packet->offset;
   log->count += 1;
   return 0;
+}
+
+typedef struct {
+  const po32_demodulator_t *demod;
+  size_t offset;
+  int count_seen_by_callback;
+  int calls;
+} streaming_stop_log_t;
+
+static int streaming_demod_stop(const po32_packet_t *packet, void *user) {
+  streaming_stop_log_t *log = (streaming_stop_log_t *)user;
+
+  log->offset = packet->offset;
+  log->count_seen_by_callback = po32_demodulator_packet_count(log->demod);
+  log->calls += 1;
+  return 1;
 }
 
 /* Build a three-packet frame and render it at 44.1 kHz. */
@@ -1603,6 +1620,70 @@ static void test_streaming_packet_offsets_match_frame_parse(void) {
   free(samples);
 }
 
+/* A callback returning nonzero stops the stream for good, and the packet it
+   stopped on is committed rather than replayed. */
+static void test_streaming_callback_stop_is_terminal(void) {
+  po32_demodulator_t demod;
+  streaming_stop_log_t stop_log;
+  streaming_offset_log_t parsed;
+  uint8_t frame[512];
+  size_t frame_len = 0u;
+  size_t sample_count = 0u;
+  float *samples = NULL;
+  po32_status_t status;
+
+  streaming_build_multi_packet_audio(frame, sizeof(frame), &frame_len, &samples, &sample_count);
+
+  memset(&parsed, 0, sizeof(parsed));
+  status = po32_frame_parse(frame, frame_len, streaming_demod_log_offset, &parsed, NULL);
+  assert(status == PO32_OK);
+
+  memset(&stop_log, 0, sizeof(stop_log));
+  po32_demodulator_init(&demod, 44100.0f);
+  stop_log.demod = &demod;
+  assert(po32_demodulator_stopped(&demod) == 0);
+
+  status = po32_demodulator_push(&demod, samples, sample_count, streaming_demod_stop, &stop_log);
+  assert(status == PO32_OK);
+
+  /* Only the first packet reached the callback, and the count agrees with it
+     both from inside the callback and after the push returned. */
+  assert(stop_log.calls == 1);
+  assert(stop_log.offset == parsed.offsets[0]);
+  assert(stop_log.count_seen_by_callback == 1);
+  assert(po32_demodulator_packet_count(&demod) == 1);
+
+  /* The packet was consumed, not left in the work buffer to be re-decoded. */
+  assert(demod.work_len == 0u);
+  assert(demod.synced == 1);
+
+  /* Terminal: still sitting on an unfinished frame, but every later push is a
+     no-op, so no partial packet is appended and nothing else is delivered. */
+  assert(po32_demodulator_stopped(&demod) == 1);
+  assert(po32_demodulator_done(&demod) == 0);
+  status = po32_demodulator_push(&demod, samples, sample_count, streaming_demod_stop, &stop_log);
+  assert(status == PO32_OK);
+  assert(stop_log.calls == 1);
+  assert(po32_demodulator_packet_count(&demod) == 1);
+  assert(po32_demodulator_done(&demod) == 0);
+
+  /* desync() clears sync state but not the stop; only init() reuses it. */
+  po32_demodulator_desync(&demod);
+  assert(po32_demodulator_stopped(&demod) == 1);
+  status = po32_demodulator_push(&demod, samples, sample_count, streaming_demod_stop, &stop_log);
+  assert(status == PO32_OK);
+  assert(stop_log.calls == 1);
+
+  po32_demodulator_init(&demod, 44100.0f);
+  assert(po32_demodulator_stopped(&demod) == 0);
+  status = po32_demodulator_push(&demod, samples, sample_count, streaming_demod_stop, &stop_log);
+  assert(status == PO32_OK);
+  assert(stop_log.calls == 2);
+  assert(po32_demodulator_packet_count(&demod) == 1);
+
+  free(samples);
+}
+
 int main(void) {
   printf("po32 core tests\n");
   printf("===============\n");
@@ -1628,6 +1709,7 @@ int main(void) {
   test_known_transfer_shapes();
   test_streaming_demodulator();
   test_streaming_packet_offsets_match_frame_parse();
+  test_streaming_callback_stop_is_terminal();
 
   printf("core tests passed\n");
   return 0;
