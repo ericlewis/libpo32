@@ -18,6 +18,7 @@ to build, send, receive, and preview PO-32 transfers.
 - [Using It With a PO-32](#using-it-with-a-po-32)
 - [Getting Started](#getting-started)
 - [Examples](#examples)
+- [Projects Built with libpo32](#projects-built-with-libpo32)
 - [Public API](#public-api)
 - [Documentation](#documentation)
 - [Project Layout](#project-layout)
@@ -113,6 +114,12 @@ cc app.c $(pkg-config --cflags --libs po32) -lm
 | `./build/po32_demo` | End-to-end demo: transfer frame build/render/decode plus local drum synthesis |
 | `./build/po32_pattern_editor` | Interactive PO-32 pattern editing and WAV export |
 | `./build/po32_decode_capture <input.wav> <out-dir>` | Packet and pattern dumps from a transfer WAV |
+
+## Projects Built with libpo32
+
+| Project | What it does |
+| --- | --- |
+| [Libpo32 for Schwung](https://github.com/mestela/schwung-libpo32) | A 16-voice drum synthesizer module for Schwung on Ableton Move, powered by `libpo32` |
 
 ## Public API
 
