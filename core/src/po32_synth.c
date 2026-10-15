@@ -17,6 +17,7 @@
 
 #include "po32_synth.h"
 #include "po32_lut.h"
+#include "po32_param_maps.h"
 
 #include <stdint.h>
 
@@ -72,19 +73,13 @@ static float lut_sqrtf(float x) {
 #define SYNTH_DECAY_MIN_SECONDS 0.01f
 #define SYNTH_DECAY_MAX_SECONDS 10.0f
 
-/* Precomputed: powf(10, -7/5) */
-#define SYNTH_ATTACK_SCALE_AT_ZERO 0.01995262315f
-#define SYNTH_ATTACK_EXPONENT_SPAN (12.0f / 5.0f)
-
 #define SYNTH_MIDI_MAX_VELOCITY 127.0f
 #define SYNTH_MIDI_HALF_RANGE   63.0f
 
 #define SYNTH_VELOCITY_CURVE_DB 37.0f
 #define SYNTH_MIX_TILT_DB       25.0f
 
-#define SYNTH_MOD_MAX_SEMITONES    96.0f
 #define SYNTH_SEMITONES_PER_OCTAVE 12.0f
-#define SYNTH_SINE_MOD_MAX_HZ      2000.0f
 
 #define SYNTH_EQ_MAX_ABS_DB       40.0f
 #define SYNTH_EQ_ENABLE_THRESH_DB 0.5f
@@ -96,8 +91,6 @@ static float lut_sqrtf(float x) {
 
 #define SYNTH_ONE_THIRD  (1.0f / 3.0f)
 #define SYNTH_TWO_THIRDS (2.0f / 3.0f)
-
-#define SYNTH_MOD_ALPHA_MIN 0.001f
 
 #define SYNTH_MOD_ENV_PERIOD_THRESH_S   1.5e-3f
 #define SYNTH_MOD_ENV_PERIOD_SCALE_SLOW 2.0f
@@ -172,9 +165,7 @@ static float synth_sym_limit(float x) {
 /* ── Envelope curves ─────────────────────────────────────────────── */
 
 static float synth_attack_time(float x) {
-  if (x <= 0.0f)
-    return 0.0f;
-  return x * SYNTH_ATTACK_SCALE_AT_ZERO * lut_pow10f(SYNTH_ATTACK_EXPONENT_SPAN * x);
+  return po32_param_attack_seconds(x);
 }
 
 static float synth_decay_time(float x) {
@@ -437,7 +428,7 @@ static void synth_biquad_from_flat(const float *flat, synth_biquad_t *bq) {
 void po32_synth_voice_init(po32_synth_voice_t *v, uint32_t sample_rate,
                            const po32_patch_params_t *params, int velocity, float duration) {
   float sr, inv_sr, mix, eq_db, eq_freq_hz, mod_rate, mod_vel_g;
-  float osc_freq, mod_sm, mod_mode, mod_decay_time, mod_rate_hz;
+  float osc_freq, mod_sm, mod_mode, mod_rate_hz;
   float nf_freq, nf_q;
   synth_biquad_t nf, ef;
 
@@ -475,7 +466,7 @@ void po32_synth_voice_init(po32_synth_voice_t *v, uint32_t sample_rate,
   v->osc_atk = synth_attack_time(params->OscAtk);
   v->osc_dcy = synth_decay_time(params->OscDcy);
 
-  mod_sm = (params->ModAmt - 0.5f) * (2.0f * SYNTH_MOD_MAX_SEMITONES);
+  mod_sm = po32_param_mod_semitones(params->ModAmt, params->ModMode);
   mod_mode = params->ModMode;
   mod_rate = params->ModRate;
 
@@ -513,12 +504,10 @@ void po32_synth_voice_init(po32_synth_voice_t *v, uint32_t sample_rate,
     synth_biquad_to_flat(&ef, v->eq_filt);
   }
 
-  mod_decay_time = synth_decay_time(mod_rate);
-  mod_rate_hz = (mod_mode < SYNTH_TWO_THIRDS) ? (SYNTH_SINE_MOD_MAX_HZ * mod_rate)
-                                              : synth_param_to_hz(mod_rate);
+  mod_rate_hz = po32_param_mod_hz(mod_rate, mod_mode < SYNTH_TWO_THIRDS);
 
   v->mod_alpha_precomp = 1.0f - lut_expf(-LUT_TWO_PI * mod_rate_hz / sr);
-  v->mod_alpha_precomp = synth_clamp(v->mod_alpha_precomp, SYNTH_MOD_ALPHA_MIN, 1.0f);
+  v->mod_alpha_precomp = synth_clamp(v->mod_alpha_precomp, 0.0f, 1.0f);
   v->mod_one_minus_alpha = 1.0f - v->mod_alpha_precomp;
 
   v->wave_sel = (params->OscWave < SYNTH_ONE_THIRD)    ? 0
@@ -556,9 +545,9 @@ void po32_synth_voice_init(po32_synth_voice_t *v, uint32_t sample_rate,
 
   /* Pitch-mod source: exponential decay is a geometric recursion; the
    * sine LFO is a recursive complex rotation (same scheme as the DPSK
-   * modulator oscillator). mod_decay_time is always > 0
-   * (synth_decay_time returns >= SYNTH_DECAY_MIN_SECONDS). */
-  v->mod_dcy_coeff = lut_powf(SYNTH_ENV_FLOOR_GAIN, inv_sr / mod_decay_time);
+   * modulator oscillator). Only the decaying source has a decay envelope;
+   * rate zero freezes each source at its trigger value. */
+  v->mod_dcy_coeff = v->mod_is_exp ? po32_param_mod_decay_coefficient(mod_rate, inv_sr) : 1.0f;
   po32_lut_rot_step(LUT_TWO_PI * mod_rate_hz * inv_sr, &v->mod_rot_s, &v->mod_rot_c);
 
   v->mod_env_amp_correction = 1.0f;
@@ -596,8 +585,10 @@ void po32_synth_voice_reset(po32_synth_voice_t *v) {
   v->nenv_v = SYNTH_ENV_FLOOR_GAIN;
   v->nenv_synced = 0;
   v->mod_env_v = 1.0f;
-  v->mod_osc_s = 0.0f;
-  v->mod_osc_c = 1.0f;
+  v->mod_osc_s = 1.0f;
+  v->mod_osc_c = 0.0f;
+  if (!v->mod_is_exp && !v->mod_is_sine)
+    v->mod_state = synth_randf(&v->rand_state) * 2.0f - 1.0f;
 
   /* Reset filter z1/z2 (indices 5, 6) */
   v->noise_filt[5] = 0.0f;

@@ -7,6 +7,7 @@
 #if PO32_ENABLE_MTDRUM_IMPORT
 
 #include "po32_lut.h"
+#include "po32_param_maps.h"
 
 #include <stddef.h>
 
@@ -292,7 +293,7 @@ static float po32_patch_import_attack_ms_to_param(float ms) {
   seconds = ms / 1000.0f;
   for (i = 0; i < 32; ++i) {
     const float mid = (lo + hi) * 0.5f;
-    const float probe = mid == 0.0f ? 0.0f : mid * po32_lut_pow10f((12.0f * mid - 7.0f) / 5.0f);
+    const float probe = po32_param_attack_seconds(mid);
     if (probe < seconds) {
       lo = mid;
     } else {
@@ -307,8 +308,8 @@ static float po32_patch_import_filter_q_to_param(float q) {
   return po32_patch_import_clamp01(po32_lut_log10f(q / 0.1f) / 5.0f);
 }
 
-static float po32_patch_import_mod_amount_to_param(float semitones) {
-  return po32_patch_import_clamp01(semitones / 192.0f + 0.5f);
+static float po32_patch_import_mod_amount_to_param(float semitones, int decay) {
+  return po32_param_mod_from_semitones(semitones, decay);
 }
 
 static float po32_patch_import_eq_gain_to_param(float db) {
@@ -432,13 +433,13 @@ static po32_status_t po32_patch_import_parse_line(po32_span_t key, po32_span_t v
       if (status != PO32_OK || raw <= 0.0f) {
         return PO32_ERR_PARSE;
       }
-      out->ModRate = po32_patch_import_decay_ms_to_param(raw);
+      out->ModRate = po32_param_mod_from_ms(raw);
     } else if (*mod_mode_hint == 2) {
       status = po32_patch_import_parse_leading_float(value, &raw);
-      if (status != PO32_OK) {
-        return status;
+      if (status != PO32_OK || raw < 0.0f) {
+        return PO32_ERR_PARSE;
       }
-      out->ModRate = po32_patch_import_clamp01(raw / 2000.0f);
+      out->ModRate = po32_param_mod_from_hz(raw, 1);
     } else {
       status = po32_patch_import_parse_leading_float(value, &raw);
       if (status != PO32_OK || raw < 0.0f) {
@@ -448,7 +449,7 @@ static po32_status_t po32_patch_import_parse_line(po32_span_t key, po32_span_t v
         out->ModRate = 0.0f;
         return PO32_OK;
       }
-      out->ModRate = po32_patch_import_hz_to_param(raw);
+      out->ModRate = po32_param_mod_from_hz(raw, 0);
     }
     return PO32_OK;
   }
@@ -459,7 +460,7 @@ static po32_status_t po32_patch_import_parse_line(po32_span_t key, po32_span_t v
     if (status != PO32_OK) {
       return status;
     }
-    out->ModAmt = po32_patch_import_mod_amount_to_param(raw);
+    out->ModAmt = po32_patch_import_mod_amount_to_param(raw, *mod_mode_hint <= 1);
     return PO32_OK;
   }
 
@@ -640,6 +641,7 @@ po32_status_t po32_patch_parse_mtdrum_text(const char *text, size_t text_len,
   int mod_mode_hint = 0;
   int nenv_mode_hint = 0;
   int recognized_fields = 0;
+  int pass;
 
   if (text == NULL || out == NULL) {
     return PO32_ERR_INVALID_ARG;
@@ -649,48 +651,59 @@ po32_status_t po32_patch_parse_mtdrum_text(const char *text, size_t text_len,
   cursor = text;
   end = text + text_len;
 
-  while (cursor < end) {
-    const char *line_end = cursor;
-    const char *colon;
-    po32_span_t line;
+  /* Resolve mode selectors before mode-dependent units, regardless of order. */
+  for (pass = 0; pass < 2; ++pass) {
+    cursor = text;
+    while (cursor < end) {
+      const char *line_end = cursor;
+      const char *colon;
+      po32_span_t line;
 
-    while (line_end < end && *line_end != '\n') {
-      line_end += 1;
-    }
-
-    line.begin = cursor;
-    line.end = line_end;
-    line = po32_patch_import_trim(line);
-
-    colon = line.begin;
-    while (colon < line.end && *colon != ':') {
-      colon += 1;
-    }
-
-    if (colon < line.end) {
-      po32_span_t key;
-      po32_span_t value;
-      po32_status_t status;
-
-      key.begin = line.begin;
-      key.end = colon;
-      key = po32_patch_import_trim(key);
-
-      value.begin = colon + 1;
-      value.end = line.end;
-      value = po32_patch_import_trim(value);
-
-      status = po32_patch_import_parse_line(key, value, &mod_mode_hint, &nenv_mode_hint,
-                                            &recognized_fields, out);
-      if (status != PO32_OK) {
-        po32_patch_params_zero(out);
-        return status;
+      while (line_end < end && *line_end != '\n') {
+        line_end += 1;
       }
-    }
 
-    cursor = line_end;
-    if (cursor < end && *cursor == '\n') {
-      cursor += 1;
+      line.begin = cursor;
+      line.end = line_end;
+      line = po32_patch_import_trim(line);
+
+      colon = line.begin;
+      while (colon < line.end && *colon != ':') {
+        colon += 1;
+      }
+
+      if (colon < line.end) {
+        po32_span_t key;
+        po32_span_t value;
+        po32_status_t status;
+
+        key.begin = line.begin;
+        key.end = colon;
+        key = po32_patch_import_trim(key);
+
+        value.begin = colon + 1;
+        value.end = line.end;
+        value = po32_patch_import_trim(value);
+
+        if ((pass == 0) != (po32_patch_import_key_equals(key, "ModMode") ||
+                            po32_patch_import_key_equals(key, "NEnvMod"))) {
+          cursor = line_end;
+          if (cursor < end && *cursor == '\n')
+            cursor += 1;
+          continue;
+        }
+        status = po32_patch_import_parse_line(key, value, &mod_mode_hint, &nenv_mode_hint,
+                                              &recognized_fields, out);
+        if (status != PO32_OK) {
+          po32_patch_params_zero(out);
+          return status;
+        }
+      }
+
+      cursor = line_end;
+      if (cursor < end && *cursor == '\n') {
+        cursor += 1;
+      }
     }
   }
 

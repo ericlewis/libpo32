@@ -42,13 +42,13 @@ and ignores non-PO-32 metadata fields such as `Name`, `Path`, `NStereo`,
 |---|---------|------------|----------------------------------|------------|
 | 4 | ModMode | discrete   | Decay \| Sine \| Noise           | Decay      |
 | 5 | ModRate | continuous | mode-dependent (see below)       | 0.5        |
-| 6 | ModAmt  | continuous | ±96 semitones (linear)           | 0          |
+| 6 | ModAmt  | continuous | ±96 decay; ±48 sine/noise (curved)           | 0          |
 
 | Name | Role | Mapping / Notes |
 | --- | --- | --- |
 | `ModMode` | Oscillator pitch modulation source | Decay = pitch sweep, Sine = vibrato / FM wobble, Noise = random pitch jitter |
-| `ModRate` | Modulation speed or frequency | Decay mode: pitch-mod decay time in ms, approximately `pow(10, 3x-2)` seconds, with `param=0` often exported by Microtonic as `inf ms`<br/>Sine mode: LFO frequency in Hz, approximately `2000 * x`<br/>Noise mode: noise filter cutoff in Hz, `20 * pow(1000, x)` |
-| `ModAmt` | Pitch modulation depth | `semitones = (param - 0.5) * 192`<br/>Range `-96` to `+96` semitones |
+| `ModRate` | Modulation speed or frequency | Decay: `(1.03-x)/(3*x)` seconds, infinite at zero<br/>Sine: `2000*x*pow(10,3.5*(x-1))` Hz<br/>Noise: `20000*x*pow(10,4*(x-1))` Hz |
+| `ModAmt` | Pitch modulation depth | `b = 2*x-1; semitones = b*abs(b)*limit`<br/>Limit96 in decay mode,48 in sine/noise modes |
 
 ### Noise (7-12)
 
@@ -66,7 +66,7 @@ and ignores non-PO-32 metadata fields such as `Name`, `Path`, `NStereo`,
 | `NFilMod` | Noise filter type | LP = dark brushed-snare style noise, BP = focused band noise, HP = bright hi-hat style hiss |
 | `NFilFrq` | Noise filter cutoff / center frequency | `Hz = 20 * pow(1000, x)`<br/>Low = dark rumble, high = bright sizzle |
 | `NFilQ` | Noise filter resonance | `Q = 0.1 * pow(10, 5x)`<br/>Range `0.1` to `10000`<br/>Low = broad natural noise, high = narrow metallic emphasis |
-| `NEnvMod` | Noise envelope shape | `Exp`: exponential attack/decay<br/>`Lin`: linear ramps with times scaled by `2/3` (Microtonic exports the displayed attack/decay values already scaled, so importers need to invert that display scaling)<br/>`Mod`: damped cosine tremolo with short-period audio-rate ring-mod behavior |
+| `NEnvMod` | Noise envelope shape | `Exp`: exponential attack/decay<br/>`Lin`: linear ramps with times scaled by `2/3` (Microtonic exports the displayed attack/decay values already scaled, so importers need to invert that display scaling)<br/>`Mod`: the reference behaviour is repeated clap bursts before decay; the current synthesizer approximates this with damped cosine modulation and is not equivalent |
 | `NEnvAtk` | Noise attack time | Same curve as `OscAtk`<br/>Usually near `0` for percussive sounds |
 | `NEnvDcy` | Noise decay time | Same curve as `OscDcy`<br/>Short = closed hat, long = open hat or crash |
 
@@ -102,9 +102,9 @@ and ignores non-PO-32 metadata fields such as `Name`, `Path`, `NStereo`,
 | `NVel` | Velocity sensitivity for noise level | Lets softer hits keep noise while reducing tone independently of the oscillator |
 | `ModVel` | Velocity sensitivity for modulation depth | High values reduce sweep on soft hits and keep full sweep on hard hits |
 
-## Exact Mapping Functions
+## Parameter Mapping Functions
 
-### Frequency (OscFreq, NFilFrq, EQFreq, ModRate in Noise mode)
+### Frequency (OscFreq, NFilFrq, EQFreq)
 ```
 Hz = 20 * pow(1000, x)
   x=0.0 ->    20 Hz
@@ -112,31 +112,34 @@ Hz = 20 * pow(1000, x)
   x=1.0 -> 20000 Hz
 ```
 
-### ModRate in Sine mode (linear, NOT logarithmic)
+### Pitch Modulation Rate
 ```
-Hz = 2000 * x
-  x=0.0 ->    0 Hz
-  x=0.5 -> 1000 Hz
-  x=1.0 -> 2000 Hz
+Decay seconds = (1.03-x)/(3*x), infinite at x=0
+Sine Hz = 2000*x*pow(10,3.5*(x-1))
+Noise Hz = 20000*x*pow(10,4*(x-1))
+               x=0      x=0.25       x=0.5         x=1
+Decay          infinite 1040.00 ms   353.33 ms     10.00 ms
+Sine           0 Hz     1.19 Hz      17.78 Hz      2000 Hz
+Noise          0 Hz     5.00 Hz      100.00 Hz     20000 Hz
 ```
 
 ### Attack Time (OscAtk, NEnvAtk)
 ```
 time_seconds = x * pow(10, (12*x - 7) / 5)
   x=0.00 ->     0 ms
-  x=0.25 ->  0.05 ms
-  x=0.50 ->     2 ms
-  x=0.75 ->    50 ms
+  x=0.25 -> 39.62 ms
+  x=0.50 ->315.48 ms
+  x=0.75 ->1883.91 ms
   x=1.00 -> 10000 ms
 ```
 
-### Decay Time (OscDcy, NEnvDcy, ModRate in Decay mode)
+### Amplitude Decay Time (OscDcy, NEnvDcy)
 ```
 time_seconds = pow(10, 3*x - 2)
   x=0.00 ->    10 ms
-  x=0.25 ->    18 ms
-  x=0.50 ->   100 ms
-  x=0.75 ->   562 ms
+  x=0.25 -> 56.23 ms
+  x=0.50 ->316.23 ms
+  x=0.75 ->1778.28 ms
   x=1.00 -> 10000 ms
 ```
 
@@ -168,10 +171,14 @@ Q = 0.1 * pow(10, 5*x)
 
 ### Mod Amount
 ```
-semitones = (x - 0.5) * 192
-  x=0.0 -> -96 sm
-  x=0.5 ->   0 sm
-  x=1.0 -> +96 sm
+b = 2*x - 1
+semitones = b * abs(b) * limit
+limit = 96 in decay mode, 48 in sine/noise modes
+  x=0.00 -> -96 / -48 sm
+  x=0.25 -> -24 / -12 sm
+  x=0.50 ->   0 /   0 sm
+  x=0.75 -> +24 / +12 sm
+  x=1.00 -> +96 / +48 sm
 ```
 
 ## Morph System
@@ -188,3 +195,24 @@ current_value = left_value + (right_value - left_value) * morph_position
 
 The `.mtdrum` format uses a simple `key: value` text layout with units.
 The `po32_patch_parse_mtdrum_text()` function in the C API handles parsing.
+
+## Mapping validation and remaining synthesis limits
+
+The corrected attack and pitch-modulation maps were checked against the
+Microtonic3.3.4 Audio Unit parameter-value interface at16 normalised values
+per control and mode. Examples above are independently observed physical
+reference points, not just importer/renderer round trips. The documented ranges
+and zero-rate behaviour are also described in the
+[official user guide](https://soniccharge.com/public/Microtonic%20User%20Guide.pdf).
+No proprietary implementation code is included.
+
+The sine pitch source begins at maximum excursion and is not damped. Zero rate
+holds it there. Random zero rate holds a seeded trigger value; this library's
+voice reset deliberately remains deterministic, so repeated resets repeat the
+same random sequence. That is a reproducibility policy, not a claim to reproduce
+the device's trigger-to-trigger random state.
+
+Correct control maps do not establish complete sound equivalence. Oscillator
+antialiasing, waveform gain/phase, EQ boost compensation, the modulated noise
+envelope and stochastic filtering still require independent audio comparisons.
+The normalised packet encoding and21-field public struct layout are unchanged.

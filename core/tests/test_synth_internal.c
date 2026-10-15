@@ -121,7 +121,49 @@ static void test_public_helper_guards(void) {
   }
 }
 
+static void test_normalised_control_reference_points(void) {
+  po32_patch_params_t p;
+  po32_synth_voice_t v;
+  float output[256];
+  size_t made;
+  /* Independent physical reference points, not a forward/inverse round trip. */
+  assert(abs_diff(synth_attack_time(0.25f), 0.0396223f) < 0.00001f);
+  assert(abs_diff(synth_attack_time(0.5f), 0.315479f) < 0.0001f);
+  assert(abs_diff(synth_attack_time(1.0f), 10.0f) < 0.001f);
+  assert(abs_diff(po32_param_mod_semitones(0.25f, 0.0f), -24.0f) < 0.001f);
+  assert(abs_diff(po32_param_mod_semitones(0.25f, 0.5f), -12.0f) < 0.001f);
+  assert(abs_diff(po32_param_mod_semitones(0.75f, 1.0f), 12.0f) < 0.001f);
+  assert(abs_diff(po32_param_mod_hz(0.25f, 1), 1.185687f) < 0.001f);
+  assert(abs_diff(po32_param_mod_hz(0.5f, 1), 17.782794f) < 0.002f);
+  assert(abs_diff(po32_param_mod_hz(0.25f, 0), 5.0f) < 0.001f);
+  assert(abs_diff(po32_param_mod_hz(0.5f, 0), 100.0f) < 0.01f);
+  assert(po32_param_mod_hz(0.0f, 0) == 0.0f);
+  assert(po32_param_mod_decay_coefficient(0.0f, 1.0f / 44100.0f) == 1.0f);
+  assert(abs_diff(po32_param_mod_from_ms(353.333333f), 0.5f) < 0.00001f);
+  assert(abs_diff(po32_param_mod_from_hz(17.782794f, 1), 0.5f) < 0.0001f);
+  assert(abs_diff(po32_param_mod_from_hz(100.0f, 0), 0.5f) < 0.0001f);
+  memset(&p, 0, sizeof(p));
+  p.Level = 0.5f;
+  p.ModAmt = 1.0f;
+  p.ModMode = 0.5f;
+  p.ModRate = 0.0f;
+  po32_synth_voice_init(&v, 44100, &p, 127, 1.0f);
+  assert(v.mod_pitch_scale == 4.0f && v.mod_osc_s == 1.0f);
+  assert(v.mod_dcy_coeff == 1.0f);
+  assert(po32_synth_voice_render_f32(&v, output, 256, &made) == PO32_OK);
+  assert(v.mod_env_v == 1.0f && v.mod_osc_s == 1.0f);
+  p.ModMode = 1.0f;
+  po32_synth_voice_init(&v, 44100, &p, 127, 1.0f);
+  {
+    float held = v.mod_state;
+    assert(held != 0.0f && v.mod_alpha_precomp == 0.0f);
+    assert(po32_synth_voice_render_f32(&v, output, 256, &made) == PO32_OK);
+    assert(v.mod_state == held);
+  }
+}
+
 int main(void) {
+  test_normalised_control_reference_points();
   test_lut_functions();
   test_synth_helper_functions();
   test_public_helper_guards();
