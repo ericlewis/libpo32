@@ -84,7 +84,7 @@ and ignores non-PO-32 metadata fields such as `Name`, `Path`, `NStereo`,
 | `Mix` | Balance between oscillator and noise | `0.5` = equal blend<br/>Below `0.5` favors oscillator, above `0.5` favors noise<br/>Uses an asymmetric dB crossfade: `n = mix*2 - 1`, then the oscillator and noise gains are scaled separately |
 | `DistAmt` | Distortion amount | Cubic waveshaper with automatic gain compensation<br/>`0` = clean, `100` = aggressive clipping |
 | `EQFreq` | EQ center frequency | Same logarithmic scale as `OscFreq`<br/>Placed after distortion |
-| `EQGain` | EQ boost or cut | Stored as `(dB + 40) / 80`<br/>Range `-40 dB` to `+40 dB` |
+| `EQGain` | EQ boost or cut | Stored as `(dB + 40) / 80`<br/>Range `-40 dB` to `+40 dB`; positive boosts also attenuate the whole channel by half the boost in dB |
 
 ### Output (17-20)
 
@@ -213,6 +213,12 @@ same random sequence. That is a reproducibility policy, not a claim to reproduce
 the device's trigger-to-trigger random state.
 
 Correct control maps do not establish complete sound equivalence. Oscillator
-antialiasing, waveform gain/phase, EQ boost compensation, the modulated noise
+antialiasing, waveform gain/phase, the modulated noise
 envelope and stochastic filtering still require independent audio comparisons.
 The normalised packet encoding and21-field public struct layout are unchanged.
+
+EQ compensation was checked with eight controlled offline renders at low level:
+positive boosts of5/10/20/40dB attenuated a far-off-centre tone by half the boost;
+a tone at the EQ centre gained approximately half the boost. A negative20dB
+cut did not apply the positive-boost compensation. This is separate from the
+unchanged output Level control.

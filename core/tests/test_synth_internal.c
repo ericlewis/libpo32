@@ -160,6 +160,16 @@ static void test_normalised_control_reference_points(void) {
     assert(po32_synth_voice_render_f32(&v, output, 256, &made) == PO32_OK);
     assert(v.mod_state == held);
   }
+  p.EQGain = 0.75f;
+  p.EQFreq = 0.5f;
+  po32_synth_voice_init(&v, 44100, &p, 127, 1.0f);
+  assert(abs_diff(v.level / synth_level_gain(p.Level), 0.31622777f) < 0.0001f);
+  p.EQGain = 1.0f;
+  po32_synth_voice_init(&v, 44100, &p, 127, 1.0f);
+  assert(abs_diff(v.level / synth_level_gain(p.Level), 0.1f) < 0.0001f);
+  p.EQGain = 0.25f;
+  po32_synth_voice_init(&v, 44100, &p, 127, 1.0f);
+  assert(abs_diff(v.level / synth_level_gain(p.Level), 1.0f) < 0.0001f);
 }
 
 int main(void) {

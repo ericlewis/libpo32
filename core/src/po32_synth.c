@@ -481,6 +481,9 @@ void po32_synth_voice_init(po32_synth_voice_t *v, uint32_t sample_rate,
   eq_db = (params->EQGain - 0.5f) * (2.0f * SYNTH_EQ_MAX_ABS_DB);
   eq_freq_hz = synth_clamp_sr_freq(synth_param_to_hz(params->EQFreq), sr);
   v->level = synth_level_gain(params->Level);
+  /* Positive peak boosts reduce the whole channel by half the boost in dB. */
+  if (eq_db > 0.0f)
+    v->level *= synth_db_to_gain(-0.5f * eq_db);
 
   v->osc_gain_mix = synth_mix_osc_gain(mix);
   v->noise_gain_mix = synth_mix_noise_gain(mix);
