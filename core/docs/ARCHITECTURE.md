@@ -30,7 +30,7 @@ cross-compilation alone is not runtime validation.
 | `po32.c`, `po32.h` | PO-32 typed packets, mono modem, builders and receivers |
 | `po32_patch_import.c` | `.mtdrum` text parser |
 | `po32_synth.c`, `po32_synth.h` | Microtonic-compatible drum model |
-| `po33.c`, `po33_data.c`, `po33.h` | PO-33/133 framing, sample companding and lossless logical records |
+| `po33.c`, `po33_audio.c`, `po33_data.c`, `po33.h` | PO-33/133 framing, PCM conversion, sample companding and lossless logical records |
 | `po35.c`, `po35.h` | PO-35/137 framing, speech records, settings and patterns |
 | `po35_analysis.c`, `po35_analysis.h` | Experimental one-shot PCM analysis with fixed caller-owned workspace |
 | `po35_synth.c`, `po35_synth.h` | Experimental speech reconstruction with caller-owned streaming voices |
@@ -79,6 +79,13 @@ for typed workspace sizes and provide those arrays to `po_stereo_decode_f32`.
 It preserves the input, recovers wire bytes from the counter preamble onward,
 and leaves model grammar and final-frame trimming to the family parser.
 
+`po33_samples_encode_f32` converts finite mono PCM to the nominal 23,437.5 Hz
+sample clock and quantizes it with the existing mu-law encoder. The caller owns
+input and output buffers; internal scratch storage is fixed and requires no
+allocation. `po_resample_internal.h` shares the bandlimited Lanczos-8 kernel
+with speech analysis. The 23,438 Hz WAV rate is treated as an exact native alias
+to preserve exported sample counts.
+
 `po35_analysis_encode_f32` analyzes complete finite mono PCM in `[-1,1]` at
 8–192 kHz. It resamples onto a bandlimited 24 kHz analysis clock and derives
 both the 24 kHz high bank and decimated 8 kHz low bank. A fixed caller-owned
@@ -100,6 +107,12 @@ channels; its capture adapter allocates workspace and calls the core stereo
 receiver. `examples/po_stereo_wav.c` validates family frames, wraps the core
 transmitter in WAV/PCM output, and handles exclusive file creation. The PO-33
 and PO-35 examples collect logical records and export their contents.
+
+`po33_encode_capture` uses the PCM converter for sample replacements. It retains
+the original allocation for shorter audio and clears the unused tail to silence;
+longer audio adds whole 4,096-byte sample blocks. Existing nine-byte headers,
+trim/slice references and unrelated packets remain unchanged. Pool growth does
+not expand the audible trim or establish hardware memory capacity.
 
 `po35_encode_capture` selects or explicitly mixes speech WAV channels, calls
 the core analysis API, and replaces existing speech groups. Its 640-record

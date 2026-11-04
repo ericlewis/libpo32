@@ -60,15 +60,35 @@ preserves the normalized frame bytes, not the original recorded waveform.
 
 ## PO-33 / PO-133 Template Editing
 
-Edit an exported sample WAV while retaining mono PCM16, 23,438 Hz and its exact
-sample count. The sample pool can be shared by several drum slices. Pattern
-replacements are raw records and must retain their original length.
+Replace an existing sample pool with a nonempty PCM16, PCM24, PCM32 or float32
+WAV at 8–192 kHz, including extensible WAV. The core converts it to the nominal
+23,437.5 Hz clock; exported 23,438 Hz WAVs are treated as native-rate input.
+Samples must be finite and in `[-1,1]`. The sample pool can be shared by several
+drum slices. Pattern replacements remain raw records of their original length.
 
 ```sh
 ./build/core/po33_encode_capture decoded-po33/frame.bin edited-po33.wav \
   --sample 0 edited-sound-000.wav \
   --pattern 0 edited-pattern-00.bin
 ```
+
+Mono input needs no channel option. Stereo requires an explicit global channel
+choice; `left` and `right` select one channel, and `mix` takes their arithmetic
+mean. Mono accepts `left` or `mix` and rejects `right`.
+
+```sh
+./build/core/po33_encode_capture decoded-po33/frame.bin edited-po33.wav \
+  --sample 0 new-stereo-recording.wav --channel mix
+```
+
+Shorter audio is padded with silence to the existing allocation. Longer audio
+grows the pool in 4,096-byte blocks, with silence in the final partial block;
+it is never truncated to fit the old length. Growth requires a block-aligned
+original pool and rejects ambiguous extensions in the selected sound group.
+The editor preserves trim coordinates and slice references exactly. It does
+not extend trims to cover appended audio or reclaim storage after a shorter
+replacement. Device storage capacity and restoration of larger pools remain
+unverified.
 
 Selectors are zero-based and match the exported filenames. To replace one raw
 pattern byte instead of the whole pattern:
@@ -80,10 +100,14 @@ pattern byte instead of the whole pattern:
 
 This changes a raw byte; it is not a musical-note editing API. Options can be
 repeated for different records, and conflicting edits are rejected. The editor
-preserves packet order, lengths, settings, headers, allocations and unselected
-content. It cannot add or resize sample pools, change trim endpoints or remap
-slices. Edited PCM is quantized to the nearest representable mu-law level;
-unchanged PCM retains its original byte, including the alternate zero encoding.
+preserves settings, patterns not explicitly edited, all sample headers and
+unselected content. Existing packet lengths and order are retained; growth adds
+sample-data packets to the selected group. It cannot create a new pool from a
+missing or metadata-only entry, change trim endpoints or remap slices. Edited
+PCM is quantized to the nearest representable mu-law level. Unchanged native
+PCM retains its original byte, including the alternate zero encoding. Input is
+not gain-normalized; overshoot from sample-rate conversion is saturated before
+quantization. Outputs must not exist, and all edits validate before creation.
 
 ## PO-35 / PO-137 Decode and Speech Preview
 
