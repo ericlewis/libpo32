@@ -7,6 +7,7 @@
 #include "po32_synth.h"
 #include "po33.h"
 #include "po35.h"
+#include "po35_analysis.h"
 #include "po35_synth.h"
 #include "po_stereo.h"
 #endif

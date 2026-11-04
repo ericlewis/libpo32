@@ -33,6 +33,7 @@ add_library(po32 STATIC
   src/po33.c
   src/po33_data.c
   src/po35.c
+  src/po35_analysis.c
   src/po35_synth.c
   src/po_stereo.c
   src/po32_patch_import.c
@@ -235,7 +236,7 @@ add_test(NAME po35_example_tests COMMAND po35_example_tests)
 set_tests_properties(po35_example_tests PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
 
 # Family codecs, shared transport, and the freestanding speech renderer.
-foreach(test_name IN ITEMS po33_data po35 po35_synth po_stereo po_wire)
+foreach(test_name IN ITEMS po33_data po35 po35_analysis po35_synth po_stereo po_wire)
   add_executable(${test_name}_tests tests/test_${test_name}.c)
   target_link_libraries(${test_name}_tests PRIVATE po32)
   add_test(NAME ${test_name}_tests COMMAND ${test_name}_tests)
@@ -290,6 +291,7 @@ install(FILES
   include/po_common.h
   include/po32.h
   include/po35.h
+  include/po35_analysis.h
   include/po35_synth.h
   include/po_stereo.h
   include/po33.h
