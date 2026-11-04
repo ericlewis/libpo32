@@ -60,6 +60,7 @@ int main(void) {
   po35_synth_voice_t voice;
   size_t length;
   size_t analysis_bytes;
+  size_t sample_count;
   if (legacy_status != PO_OK || legacy_packet.payload_len != 0) return 1;
   if (po35_builder_init(&builder, frame, sizeof(frame)) != PO_OK) return 2;
   if (po35_builder_finish(&builder, &length) != PO_OK) return 3;
@@ -67,6 +68,7 @@ int main(void) {
   if (po35_synth_init(&synth, PO35_SYNTH_BANK_HIGH, 350) != PO_OK) return 5;
   if (po35_synth_voice_init(&voice, &synth, 0, 0, 80) != PO_OK || !po35_synth_voice_done(&voice)) return 6;
   if (po35_analysis_size_for_pcm(48000, 48000, 80, &analysis_bytes) != PO_OK || analysis_bytes != 80 * 44) return 8;
+  if (po33_sample_count_for_pcm(48000, 48000, &sample_count) != PO_OK || sample_count != 23438) return 9;
   return po33_sample_decode(0) == 0 ? 0 : 7;
 }
 ]=])

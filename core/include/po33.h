@@ -105,6 +105,25 @@ int16_t po33_sample_decode(uint8_t encoded);
  * decoding the alternate zero byte 255 and re-encoding it produces 0. */
 uint8_t po33_sample_encode(int16_t sample);
 
+/* Size a mono PCM conversion to the nominal 23437.5 Hz sample clock. Input
+ * rates are 8000..192000 Hz; 23438 is treated as an exact native-rate alias
+ * for exported WAVs. Other rates round duration up to one whole output sample.
+ * Empty input requires zero output bytes. Counts that cannot fit the input
+ * float array, output buffer or signed 64-bit sample index return RANGE.
+ * On error *out_count is zero. No device allocation limit is imposed. */
+po_status_t po33_sample_count_for_pcm(size_t count, uint32_t rate, size_t *out_count);
+
+/* Convert finite normalized mono PCM in [-1,1] to signed-order mu-law bytes.
+ * A bandlimited filter resamples nonnative rates; native 23438 Hz input is
+ * encoded directly. Values scale by 32768 and round to nearest PCM16 (ties
+ * away from zero), saturating at the codec's +/-32124 limits before encoding.
+ * All validation precedes output writes; on error output is untouched and
+ * *written is zero. Empty input permits NULL pcm/out. Input, output and written
+ * must be disjoint. No allocation or persistent state; IEEE-754 float/double
+ * are required. Headers, pool allocation and metadata are the caller's job. */
+po_status_t po33_samples_encode_f32(const float *pcm, size_t count, uint32_t rate, uint8_t *out,
+                                    size_t capacity, size_t *written);
+
 typedef struct po33_builder {
   uint8_t *buffer;
   size_t capacity;
