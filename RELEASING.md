@@ -45,6 +45,11 @@ packages. The repository, legacy package names and library filename still use
 7. Check `git status` for unrelated workspace changes before tagging.
 8. Tag the release and push the tag.
 
+The nested Go module requires its own prefixed version tag, such as
+`bindings/go/v0.4.0`. Repository-root tags version the native project, not the
+module under `bindings/go`. Create a Go module tag only for the version whose
+module contents and isolated consumer have been validated.
+
 ## Notes
 
 - Consult `core/docs/C_API.md` for the native API surface and
