@@ -1,5 +1,6 @@
 #include "po35_analysis.h"
 #include "po_math_internal.h"
+#include "po_resample_internal.h"
 #include "po35_synth_tables.h"
 
 static double absd(double x) {
@@ -25,48 +26,18 @@ po_status_t po35_analysis_size_for_pcm(size_t count, uint32_t rate, uint32_t fps
   return PO_OK;
 }
 
-/* Lanczos-8 lowpass interpolation with the radius widened on downsampling.
- * Sum all kernel weights, including weights over the zero-padded boundary,
- * to preserve DC gain without extending the first or last source sample.
- * Sinusoid recurrences avoid transcendental work per input tap. */
 static double native_sample(const po35_analysis_workspace_t *w, const float *pcm, size_t count,
                             uint32_t rate, int64_t index) {
-  double position, z, sine, cosine, window_sine, window_cosine;
-  double sum = 0.0, weight_sum = 0.0;
-  int64_t first, last, i;
-  if (rate == 24000u)
-    return index >= 0 && (uint64_t)index < count ? pcm[(size_t)index] : 0.0;
-  position = (double)index * rate / 24000.0;
-  if (position < -w->resample_radius || position >= (double)count + w->resample_radius)
-    return 0.0;
-  first = (int64_t)po_math_floor(position - w->resample_radius) + 1;
-  last = (int64_t)po_math_floor(position + w->resample_radius);
-  z = PO_MATH_PI * (position - (double)first) * w->resample_cutoff;
-  sine = po_math_sin(z);
-  cosine = po_math_cos(z);
-  window_sine = po_math_sin(z / 8.0);
-  window_cosine = po_math_cos(z / 8.0);
-  for (i = first; i <= last; ++i) {
-    double distance = PO_MATH_PI * (position - (double)i) * w->resample_cutoff;
-    double weight = absd(distance) < 1e-8 ? 1.0 : 8.0 * sine * window_sine / (distance * distance);
-    double next;
-    weight_sum += weight;
-    if (i >= 0 && (uint64_t)i < count)
-      sum += weight * pcm[(size_t)i];
-    next = sine * w->resample_cos_step + cosine * w->resample_sin_step;
-    cosine = cosine * w->resample_cos_step - sine * w->resample_sin_step;
-    sine = next;
-    next = window_sine * w->resample_window_cos_step + window_cosine * w->resample_window_sin_step;
-    window_cosine =
-        window_cosine * w->resample_window_cos_step - window_sine * w->resample_window_sin_step;
-    window_sine = next;
-  }
-  return weight_sum > 1e-12 ? sum / weight_sum : 0.0;
+  po_resample_kernel_t kernel = {w->resample_cutoff,          w->resample_radius,
+                                 w->resample_sin_step,        w->resample_cos_step,
+                                 w->resample_window_sin_step, w->resample_window_cos_step};
+  return po_resample_f32(&kernel, pcm, count, rate, 24000.0, index);
 }
 
 static void setup(po35_analysis_workspace_t *w, uint32_t rate) {
   unsigned i;
   double sum = 0.0;
+  po_resample_kernel_t kernel;
   for (i = 0; i < 1024; ++i) {
     double phase = (double)i / 1024.0;
     double sine = po_math_sin(PO_MATH_PI * phase * phase);
@@ -84,12 +55,13 @@ static void setup(po35_analysis_workspace_t *w, uint32_t rate) {
   }
   for (i = 0; i < 49; ++i)
     w->decimator[i] /= sum;
-  w->resample_cutoff = rate > 24000u ? 24000.0 / rate : 1.0;
-  w->resample_radius = 8.0 / w->resample_cutoff;
-  w->resample_sin_step = po_math_sin(-PO_MATH_PI * w->resample_cutoff);
-  w->resample_cos_step = po_math_cos(-PO_MATH_PI * w->resample_cutoff);
-  w->resample_window_sin_step = po_math_sin(-PO_MATH_PI * w->resample_cutoff / 8.0);
-  w->resample_window_cos_step = po_math_cos(-PO_MATH_PI * w->resample_cutoff / 8.0);
+  po_resample_init(&kernel, rate, 24000.0);
+  w->resample_cutoff = kernel.cutoff;
+  w->resample_radius = kernel.radius;
+  w->resample_sin_step = kernel.sin_step;
+  w->resample_cos_step = kernel.cos_step;
+  w->resample_window_sin_step = kernel.window_sin_step;
+  w->resample_window_cos_step = kernel.window_cos_step;
 }
 
 static void window_signal(po35_analysis_workspace_t *w, const double *input, unsigned n) {
