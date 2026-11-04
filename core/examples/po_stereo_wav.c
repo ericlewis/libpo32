@@ -26,7 +26,7 @@ static int write_stereo_wav(const char *path, const uint8_t *frame, size_t frame
   float samples[2048];
   size_t total, count;
   FILE *fp = NULL;
-  int fd = -1, created = 0, ok = 0;
+  int fd = -1, ok = 0;
   if (!path || po_stereo_modulator_init(&modulator, frame, frame_len, rate) != PO32_OK)
     return 0;
   total = po_stereo_modulator_remaining(&modulator);
@@ -47,7 +47,6 @@ static int write_stereo_wav(const char *path, const uint8_t *frame, size_t frame
   fd = open(path, O_WRONLY | O_CREAT | O_EXCL, 0666);
   if (fd < 0)
     return 0;
-  created = 1;
   fp = fdopen(fd, "wb");
   if (!fp)
     goto cleanup;
@@ -73,7 +72,7 @@ cleanup:
     fclose(fp);
   if (fd >= 0)
     close(fd);
-  if (!ok && created)
+  if (!ok)
     unlink(path);
   return ok;
 }
@@ -81,7 +80,7 @@ int po33_write_transfer_wav(const char *path, const uint8_t *frame, size_t frame
                             uint32_t rate) {
   po33_decode_result_t result;
   if (!frame || frame_len > UINT32_MAX / 4u ||
-      po33_frame_parse(frame, frame_len, NULL, NULL, &result) != PO32_OK || !result.done ||
+      po33_frame_parse(frame, frame_len, NULL, NULL, &result) != PO32_OK ||
       result.frame_bytes != frame_len)
     return 0;
   return write_stereo_wav(path, frame, frame_len, rate);
@@ -90,7 +89,7 @@ int po35_write_transfer_wav(const char *path, const uint8_t *frame, size_t frame
                             uint32_t rate) {
   po35_decode_result_t result;
   if (!frame || frame_len > UINT32_MAX / 4u ||
-      po35_frame_parse(frame, frame_len, NULL, NULL, &result) != PO_OK || !result.done ||
+      po35_frame_parse(frame, frame_len, NULL, NULL, &result) != PO_OK ||
       result.frame_bytes != frame_len)
     return 0;
   return write_stereo_wav(path, frame, frame_len, rate);

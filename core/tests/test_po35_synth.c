@@ -3,7 +3,9 @@
 #endif
 #include "po35_synth.h"
 #include "../src/po_math_internal.h"
+#include "../src/po35_synth_tables.h"
 #include <assert.h>
+#include <float.h>
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -47,6 +49,89 @@ static void test_arguments_and_timing(void) {
   assert(v.record_index == 2 && v.samples_rendered == 267);
   assert(po35_synth_voice_render_f32(&v, audio, 133, &n) == PO32_OK && n == 133);
   assert(po35_synth_voice_done(&v));
+}
+
+static void test_invalid_argument_contract(void) {
+  po35_synth_t synth, invalid = {(po35_synth_bank_t)99, 350};
+  po35_synth_voice_t voice;
+  po_status_t status;
+  size_t count = 99;
+  status = po35_synth_init(&synth, PO35_SYNTH_BANK_LOW, 350);
+  assert(status == PO_OK);
+  status = po35_synth_samples_for_records(&synth, 1, 40, NULL);
+  assert(status == PO_ERR_INVALID_ARG);
+  status = po35_synth_samples_for_records(NULL, 1, 40, &count);
+  assert(status == PO_ERR_INVALID_ARG && count == 0);
+  count = 99;
+  status = po35_synth_samples_for_records(&invalid, 1, 40, &count);
+  assert(status == PO_ERR_RANGE && count == 0);
+  /* Largest whole-second boundary fits; one more second must reject overflow. */
+  size_t seconds = (size_t)-1 / 8000;
+  status = po35_synth_samples_for_records(&synth, seconds * 60, 60, &count);
+  assert(status == PO_OK && count == seconds * 8000);
+  status = po35_synth_samples_for_records(&synth, (seconds + 1) * 60, 60, &count);
+  assert(status == PO_ERR_RANGE && count == 0);
+  status = po35_synth_voice_init(NULL, &synth, NULL, 0, 40);
+  assert(status == PO_ERR_INVALID_ARG);
+  status = po35_synth_voice_init(&voice, NULL, NULL, 0, 40);
+  assert(status == PO_ERR_INVALID_ARG);
+  assert(po35_synth_voice_done(&voice));
+  status = po35_synth_voice_init(&voice, &invalid, records, 44, 40);
+  assert(status == PO_ERR_RANGE);
+  assert(po35_synth_voice_done(&voice));
+  status = po35_synth_voice_init(&voice, &synth, records, 44, 0);
+  assert(status == PO_ERR_RANGE);
+  assert(po35_synth_voice_done(&voice));
+  po35_synth_voice_reset(NULL);
+  count = po35_synth_voice_samples_remaining(NULL);
+  assert(count == 0);
+  status = po35_synth_voice_render_f32(&voice, audio, 1, NULL);
+  assert(status == PO_ERR_INVALID_ARG);
+  count = 99;
+  status = po35_synth_voice_render_f32(NULL, audio, 1, &count);
+  assert(status == PO_ERR_INVALID_ARG && count == 0);
+  status = po35_synth_render(&synth, records, 44, 40, audio, 400, NULL);
+  assert(status == PO_ERR_INVALID_ARG);
+  audio[0] = 17;
+  count = 99;
+  status = po35_synth_render(&synth, records, 43, 40, audio, 400, &count);
+  assert(status == PO_ERR_RANGE && count == 0 && audio[0] == 17);
+}
+
+static void test_extreme_filter_bounds(void) {
+  po35_synth_t synth;
+  po35_synth_voice_t voice;
+  po_status_t status;
+  size_t count;
+  for (unsigned i = 0; i < 256; ++i)
+    assert(isfinite(po35_lar_reflection[i]) && fabs(po35_lar_reflection[i]) < 1);
+  for (int bank = 0; bank < 2; ++bank) {
+    unsigned order = bank ? 30 : 10;
+    for (unsigned pattern = 0; pattern < 4; ++pattern) {
+      make_record(records, 1536, 255, 0);
+      for (unsigned i = 0; i < order; ++i)
+        records[(bank ? 14 : 4) + i] =
+            (uint8_t)(pattern < 2 ? 127 + pattern : 127 + ((i + pattern) & 1));
+      status = po35_synth_init(&synth, (po35_synth_bank_t)bank, 350);
+      assert(status == PO_OK);
+      status = po35_synth_voice_init(&voice, &synth, records, 44, 20);
+      assert(status == PO_OK);
+      status = po35_synth_voice_render_f32(&voice, audio, 1, &count);
+      assert(status == PO_OK && count == 1);
+      double norm = 0;
+      for (unsigned i = 0; i <= order; ++i)
+        norm += fabs(voice.lpc[i]);
+      assert(norm <= ldexp(1.0, (int)order));
+      status = po35_synth_voice_render_f32(&voice, audio, 1200, &count);
+      assert(status == PO_OK || status == PO_ERR_RANGE);
+      for (size_t i = 0; i < count; ++i)
+        assert(isfinite(audio[i]) && fabs(audio[i]) <= FLT_MAX);
+      for (unsigned i = 0; i < order; ++i) {
+        assert(isfinite(voice.history[i]) && fabs(voice.history[i]) <= FLT_MAX);
+        assert(isfinite(voice.delay[i]) && fabs(voice.delay[i]) < 2 * norm * FLT_MAX);
+      }
+    }
+  }
 }
 
 static void test_streaming_reset_and_capacity(void) {
@@ -308,6 +393,8 @@ static void test_math_accuracy(void) {
 
 int main(void) {
   test_arguments_and_timing();
+  test_invalid_argument_contract();
+  test_extreme_filter_bounds();
   test_streaming_reset_and_capacity();
   test_voiced_reference();
   test_noise_distribution_and_zero_seed();

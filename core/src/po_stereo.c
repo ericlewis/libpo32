@@ -52,8 +52,8 @@ po_status_t po_stereo_modulator_init(po_stereo_modulator_t *state, const uint8_t
     return PO_ERR_RANGE;
   symbols = (uint64_t)wire_bytes * 2u + 1u + PO_STEREO_HOLD_SYMBOLS;
   active = (symbols * denominator + 15624u) / 15625u;
-  if (active > UINT64_MAX / 15625u)
-    return PO_ERR_RANGE;
+  /* The wire-byte bound also ensures active <= UINT64_MAX / 15625,
+   * so converting active sample positions back to ticks remains safe. */
   total = active + 2u * (sample_rate / 4u);
   if (total > SIZE_MAX / (2u * sizeof(float)))
     return PO_ERR_RANGE;

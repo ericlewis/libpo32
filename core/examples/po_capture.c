@@ -159,8 +159,7 @@ int po_capture_decode(const po_capture_t *capture, po_stereo_channel_order_t ord
   if (capture == NULL || capture->samples == NULL || capture->frames == 0)
     return 0;
   if (po_stereo_decode_requirements(capture->frames, capture->rate, &work.scalar_count,
-                                    &work.byte_count, &wire_capacity) != PO32_OK ||
-      work.scalar_count > (size_t)-1 / sizeof(double))
+                                    &work.byte_count, &wire_capacity) != PO32_OK)
     return 0;
   work.scalars = (double *)malloc(work.scalar_count * sizeof(double));
   work.bytes = (uint8_t *)malloc(work.byte_count);

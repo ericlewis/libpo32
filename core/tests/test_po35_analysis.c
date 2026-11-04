@@ -132,6 +132,20 @@ static void test_contract(void) {
         assert(records[f * 44 + 2] == 0);
     }
 }
+static void test_error_output_contract(void) {
+  size_t bytes = 99;
+  po_status_t status;
+  memset(records, 0x5a, sizeof(records));
+  status = po35_analysis_encode_f32(&workspace, pcm, 1, 24000, 40, records, sizeof(records), NULL);
+  assert(status == PO_ERR_INVALID_ARG);
+  status = po35_analysis_encode_f32(&workspace, pcm, 1, 7999, 40, records, sizeof(records), &bytes);
+  assert(status == PO_ERR_RANGE && bytes == 0);
+  bytes = 99;
+  status = po35_analysis_encode_f32(&workspace, pcm, 1, 24000, 0, records, sizeof(records), &bytes);
+  assert(status == PO_ERR_RANGE && bytes == 0);
+  for (size_t i = 0; i < sizeof(records); ++i)
+    assert(records[i] == 0x5a);
+}
 static void test_signal(const char *label, double freq, int noise) {
   size_t i, n, total;
   unsigned state = 7;
@@ -298,6 +312,7 @@ static void test_syllable_resampling(void) {
 }
 int main(void) {
   test_contract();
+  test_error_output_contract();
   test_native_golden();
   test_signal("silence", 0, 0);
   test_signal("440hz", 440, 0);
