@@ -86,10 +86,11 @@ Optional, but recommended for local development:
 ./scripts/install-git-hooks.sh
 ```
 
-That enables the repo-managed pre-commit hook, which runs `clang-format` on
-staged `.c` and `.h` files before each commit and validates commit subjects
-against Conventional Commits. The repo-managed `pre-push` hook runs the static
-analysis script before push.
+That enables the repo-managed hooks. The pre-commit hook formats the complete
+working-tree copy of each staged `.c` or `.h` path and stages the full file again,
+including previously unstaged changes; it does not preserve partial staging.
+The commit-msg hook validates subjects against Conventional Commits. The
+pre-push hook runs the static analysis script before push.
 
 The pre-commit hook requires `clang-format` 18 and fails on any other major
 version; see [CONTRIBUTING.md](CONTRIBUTING.md#clang-format) for install options.
@@ -164,7 +165,7 @@ Additional hosted tools:
 | [C API](core/docs/C_API.md) | C function reference |
 | [Synth](core/docs/SYNTH.md) | Synthesizer signal path |
 | [Patch Parameters](core/docs/PATCH_PARAMETERS.md) | The 21 parameters |
-| [Bindings](core/docs/BINDINGS.md) | PO-32 binding conventions |
+| [Bindings](core/docs/BINDINGS.md) | Existing PO-32 Go binding conventions |
 | [Examples](core/examples/README.md) | Supported example programs |
 | [Fuzzing](core/fuzz/README.md) | Fuzz harnesses and differential properties |
 | [Contributing](CONTRIBUTING.md) | Local setup, checks, and commit conventions |
@@ -179,7 +180,7 @@ Additional hosted tools:
 | [`core/tests`](core/tests) | Core test coverage |
 | [`core/fuzz`](core/fuzz) | Existing PO-32 libFuzzer harnesses |
 | [`core/docs`](core/docs) | Architecture, protocol, and API notes |
-| [`bindings/go`](bindings/go) | Existing PO-32 Go bindings (cgo) |
+| [`bindings/go`](bindings/go) | Existing PO-32 Go binding (cgo) |
 
 ## Contributing
 
