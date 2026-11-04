@@ -17,9 +17,19 @@ The format is based on Keep a Changelog, and the project follows Semantic Versio
   `po32_synth_voice_reset(...)`, `po32_synth_voice_done(...)`, and
   `po32_synth_voice_samples_remaining(...)` render a hit in chunks.
   `po32_decode_f32(...)` and `po32_synth_render(...)` are now one-shot
-  wrappers over them, so both paths share one implementation.
+  wrappers over them, so both paths share one implementation. Packets
+  delivered by `po32_demodulator_push(...)` carry the same `offset` that
+  `po32_frame_parse(...)` and `po32_builder_append_packet(...)` report: a byte
+  offset into the whole transmitted frame, counting the 128-byte preamble, so
+  it can index a reconstructed frame directly.
+  `po32_synth_voice_init(...)` reports no status, so an init it refuses — a
+  null params pointer, a zero sample rate, or a non-positive or non-finite
+  duration — leaves an inert voice rather than one holding stale state.
 - `po32_demodulator_stopped(...)` — report that a callback returning nonzero
-  has stopped the stream. The stop is terminal: later pushes are no-ops.
+  has stopped the stream. The stop is terminal: later pushes are no-ops. A
+  packet is committed before its callback runs, so
+  `po32_demodulator_packet_count(...)` counts every packet the callback was
+  handed, including the one it stopped on.
 - `po32_demodulator_flush(...)` — signal end-of-audio to the streaming
   demodulator so a final pending symbol is resolved without trailing
   silence.
@@ -60,15 +70,6 @@ The format is based on Keep a Changelog, and the project follows Semantic Versio
   found and the one it needs, instead of reformatting untouched lines.
 
 ### Fixed
-- Packets delivered by `po32_demodulator_push(...)` now carry the same
-  `offset` as the ones `po32_frame_parse(...)` reports for the same frame.
-  The streaming path measured from the first byte after the preamble, so
-  every offset was 128 bytes short and pointed inside the preamble when used
-  to index a reconstructed frame.
-- A packet is now committed before its callback runs, so
-  `po32_demodulator_packet_count(...)` counts the packet a callback stops on.
-  Previously the count omitted it and the demodulator resumed mid-packet,
-  desyncing on the next push.
 - Long frames whose audio ends exactly at `po32_render_sample_count(...)`
   samples now decode completely. The demodulator decides each bit at the
   symbol boundary that closes its correlation window, which for the final
@@ -87,9 +88,6 @@ The format is based on Keep a Changelog, and the project follows Semantic Versio
   NaN, infinite, or enormous duration can no longer reach an out-of-range
   float-to-`size_t` conversion, and a zero sample rate renders nothing instead
   of dividing by zero and feeding NaN to the LUT helpers.
-- `po32_synth_voice_init(...)` zeroes the voice before rejecting a null params
-  pointer, so a refused init leaves an inert voice rather than the previous
-  hit's live state.
 - `po32_demodulator_init(...)` and `po32_decode_f32(...)` reject any sample
   rate that is not positive and finite. A NaN rate previously slipped past a
   `rate <= 0` guard and reached the same undefined LUT conversions.
