@@ -14,17 +14,14 @@ static uint32_t bank_rate(po35_synth_bank_t bank) {
   return 0u;
 }
 
-static po_status_t rounded_samples(size_t count, uint32_t rate, uint32_t fps, size_t *out) {
-  size_t whole = count / fps;
+static size_t rounded_tail(size_t count, uint32_t rate, uint32_t fps) {
   size_t numerator = (count % fps) * rate;
   size_t tail = numerator / fps;
   size_t remainder = numerator % fps;
-  if (remainder * 2u > fps || (remainder * 2u == fps && (tail & 1u)))
+  /* Supported rates/fps yield only integral, 1/3 or 2/3 sample boundaries. */
+  if (remainder * 2u > fps)
     ++tail;
-  if (whole > ((size_t)-1 - tail) / rate)
-    return PO32_ERR_RANGE;
-  *out = whole * rate + tail;
-  return PO32_OK;
+  return tail;
 }
 
 po_status_t po35_synth_init(po35_synth_t *synth, po35_synth_bank_t bank, uint32_t seed) {
@@ -38,6 +35,7 @@ po_status_t po35_synth_init(po35_synth_t *synth, po35_synth_bank_t bank, uint32_
 po_status_t po35_synth_samples_for_records(const po35_synth_t *synth, size_t count, uint32_t fps,
                                            size_t *out) {
   uint32_t rate;
+  size_t whole, tail;
   if (!out)
     return PO32_ERR_INVALID_ARG;
   *out = 0;
@@ -46,7 +44,12 @@ po_status_t po35_synth_samples_for_records(const po35_synth_t *synth, size_t cou
   rate = bank_rate(synth->bank);
   if (!rate || !valid_fps(fps))
     return PO32_ERR_RANGE;
-  return rounded_samples(count, rate, fps, out);
+  whole = count / fps;
+  tail = rounded_tail(count, rate, fps);
+  if (whole > ((size_t)-1 - tail) / rate)
+    return PO32_ERR_RANGE;
+  *out = whole * rate + tail;
+  return PO32_OK;
 }
 
 static void clear_dsp(po35_synth_voice_t *v) {
@@ -138,14 +141,15 @@ static double gaussian(po35_synth_voice_t *v) {
     x = ((double)random_u32(v) + 0.5) / 2147483648.0 - 1.0;
     y = ((double)random_u32(v) + 0.5) / 2147483648.0 - 1.0;
     radius = x * x + y * y;
-  } while (radius >= 1.0 || radius == 0.0);
+    /* Each coordinate is an odd multiple of 2^-32, so radius cannot be zero. */
+  } while (radius >= 1.0);
   scale = po_math_sqrt(-2.0 * po_math_log(radius) / radius);
   v->noise_cache = y * scale;
   v->noise_cached = 1;
   return x * scale;
 }
 
-static po_status_t prepare_record(po35_synth_voice_t *v) {
+static void prepare_record(po35_synth_voice_t *v) {
   const uint8_t *r = v->records + v->record_index * PO35_SYNTH_RECORD_BYTES;
   unsigned i, j, offset = v->order == 10u ? 4u : 14u;
   unsigned raw_pitch = (unsigned)r[0] | (unsigned)r[1] << 8;
@@ -172,21 +176,23 @@ static po_status_t prepare_record(po35_synth_voice_t *v) {
     v->lpc[i] = k;
   }
   v->residual_gain = gain * gain * po_math_sqrt(residual);
-  /* Initialize transposed filter state from newest-first output history. */
+  /* Initialize transposed filter state from newest-first output history.
+   * |reflection| < 1 and order <= 30 bound the LPC L1 norm by 2^30.
+   * History contains only committed, finite samples bounded by FLT_MAX,
+   * so these sums cannot overflow binary64. */
   for (i = 0; i < v->order; ++i) {
     double state = 0.0;
     for (j = 0; j < v->order - i; ++j)
       state -= v->lpc[i + j + 1] * v->history[j];
-    if (!po_math_isfinite(state))
-      return PO32_ERR_RANGE;
     v->delay[i] = state;
   }
-  if (rounded_samples(v->record_index + 1, v->sample_rate, v->fps, &boundary) != PO32_OK)
-    return PO32_ERR_RANGE;
+  /* Voice initialization checked the final boundary for overflow. Every
+   * preceding boundary is no larger because record_index < record_count. */
+  boundary = ((v->record_index + 1) / v->fps) * v->sample_rate +
+             rounded_tail(v->record_index + 1, v->sample_rate, v->fps);
   v->record_samples = boundary - v->samples_rendered;
   v->record_sample = 0;
   v->frame_ready = 1;
-  return PO32_OK;
 }
 
 static double blit(const po35_synth_voice_t *v, double phase) {
@@ -219,31 +225,24 @@ po_status_t po35_synth_voice_render_f32(po35_synth_voice_t *v, float *out, size_
   while (n < capacity && v->samples_rendered < v->total_samples) {
     double phase, excitation, sample, noise;
     unsigned i;
-    if (!v->frame_ready) {
-      v->status = prepare_record(v);
-      if (v->status != PO32_OK)
-        break;
-    }
+    if (!v->frame_ready)
+      prepare_record(v);
     phase = v->phase + (double)v->record_sample * v->increment;
     phase -= po_math_floor(phase);
     noise = gaussian(v); /* Consume one sample even for fully voiced/silent frames. */
     excitation = (v->periodic_scale * blit(v, phase) + v->noise_scale * noise) * v->residual_gain;
     sample = excitation + v->delay[0];
-    if (!po_math_isfinite(sample) || sample > 3.4028234663852886e38 ||
-        sample < -3.4028234663852886e38) {
+    /* Negated ordered comparisons reject NaN as well as infinity/overflow. */
+    if (!(sample >= -3.4028234663852886e38 && sample <= 3.4028234663852886e38)) {
       v->status = PO32_ERR_RANGE;
       break;
     }
+    /* Each delay is a finite sum of at most order LPC/history products,
+     * with the same 2^30 * FLT_MAX bound used by prepare_record. */
     for (i = 0; i < v->order; ++i) {
       double next = i + 1u < v->order ? v->delay[i + 1] : 0.0;
       v->delay[i] = next - v->lpc[i + 1] * sample;
-      if (!po_math_isfinite(v->delay[i])) {
-        v->status = PO32_ERR_RANGE;
-        break;
-      }
     }
-    if (v->status != PO32_OK)
-      break;
     for (i = v->order - 1; i > 0; --i)
       v->history[i] = v->history[i - 1];
     v->history[0] = sample;

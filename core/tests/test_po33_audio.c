@@ -32,6 +32,10 @@ static void test_count(void) {
   assert(status == PO_ERR_RANGE && count == 0);
   status = po33_sample_count_for_pcm((size_t)-1, 48000, &count);
   assert(status == PO_ERR_RANGE && count == 0);
+#if SIZE_MAX > UINT32_MAX
+  status = po33_sample_count_for_pcm(SIZE_MAX / sizeof(float), 8000, &count);
+  assert(status == PO_ERR_RANGE && count == 0);
+#endif
   /* These fit a 32-bit float-array extent but overflow naive ratio products. */
   status = po33_sample_count_for_pcm(1073741823u, 8000, &count);
   assert(status == PO_OK && count == UINT32_C(3145727998));
@@ -71,6 +75,9 @@ static void test_contract(void) {
   status = po33_samples_encode_f32(pcm, 48000, 48000, encoded, sizeof(encoded), &count);
   assert(status == PO_ERR_RANGE && count == 0);
   pcm[47999] = -1.01f;
+  status = po33_samples_encode_f32(pcm, 48000, 48000, encoded, sizeof(encoded), &count);
+  assert(status == PO_ERR_RANGE && count == 0);
+  pcm[47999] = 1.01f;
   status = po33_samples_encode_f32(pcm, 48000, 48000, encoded, sizeof(encoded), &count);
   assert(status == PO_ERR_RANGE && count == 0);
   pcm[47999] = 0.0f;

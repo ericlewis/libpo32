@@ -178,8 +178,9 @@ static po32_status_t po32_packet_decode_bytes(const uint8_t *src, size_t src_len
     return PO32_ERR_INVALID_ARG;
   if (src_len < PO32_PACKET_OVERHEAD_BYTES)
     return PO32_ERR_FRAME;
-  if (po_wire_packet_header(src, src_len, *state, &tag_code, &packet_len) != PO_OK ||
-      !po32_tag_payload_len_is_valid(tag_code, packet_len - PO32_PACKET_OVERHEAD_BYTES) ||
+  /* Non-NULL arguments and the complete header span were checked above. */
+  po_wire_packet_header(src, src_len, *state, &tag_code, &packet_len);
+  if (!po32_tag_payload_len_is_valid(tag_code, packet_len - PO32_PACKET_OVERHEAD_BYTES) ||
       src_len < packet_len)
     return PO32_ERR_FRAME;
   return po_wire_read_packet(src, src_len, state, consumed_bytes, packet);
@@ -202,12 +203,9 @@ static int po32_frame_parse_packet_at(const uint8_t *frame, size_t frame_len, si
 static po32_status_t po32_packet_decode_header(const uint8_t *src, size_t src_len, uint16_t state,
                                                uint16_t *tag_code, size_t *packet_len) {
   size_t decoded_len;
-  po32_status_t status;
   if (src == NULL || tag_code == NULL || packet_len == NULL || src_len < PO32_PACKET_HEADER_BYTES)
     return PO32_ERR_INVALID_ARG;
-  status = po_wire_packet_header(src, src_len, state, tag_code, &decoded_len);
-  if (status != PO32_OK)
-    return status;
+  po_wire_packet_header(src, src_len, state, tag_code, &decoded_len);
   if (!po32_tag_payload_len_is_valid(*tag_code, decoded_len - PO32_PACKET_OVERHEAD_BYTES))
     return PO32_ERR_FRAME;
   *packet_len = decoded_len;

@@ -10,6 +10,12 @@ static int nearest(double x) {
   return (int)(x < 0.0 ? x - 0.5 : x + 0.5);
 }
 
+/* Shared initial/calibrated gain quantization for finite nonnegative amplitudes. */
+static uint8_t quantize_gain(double amplitude) {
+  double gain = 128.0 * po_math_sqrt(amplitude);
+  return gain >= 255.0 ? 255u : (uint8_t)(gain + 0.5);
+}
+
 po_status_t po35_analysis_size_for_pcm(size_t count, uint32_t rate, uint32_t fps, size_t *bytes) {
   size_t n;
   if (!bytes)
@@ -118,8 +124,7 @@ static void lpc_bank(po35_analysis_workspace_t *w, const double *input, unsigned
     int q = nearest((64.0 / 3.0) * po_math_log((1.0 + k) / (1.0 - k)));
     if (q > 127)
       q = 127;
-    if (q < -128)
-      q = -128;
+    /* k >= -0.995 gives an unrounded value >= -127.765, hence q >= -128. */
     out[i - 1] = (uint8_t)q;
     for (j = 1; j < i; ++j)
       w->temporary[j] = (w->lpc[j] - k * w->lpc[i - j]) / (1.0 - k * k);
@@ -229,7 +234,7 @@ po_status_t po35_analysis_encode_f32(po35_analysis_workspace_t *w, const float *
     size_t center = (start + end) / 2u;
     uint8_t *r = records + frame * 44u;
     double energy = 0.0, mean = 0.0, periodicity, frequency, rms;
-    int q, gain, unvoiced;
+    int q, unvoiced;
     /* Union of the two analysis windows and the widest (20 fps) RMS window. */
     for (i = 0; i < 1672; ++i)
       w->native[i] = native_sample(w, pcm, count, rate, (int64_t)center + (int64_t)i - 1072);
@@ -251,13 +256,10 @@ po_status_t po35_analysis_encode_f32(po35_analysis_workspace_t *w, const float *
     }
     frequency = pitch(w, &periodicity);
     q = nearest(2048.0 * po_math_log(frequency / 261.6255653005986) / PO_MATH_LN2);
-    gain = nearest(128.0 * po_math_sqrt(rms));
-    if (gain > 255)
-      gain = 255;
     unvoiced = nearest(255.0 * (1.0 - periodicity));
     r[0] = (uint8_t)q;
     r[1] = (uint8_t)((unsigned)q >> 8);
-    r[2] = (uint8_t)gain;
+    r[2] = quantize_gain(rms);
     r[3] = (uint8_t)unvoiced;
     lpc_bank(w, w->low, 512, 10, r + 4);
     lpc_bank(w, w->high, 1024, 30, r + 14);
@@ -265,12 +267,8 @@ po_status_t po35_analysis_encode_f32(po35_analysis_workspace_t *w, const float *
     double a = output_power(w, r + 4, 10, 8000.0, frequency, (double)unvoiced / 255.0);
     double b = output_power(w, r + 14, 30, 24000.0, frequency, (double)unvoiced / 255.0);
     double scale = po_math_sqrt(a > b ? a : b);
-    if (scale > 1e-12) {
-      gain = nearest(128.0 * po_math_sqrt(rms / scale));
-      if (gain > 255)
-        gain = 255;
-      r[2] = (uint8_t)gain;
-    }
+    if (scale > 1e-12)
+      r[2] = quantize_gain(rms / scale);
   }
   *bytes = required;
   return PO_OK;

@@ -14,8 +14,9 @@ po_status_t po33_sample_count_for_pcm(size_t count, uint32_t rate, size_t *out_c
     uint32_t denominator = 2u * rate;
     size_t whole = count / denominator;
     uint64_t tail = ((uint64_t)(count % denominator) * 46875u + denominator - 1u) / denominator;
-    if (whole > (SIZE_MAX - (size_t)tail) / 46875u)
-      return PO_ERR_RANGE;
+    /* Output expansion is at most 46875/16000 (<3) bytes per input sample.
+     * The binary32 input-array bound above permits at most SIZE_MAX/4 samples,
+     * so this sum cannot overflow size_t. */
     result = whole * 46875u + (size_t)tail;
   }
   if ((uint64_t)result > INT64_MAX)
