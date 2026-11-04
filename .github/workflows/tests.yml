@@ -68,5 +68,16 @@ jobs:
         working-directory: bindings/go
         run: GOEXPERIMENT=cgocheck2 go test -v -race ./...
 
+      - name: Install 32-bit C compiler support
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-multilib
+
+      - name: Test 32-bit Go bindings
+        if: runner.os == 'Linux'
+        working-directory: bindings/go
+        run: GOARCH=386 CGO_ENABLED=1 GOEXPERIMENT=cgocheck2 go test -v ./...
+
       - name: Test standalone Go module
         run: ./scripts/check-go-module.sh
