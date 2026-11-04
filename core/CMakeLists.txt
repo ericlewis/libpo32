@@ -32,6 +32,7 @@ add_library(po32 STATIC
   src/po32.c
   src/po33.c
   src/po33_data.c
+  src/po35.c
   src/po32_patch_import.c
   src/po32_synth.c
 )
@@ -194,6 +195,10 @@ add_executable(po_wire_tests tests/test_po_wire.c)
 target_link_libraries(po_wire_tests PRIVATE po32)
 add_test(NAME po_wire_tests COMMAND po_wire_tests)
 
+add_executable(po35_tests tests/test_po35.c)
+target_link_libraries(po35_tests PRIVATE po32)
+add_test(NAME po35_tests COMMAND po35_tests)
+
 # install
 
 install(TARGETS po32
@@ -207,6 +212,7 @@ install(FILES
   include/po32.h
   include/po_common.h
   include/po33.h
+  include/po35.h
   include/po32_synth.h
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )
