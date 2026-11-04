@@ -1,5 +1,6 @@
 #include "po32.h"
 #include "po32_lut.h"
+#include "po_wire_internal.h"
 
 #define PO32_PI 3.14159265358979323846f
 
@@ -149,135 +150,39 @@ const char *po32_tag_name(uint16_t tag_code) {
 }
 
 uint16_t po32_crc_mix_state(uint16_t state, uint8_t x) {
-  uint16_t masked = (uint16_t)(x & 0xFFu);
-
-  return (uint16_t)((((uint32_t)state << 8) | masked) ^ ((uint32_t)masked << 12) ^
-                    ((uint32_t)masked << 5));
+  return po_wire_crc_mix_state(state, x);
 }
 
 uint16_t po32_crc_update(uint16_t state, uint8_t raw_byte) {
-  uint8_t x = (uint8_t)(((raw_byte & 0xFFu) ^ (state >> 8)) & 0xFFu);
-
-  x ^= (uint8_t)(x >> 4);
-  return po32_crc_mix_state(state, x);
+  return po_wire_crc_update(state, raw_byte);
 }
 
 uint8_t po32_whiten_byte(uint16_t state, uint8_t raw_byte) {
-  return (uint8_t)((raw_byte + (state & 0xFFu)) & 0xFFu);
+  return po_wire_whiten(state, raw_byte);
 }
 
 uint8_t po32_unwhiten_byte(uint16_t state, uint8_t coded_byte) {
-  return (uint8_t)((coded_byte - (state & 0xFFu)) & 0xFFu);
+  return po_wire_unwhiten(state, coded_byte);
 }
 
 static po32_status_t po32_final_tail_decode(uint16_t state, const uint8_t *data, size_t len,
                                             po32_final_tail_t *tail, size_t *consumed) {
-  uint8_t raw1, raw2, raw4, raw5, x;
-  uint16_t state1, state2, state3, state4, state5;
-
-  if (data == NULL || len < PO32_FINAL_TAIL_BYTES) {
-    return PO32_ERR_INVALID_ARG;
-  }
-
-  raw1 = po32_unwhiten_byte(state, data[0]);
-  state1 = po32_crc_update(state, raw1);
-  raw2 = po32_unwhiten_byte(state1, data[1]);
-  state2 = po32_crc_update(state1, raw2);
-
-  if (raw1 != PO32_TAIL_MARKER_1 || raw2 != PO32_TAIL_MARKER_2 ||
-      data[2] != (uint8_t)(state2 & 0xFFu)) {
-    return PO32_ERR_FRAME;
-  }
-
-  x = (uint8_t)(((state2 >> 12) ^ (state2 >> 8)) & 0xFFu);
-  state3 = po32_crc_mix_state(state2, x);
-  raw4 = po32_unwhiten_byte(state3, data[3]);
-  state4 = po32_crc_update(state3, raw4);
-  raw5 = po32_unwhiten_byte(state4, data[4]);
-  state5 = po32_crc_update(state4, raw5);
-
-  if (raw4 != (uint8_t)(state3 & 0xFFu) || raw5 != (uint8_t)((state3 >> 8) & 0xFFu)) {
-    return PO32_ERR_FRAME;
-  }
-
-  if (tail != NULL) {
-    *tail = (po32_final_tail_t){
-        .marker_c3 = raw1,
-        .marker_71 = raw2,
-        .special_byte = data[2],
-        .final_lo = raw4,
-        .final_hi = raw5,
-        .state_before_special = state2,
-        .state_after_special = state3,
-        .final_state = state5,
-    };
-  }
-  if (consumed != NULL) {
-    *consumed = PO32_FINAL_TAIL_BYTES;
-  }
-
-  return PO32_OK;
+  return po_wire_read_tail(state, data, len, tail, consumed);
 }
 
 static po32_status_t po32_packet_decode_bytes(const uint8_t *src, size_t src_len, uint16_t *state,
                                               size_t *consumed_bytes, po32_packet_t *packet) {
-  size_t pos = 0u;
-  uint16_t s;
-  uint8_t tag_lo, tag_hi, payload_len, trailer_lo, trailer_hi;
-  uint16_t tag_code, packet_state;
-
-  if (src == NULL || state == NULL || packet == NULL || consumed_bytes == NULL) {
+  uint16_t tag_code;
+  size_t packet_len;
+  if (src == NULL || state == NULL || packet == NULL || consumed_bytes == NULL)
     return PO32_ERR_INVALID_ARG;
-  }
-
-  s = *state;
   if (src_len < PO32_PACKET_OVERHEAD_BYTES)
     return PO32_ERR_FRAME;
-
-  tag_lo = po32_unwhiten_byte(s, src[pos++]);
-  s = po32_crc_update(s, tag_lo);
-  tag_hi = po32_unwhiten_byte(s, src[pos++]);
-  s = po32_crc_update(s, tag_hi);
-  tag_code = (uint16_t)tag_lo | (uint16_t)((uint16_t)tag_hi << 8);
-
-  payload_len = po32_unwhiten_byte(s, src[pos++]);
-  s = po32_crc_update(s, payload_len);
-
-  if (!po32_tag_payload_len_is_valid(tag_code, payload_len))
+  if (po_wire_packet_header(src, src_len, *state, &tag_code, &packet_len) != PO_OK ||
+      !po32_tag_payload_len_is_valid(tag_code, packet_len - PO32_PACKET_OVERHEAD_BYTES) ||
+      src_len < packet_len)
     return PO32_ERR_FRAME;
-  if (src_len < PO32_PACKET_HEADER_BYTES + (size_t)payload_len + PO32_PACKET_TRAILER_BYTES) {
-    return PO32_ERR_FRAME;
-  }
-
-  packet->tag_code = tag_code;
-  packet->payload_len = payload_len;
-
-  for (size_t i = 0u; i < payload_len; ++i) {
-    uint8_t raw = po32_unwhiten_byte(s, src[pos + i]);
-    packet->payload[i] = raw;
-    s = po32_crc_update(s, raw);
-  }
-  pos += payload_len;
-
-  packet_state = s;
-  trailer_lo = po32_unwhiten_byte(s, src[pos++]);
-  s = po32_crc_update(s, trailer_lo);
-  trailer_hi = po32_unwhiten_byte(s, src[pos++]);
-  s = po32_crc_update(s, trailer_hi);
-
-  if (trailer_lo != (uint8_t)(packet_state & 0xFFu) ||
-      trailer_hi != (uint8_t)((packet_state >> 8) & 0xFFu)) {
-    return PO32_ERR_FRAME;
-  }
-
-  packet->trailer.lo = trailer_lo;
-  packet->trailer.hi = trailer_hi;
-  packet->trailer.state = packet_state;
-  packet->trailer.matches_state = 1;
-
-  *consumed_bytes = pos;
-  *state = s;
-  return PO32_OK;
+  return po_wire_read_packet(src, src_len, state, consumed_bytes, packet);
 }
 
 /* ── frame parsing ──────────────────────────────────────────────── */
@@ -296,24 +201,16 @@ static int po32_frame_parse_packet_at(const uint8_t *frame, size_t frame_len, si
 
 static po32_status_t po32_packet_decode_header(const uint8_t *src, size_t src_len, uint16_t state,
                                                uint16_t *tag_code, size_t *packet_len) {
-  uint8_t tag_lo, tag_hi, payload_len;
-
-  if (src == NULL || tag_code == NULL || packet_len == NULL || src_len < PO32_PACKET_HEADER_BYTES) {
+  size_t decoded_len;
+  po32_status_t status;
+  if (src == NULL || tag_code == NULL || packet_len == NULL || src_len < PO32_PACKET_HEADER_BYTES)
     return PO32_ERR_INVALID_ARG;
-  }
-
-  tag_lo = po32_unwhiten_byte(state, src[0]);
-  state = po32_crc_update(state, tag_lo);
-  tag_hi = po32_unwhiten_byte(state, src[1]);
-  state = po32_crc_update(state, tag_hi);
-  payload_len = po32_unwhiten_byte(state, src[2]);
-
-  *tag_code = (uint16_t)tag_lo | (uint16_t)((uint16_t)tag_hi << 8);
-  if (!po32_tag_payload_len_is_valid(*tag_code, payload_len)) {
+  status = po_wire_packet_header(src, src_len, state, tag_code, &decoded_len);
+  if (status != PO32_OK)
+    return status;
+  if (!po32_tag_payload_len_is_valid(*tag_code, decoded_len - PO32_PACKET_OVERHEAD_BYTES))
     return PO32_ERR_FRAME;
-  }
-
-  *packet_len = PO32_PACKET_HEADER_BYTES + (size_t)payload_len + PO32_PACKET_TRAILER_BYTES;
+  *packet_len = decoded_len;
   return PO32_OK;
 }
 
@@ -358,15 +255,11 @@ po32_status_t po32_frame_parse(const uint8_t *frame, size_t frame_len,
 /* ── frame building ─────────────────────────────────────────────── */
 
 static po32_status_t po32_builder_write_byte(po32_builder_t *builder, uint8_t raw_byte) {
-  if (builder == NULL || builder->buffer == NULL) {
+  if (builder == NULL || builder->buffer == NULL)
     return PO32_ERR_INVALID_ARG;
-  }
-  if (builder->length >= builder->capacity) {
+  if (builder->length >= builder->capacity)
     return PO32_ERR_BUFFER_TOO_SMALL;
-  }
-
-  builder->buffer[builder->length++] = po32_whiten_byte(builder->state, raw_byte);
-  builder->state = po32_crc_update(builder->state, raw_byte);
+  po_wire_write_byte(builder->buffer, &builder->length, &builder->state, raw_byte);
   return PO32_OK;
 }
 
@@ -651,10 +544,7 @@ po32_status_t po32_builder_append_packet(po32_builder_t *builder, uint16_t tag_c
 /* Caller must ensure capacity. Only invoked from po32_builder_finish after
    the capacity pre-check guarantees PO32_FINAL_TAIL_BYTES bytes remain. */
 static void po32_final_tail_emit_special_byte(po32_builder_t *builder) {
-  uint8_t x;
-  builder->buffer[builder->length++] = (uint8_t)(builder->state & 0xFFu);
-  x = (uint8_t)(((builder->state >> 12) ^ (builder->state >> 8)) & 0xFFu);
-  builder->state = po32_crc_mix_state(builder->state, x);
+  po_wire_write_special(builder->buffer, &builder->length, &builder->state);
 }
 
 po32_status_t po32_builder_finish(po32_builder_t *builder, size_t *frame_len) {

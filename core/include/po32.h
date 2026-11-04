@@ -8,8 +8,7 @@
  * of PO-32 acoustic transfers.
  */
 
-#include <stddef.h>
-#include <stdint.h>
+#include "po_common.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -20,7 +19,6 @@ extern "C" {
  * ══════════════════════════════════════════════════════════ */
 
 #define PO32_PREAMBLE_BYTES                 128
-#define PO32_INITIAL_STATE                  0x1D0Fu
 #define PO32_NATIVE_BAUD                    1201.923076923077f /* 14 MHz / 11648 */
 #define PO32_DPSK_CARRIER_CYCLES_PER_SYMBOL 3
 #define PO32_NATIVE_CARRIER_HZ              (PO32_NATIVE_BAUD * (float)PO32_DPSK_CARRIER_CYCLES_PER_SYMBOL)
@@ -32,8 +30,6 @@ extern "C" {
 #define PO32_PATTERN_RESERVED_COUNT         16
 #define PO32_PATTERN_PAYLOAD_BYTES          211
 #define PO32_PATCH_PAYLOAD_BYTES            43
-#define PO32_MAX_PAYLOAD                    255
-#define PO32_FINAL_TAIL_BYTES               5
 
 #define PO32_TAG_PATCH   0x37B2u
 #define PO32_TAG_RESET   0x4AB4u
@@ -45,15 +41,6 @@ extern "C" {
 /* ══════════════════════════════════════════════════════════
  * Types
  * ══════════════════════════════════════════════════════════ */
-
-typedef enum po32_status {
-  PO32_OK = 0,
-  PO32_ERR_INVALID_ARG = -1,
-  PO32_ERR_RANGE = -2,
-  PO32_ERR_BUFFER_TOO_SMALL = -3,
-  PO32_ERR_FRAME = -4,
-  PO32_ERR_PARSE = -5
-} po32_status_t;
 
 typedef enum po32_patch_side { PO32_PATCH_LEFT = 0, PO32_PATCH_RIGHT = 1 } po32_patch_side_t;
 
@@ -72,40 +59,6 @@ typedef struct po32_patch_params {
   float Mix, DistAmt, EQFreq, EQGain;
   float Level, OscVel, NVel, ModVel;
 } po32_patch_params_t;
-
-typedef struct po32_packet_trailer {
-  uint8_t lo, hi;
-  uint16_t state;
-  int matches_state;
-} po32_packet_trailer_t;
-
-typedef struct po32_packet {
-  uint16_t tag_code;
-  size_t offset;
-  size_t payload_len;
-  uint8_t payload[PO32_MAX_PAYLOAD]; /* owned copy — safe to keep after callback returns */
-  po32_packet_trailer_t trailer;
-} po32_packet_t;
-
-typedef struct po32_final_tail {
-  uint8_t marker_c3, marker_71;
-  uint8_t special_byte;
-  uint8_t final_lo, final_hi;
-  uint16_t state_before_special;
-  uint16_t state_after_special;
-  uint16_t final_state;
-} po32_final_tail_t;
-
-/*
- * Packet callback for po32_frame_parse() and po32_demodulator_push(). The
- * packet struct (including its payload array) is owned and safe to keep after
- * the callback returns. packet->offset is the packet's byte offset within the
- * full transmitted frame, counting the 128-byte preamble, from both callers
- * and from po32_builder_append_packet().
- * Return 0 to continue parsing, nonzero to stop early. Stopping is terminal
- * for the streaming demodulator — see po32_demodulator_push().
- */
-typedef int (*po32_packet_callback_t)(const po32_packet_t *packet, void *user);
 
 typedef struct po32_builder {
   uint8_t *buffer;
