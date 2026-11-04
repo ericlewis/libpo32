@@ -19,7 +19,8 @@ import (
 // Its state is C-owned. Call Close when finished; a finalizer is a fallback.
 // A Demodulator must not be copied or used concurrently without external
 // synchronization. Callbacks may query progress or Close the demodulator,
-// but must not recursively Push, Flush, or Desync it.
+// but must not recursively Push, Flush, or Desync it. Callback panics propagate;
+// a panic or runtime.Goexit in a callback closes the demodulator.
 type Demodulator struct {
 	cDemod       *C.po32_demodulator_t
 	active       bool
@@ -59,9 +60,11 @@ func (d *Demodulator) Close() {
 	}
 }
 
-func (d *Demodulator) endCall() {
+func (d *Demodulator) endCall(returned bool) {
 	d.active = false
-	if d.closePending {
+	// Callback unwinding skips the C decoder's state commit. Release that
+	// partially updated state instead of permitting another decoding call.
+	if !returned || d.closePending {
 		d.Close()
 	}
 }
@@ -95,9 +98,12 @@ func (d *Demodulator) Push(samples []float32, fn func(*Packet) bool) error {
 	}
 	defer cleanup()
 	d.active = true
-	defer d.endCall()
-	return statusToError(int(C.go_po32_demodulator_push(d.cDemod,
-		(*C.float)(unsafe.Pointer(&samples[0])), C.size_t(len(samples)), handle)))
+	returned := false
+	defer func() { d.endCall(returned) }()
+	status := C.go_po32_demodulator_push(d.cDemod,
+		(*C.float)(unsafe.Pointer(&samples[0])), C.size_t(len(samples)), handle)
+	returned = true
+	return statusToError(int(status))
 }
 
 // Flush resolves a pending final symbol after the last audio chunk. It is
@@ -118,8 +124,10 @@ func (d *Demodulator) Flush(fn func(*Packet) bool) error {
 	}
 	defer cleanup()
 	d.active = true
-	defer d.endCall()
+	returned := false
+	defer func() { d.endCall(returned) }()
 	C.go_po32_demodulator_flush(d.cDemod, handle)
+	returned = true
 	return nil
 }
 
