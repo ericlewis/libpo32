@@ -4,8 +4,8 @@ Run commands from the repo root unless a step says otherwise.
 
 ## Scope
 
-The release covers the freestanding C library and the existing PO-32 Go
-binding. The repository, legacy package names and library filename still use
+The release covers the freestanding C library and its model-specific Go
+packages. The repository, legacy package names and library filename still use
 `libpo32`; the current umbrella CMake package is `LibPO`.
 
 | Path | Role |
@@ -15,7 +15,7 @@ binding. The repository, legacy package names and library filename still use
 | `core/examples/` | Hosted WAV tools, template editors and PO-32 demos |
 | `core/tests/` | Family codecs, audio processing, preservation and package checks |
 | `core/fuzz/` | Existing PO-32 libFuzzer harnesses |
-| `bindings/go/` | Existing PO-32 Go binding |
+| `bindings/go/` | One Go module with PO-32, PO-33/133, PO-35/137 and stereo packages |
 
 ## Checklist
 
@@ -25,8 +25,10 @@ binding. The repository, legacy package names and library filename still use
    `./scripts/check-version-sync.sh`
 4. Run the core verification suite:
    `./scripts/ci-verify.sh core`
-5. Run the existing Go binding tests:
-   `(cd bindings/go && go test -race ./...)`
+5. Refresh and verify the bundled C sources with `./scripts/sync-go-core.sh`
+   and `./scripts/sync-go-core.sh --check`. Run Go checks:
+   `(cd bindings/go && GOEXPERIMENT=cgocheck2 go test -race ./...)`
+   and `./scripts/check-go-module.sh`.
 6. Review release-facing docs and versions:
    `README.md`
    `core/docs/ARCHITECTURE.md`
@@ -45,9 +47,8 @@ binding. The repository, legacy package names and library filename still use
 
 ## Notes
 
-- Consult `core/docs/C_API.md` for the native API surface. The existing Go
-  binding remains PO-32-only and does not wrap the new families or the
-  streaming decoder and synth voice.
+- Consult `core/docs/C_API.md` for the native API surface and
+  `core/docs/BINDINGS.md` for Go package coverage and migration notes.
 - Keep software validation separate from physical-device acceptance in release
   notes. The stereo-family transfers and approximate speech model are not
   hardware-validated.

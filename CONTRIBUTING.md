@@ -93,6 +93,12 @@ AddressSanitizer and UndefinedBehaviorSanitizer.
 every harness in [`core/fuzz`](core/fuzz/README.md); set
 `PO32_FUZZ_SECONDS` for a longer run.
 
+After changing canonical C sources or headers, run `./scripts/sync-go-core.sh`
+to refresh the generated sources in the standalone Go module. Verify them with
+`./scripts/sync-go-core.sh --check`, run `(cd bindings/go && go test -race ./...)`,
+and use `./scripts/check-go-module.sh` to test an isolated module and consumer.
+Do not edit the generated C copies directly.
+
 For locally supplied PO-33/35 family captures, see the
 [offline capture checks](core/examples/README.md#offline-capture-checks).
 
