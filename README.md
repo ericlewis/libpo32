@@ -116,6 +116,19 @@ The legacy `LibPO32::po32` and `pkg-config po32` interfaces remain available.
 The build target is `po32`, producing `libpo32.a` on Unix. Existing PO-32 public
 names, layouts and status values are preserved.
 
+### Go
+
+One Go module contains `po32`, `po33`, `po35`, and `stereo` packages. The root
+`libpo` package provides shared packets and errors. The module includes its C
+sources and requires Go 1.26.1 or newer, cgo, and a C99 compiler.
+
+```go
+import "github.com/ericlewis/libpo32/bindings/go/po33"
+```
+
+The old root PO-32 API moved to the `/po32` package. See the
+[Go binding guide](core/docs/BINDINGS.md) for migration, ownership, and testing.
+
 ## Examples
 
 | Command | Purpose |
@@ -164,7 +177,7 @@ Additional hosted tools:
 | [C API](core/docs/C_API.md) | C function reference |
 | [Synth](core/docs/SYNTH.md) | Synthesizer signal path |
 | [Patch Parameters](core/docs/PATCH_PARAMETERS.md) | The 21 parameters |
-| [Bindings](core/docs/BINDINGS.md) | Existing PO-32 Go binding conventions |
+| [Bindings](core/docs/BINDINGS.md) | Go model packages, migration and ownership |
 | [Examples](core/examples/README.md) | Supported example programs |
 | [Fuzzing](core/fuzz/README.md) | Fuzz harnesses and differential properties |
 | [Contributing](CONTRIBUTING.md) | Local setup, checks, and commit conventions |
@@ -179,7 +192,7 @@ Additional hosted tools:
 | [`core/tests`](core/tests) | Core test coverage |
 | [`core/fuzz`](core/fuzz) | Existing PO-32 libFuzzer harnesses |
 | [`core/docs`](core/docs) | Architecture, protocol, and API notes |
-| [`bindings/go`](bindings/go) | Existing PO-32 Go binding (cgo) |
+| [`bindings/go`](bindings/go) | One Go module for all supported families (cgo) |
 
 ## Contributing
 

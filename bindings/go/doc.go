@@ -1,11 +1,8 @@
-// Package po32 provides Go bindings for the libpo32 PO-32 acoustic codec.
+// Package libpo provides shared packet types and status errors for libpo's
+// model-specific Go packages: po32, po33, po35, and stereo.
 //
-// The package wraps the C core to provide transfer frame building, packet
-// encode/decode, DPSK audio rendering, audio decoding, and drum synthesis.
-//
-// Builder and Modulator allocate C memory internally and implement Close
-// for cleanup. A runtime finalizer is set as a safety net, but callers
-// should use defer Close() for deterministic cleanup.
-//
-// All other functions and types use Go-managed memory exclusively.
-package po32
+// The module bundles the C core and requires cgo and a C99 compiler. Each model
+// package keeps its own data format and synthesis APIs. None controls audio
+// devices or reads WAV files. Successful software decoding does not establish
+// physical-device acceptance of a generated transfer.
+package libpo

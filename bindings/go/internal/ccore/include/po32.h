@@ -1,0 +1,350 @@
+#ifndef PO32_PO32_H
+#define PO32_PO32_H
+
+/*
+ * PO-32 acoustic codec.
+ *
+ * C core for framing, packet encode/decode, rendering, and decode
+ * of PO-32 acoustic transfers.
+ */
+
+#include "po_common.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/* ══════════════════════════════════════════════════════════
+ * Protocol constants
+ * ══════════════════════════════════════════════════════════ */
+
+#define PO32_PREAMBLE_BYTES                 128
+#define PO32_NATIVE_BAUD                    1201.923076923077f /* 14 MHz / 11648 */
+#define PO32_DPSK_CARRIER_CYCLES_PER_SYMBOL 3
+#define PO32_NATIVE_CARRIER_HZ              (PO32_NATIVE_BAUD * (float)PO32_DPSK_CARRIER_CYCLES_PER_SYMBOL)
+#define PO32_NATIVE_BLOCK_SIZE              64
+#define PO32_PARAM_COUNT                    21
+#define PO32_STATE_MORPH_PAIR_COUNT         16
+#define PO32_PATTERN_LANE_COUNT             4
+#define PO32_PATTERN_STEP_COUNT             16
+#define PO32_PATTERN_RESERVED_COUNT         16
+#define PO32_PATTERN_PAYLOAD_BYTES          211
+#define PO32_PATCH_PAYLOAD_BYTES            43
+
+#define PO32_TAG_PATCH   0x37B2u
+#define PO32_TAG_RESET   0x4AB4u
+#define PO32_TAG_PATTERN 0xD022u
+#define PO32_TAG_ERASE   0xB892u
+#define PO32_TAG_STATE   0x505Au
+#define PO32_TAG_KNOB    0xA354u
+
+/* ══════════════════════════════════════════════════════════
+ * Types
+ * ══════════════════════════════════════════════════════════ */
+
+typedef enum po32_patch_side { PO32_PATCH_LEFT = 0, PO32_PATCH_RIGHT = 1 } po32_patch_side_t;
+
+typedef enum po32_knob_kind { PO32_KNOB_PITCH = 0, PO32_KNOB_MORPH = 1 } po32_knob_kind_t;
+
+typedef struct po32_morph_pair {
+  uint8_t flag;
+  uint8_t morph;
+} po32_morph_pair_t;
+
+typedef struct po32_patch_params {
+  float OscWave, OscFreq, OscAtk, OscDcy;
+  float ModMode, ModRate, ModAmt;
+  float NFilMod, NFilFrq, NFilQ;
+  float NEnvMod, NEnvAtk, NEnvDcy;
+  float Mix, DistAmt, EQFreq, EQGain;
+  float Level, OscVel, NVel, ModVel;
+} po32_patch_params_t;
+
+typedef struct po32_builder {
+  uint8_t *buffer;
+  size_t capacity;
+  size_t length;
+  uint16_t state;
+  int finished;
+} po32_builder_t;
+
+/* ══════════════════════════════════════════════════════════
+ * Protocol primitives
+ * ══════════════════════════════════════════════════════════ */
+
+/* Return the static 128-byte preamble used by all transmitted frames. */
+const uint8_t *po32_preamble_bytes(void);
+
+/* Human-readable name for a known tag code, or "unknown". */
+const char *po32_tag_name(uint16_t tag_code);
+
+/* Update and whitening helpers used by the on-wire format. */
+uint16_t po32_crc_mix_state(uint16_t state, uint8_t x);
+uint16_t po32_crc_update(uint16_t state, uint8_t raw_byte);
+uint8_t po32_whiten_byte(uint16_t state, uint8_t raw_byte);
+uint8_t po32_unwhiten_byte(uint16_t state, uint8_t coded_byte);
+
+/* ══════════════════════════════════════════════════════════
+ * Frame parser (RX: frame bytes → packets)
+ * ══════════════════════════════════════════════════════════ */
+
+/*
+ * Parse a full transmitted frame.
+ *
+ * The callback receives borrowed packet pointers in wire order; copy the
+ * packet struct to retain it. Returning nonzero stops parsing with PO32_OK
+ * before validating the remainder. Validated packets may be delivered before
+ * a later error. out_tail is written only when a valid final tail is reached,
+ * and is unchanged on early stop or error. Bytes after the tail are ignored.
+ */
+po32_status_t po32_frame_parse(const uint8_t *frame, size_t frame_len,
+                               po32_packet_callback_t callback, void *user,
+                               po32_final_tail_t *out_tail);
+
+/* ══════════════════════════════════════════════════════════
+ * Frame builder (TX: packets → frame bytes)
+ * ══════════════════════════════════════════════════════════ */
+
+/* Initialize a frame builder over caller-owned storage. */
+void po32_builder_init(po32_builder_t *builder, uint8_t *buffer, size_t capacity);
+
+/* Reset the builder and write the preamble back to the output buffer. */
+void po32_builder_reset(po32_builder_t *builder);
+
+/* Encode and append one raw packet payload to the frame. */
+po32_status_t po32_builder_append_packet(po32_builder_t *builder, uint16_t tag_code,
+                                         const uint8_t *payload, size_t payload_len,
+                                         size_t *packet_offset);
+
+/* Emit the final five-byte tail and return the full frame length. */
+po32_status_t po32_builder_finish(po32_builder_t *builder, size_t *frame_len);
+
+/* Append an already-decoded packet struct. */
+po32_status_t po32_builder_append(po32_builder_t *builder, const po32_packet_t *pkt);
+
+/* Initialize helpers for common packet defaults. */
+void po32_patch_params_zero(po32_patch_params_t *params);
+void po32_morph_pairs_default(po32_morph_pair_t *pairs, size_t pair_count);
+
+/*
+ * Parse an `.mtdrum` patch text blob into the normalized
+ * 21-parameter PO-32 patch representation.
+ *
+ * This is a low-level text importer only: callers own file I/O and text
+ * decoding, then pass the UTF-8 contents here.
+ */
+po32_status_t po32_patch_parse_mtdrum_text(const char *text, size_t text_len,
+                                           po32_patch_params_t *out);
+
+/* ══════════════════════════════════════════════════════════
+ * Packet encode/decode
+ * ══════════════════════════════════════════════════════════ */
+
+typedef struct po32_patch_packet {
+  uint8_t instrument;         /* 1-16 */
+  po32_patch_side_t side;     /* left or right morph endpoint */
+  po32_patch_params_t params; /* 21 normalized float parameters */
+} po32_patch_packet_t;
+
+typedef struct po32_knob_packet {
+  uint8_t instrument;    /* 1-16 */
+  po32_knob_kind_t kind; /* pitch or morph */
+  uint8_t value;         /* 0-255 */
+} po32_knob_packet_t;
+
+typedef struct po32_reset_packet {
+  uint8_t instrument; /* 1-16 */
+} po32_reset_packet_t;
+
+typedef struct po32_state_packet {
+  po32_morph_pair_t morph_pairs[PO32_STATE_MORPH_PAIR_COUNT];
+  uint8_t tempo;
+  uint8_t swing_times_12;
+  uint8_t pattern_numbers[PO32_PATTERN_STEP_COUNT];
+  size_t pattern_count;
+} po32_state_packet_t;
+
+typedef struct po32_pattern_step {
+  uint8_t instrument; /* 1-16, or 0 = empty */
+  uint8_t fill_rate;  /* 1-15 when active */
+  int accent;         /* from trigger byte 0x80 */
+} po32_pattern_step_t;
+
+typedef struct po32_pattern_packet {
+  uint8_t pattern_number;
+  /* Decoded per-lane-step triggers. Populated by decode, consumed by encode. */
+  po32_pattern_step_t steps[PO32_PATTERN_LANE_COUNT * PO32_PATTERN_STEP_COUNT];
+  /* Wire order is per lane: 16 trigger bytes, then 16 morph pairs, repeated 4 times. */
+  po32_morph_pair_t morph_lanes[PO32_PATTERN_LANE_COUNT * PO32_PATTERN_STEP_COUNT];
+  uint8_t reserved[PO32_PATTERN_RESERVED_COUNT];
+  uint16_t accent_bits;
+} po32_pattern_packet_t;
+
+/*
+ * Pattern builder and trigger helpers.
+ *
+ * Instruments are grouped into four fixed trigger lanes:
+ * lane 0 -> 1, 5, 9, 13
+ * lane 1 -> 2, 6, 10, 14
+ * lane 2 -> 3, 7, 11, 15
+ * lane 3 -> 4, 8, 12, 16
+ */
+/* Reset all pattern data and set the target pattern number. */
+void po32_pattern_init(po32_pattern_packet_t *pattern, uint8_t pattern_number);
+/* Clear all step data while preserving pattern_number. */
+void po32_pattern_clear(po32_pattern_packet_t *pattern);
+/* Set or replace the trigger on the instrument's fixed lane at one step. */
+po32_status_t po32_pattern_set_trigger(po32_pattern_packet_t *pattern, uint8_t step_index,
+                                       uint8_t instrument, uint8_t fill_rate);
+/* Clear one lane at one step. */
+po32_status_t po32_pattern_clear_trigger(po32_pattern_packet_t *pattern, uint8_t step_index,
+                                         uint8_t lane_index);
+/* Clear all four lanes at one step. */
+po32_status_t po32_pattern_clear_step(po32_pattern_packet_t *pattern, uint8_t step_index);
+/* Accent is step-wide: enabling or disabling it updates all active lanes there. */
+po32_status_t po32_pattern_set_accent(po32_pattern_packet_t *pattern, uint8_t step_index,
+                                      int enabled);
+po32_status_t po32_pattern_trigger_lane(uint8_t instrument, uint8_t *out_lane);
+po32_status_t po32_pattern_trigger_encode(uint8_t instrument, uint8_t fill_rate, int accent,
+                                          uint8_t *out_trigger);
+po32_status_t po32_pattern_trigger_decode(uint8_t lane_index, uint8_t trigger,
+                                          uint8_t *out_instrument, uint8_t *out_fill_rate,
+                                          int *out_accent);
+
+/* Encode/decode between typed packet structs and wire payloads. */
+po32_status_t po32_packet_encode(uint16_t tag, const void *pkt, po32_packet_t *out);
+po32_status_t po32_packet_decode(uint16_t tag, const uint8_t *data, size_t len, void *out);
+
+/* Convenience helpers for the raw 21-parameter patch byte format. */
+po32_status_t po32_encode_patch(const po32_patch_params_t *params, uint8_t *out,
+                                size_t out_capacity, size_t *out_len);
+po32_status_t po32_decode_patch(const uint8_t *data, size_t len, po32_patch_params_t *out);
+
+/* ══════════════════════════════════════════════════════════
+ * DPSK renderer (TX: frame bytes → audio)
+ * ══════════════════════════════════════════════════════════ */
+
+typedef struct po32_modulator {
+  const uint8_t *frame;
+  size_t frame_len;
+  size_t total_bits;
+  size_t total_samples;
+  size_t sample_index;
+  size_t bit_cursor;
+  float sample_rate;
+  float symbol_phase;
+  float symbols_per_sample;
+  float osc_sin, osc_cos;
+  float rot_sin, rot_cos;
+  int state;
+} po32_modulator_t;
+
+/* Number of mono float samples needed to render a frame at sample_rate. */
+size_t po32_render_sample_count(size_t frame_len, uint32_t sample_rate);
+
+/* Initialize or reset the streaming modulator state over a caller-owned frame buffer. */
+void po32_modulator_init(po32_modulator_t *m, const uint8_t *frame, size_t frame_len,
+                         uint32_t sample_rate);
+void po32_modulator_reset(po32_modulator_t *m);
+
+/* Query streaming render progress. */
+size_t po32_modulator_samples_remaining(const po32_modulator_t *m);
+int po32_modulator_done(const po32_modulator_t *m);
+
+/* Render the next chunk of mono float samples in [-1, 1]. */
+po32_status_t po32_modulator_render_f32(po32_modulator_t *m, float *out_samples,
+                                        size_t out_capacity, size_t *out_len);
+
+/* Render a full transmitted frame to mono float samples in [-1, 1]. */
+po32_status_t po32_render_dpsk_f32(const uint8_t *frame, size_t frame_len, uint32_t sample_rate,
+                                   float *out_samples, size_t out_sample_count);
+
+/* ══════════════════════════════════════════════════════════
+ * Decode (RX: audio → normalized frame bytes)
+ * ══════════════════════════════════════════════════════════ */
+
+#define PO32_DEMOD_WORK_SIZE 280
+
+typedef struct po32_demodulator {
+  float sample_rate;
+  float osc_sin, osc_cos;
+  float rot_sin, rot_cos;
+  float accum_i, accum_q;
+  float prev_i, prev_q;
+  float symbol_phase;
+  float symbols_per_sample;
+  int started;
+  uint64_t sync_window;
+  uint64_t sync_pattern;
+  int synced;
+  uint8_t current_byte;
+  uint8_t bits_in_byte;
+  size_t byte_offset;
+  uint16_t crc_state;
+  uint8_t work[PO32_DEMOD_WORK_SIZE];
+  size_t work_len;
+  int packet_count;
+  int done;
+  int stopped;
+  po32_final_tail_t tail;
+} po32_demodulator_t;
+
+/* Initialize streaming demodulator for a sample rate. */
+void po32_demodulator_init(po32_demodulator_t *d, float sample_rate);
+
+/* Reset demodulator sync state. */
+void po32_demodulator_desync(po32_demodulator_t *d);
+
+/* Push a chunk of mono float audio. Callback invoked on each decoded packet.
+   May be called repeatedly with successive chunks.
+
+   po32_demodulator_packet_count() counts packets since the most recent sync
+   acquisition and resets when sync is reacquired. Each packet is committed
+   before its callback runs, including the packet that stops the stream.
+
+   A nonzero callback return stops the stream for good: the unconsumed
+   remainder of the chunk is discarded and later pushes with non-NULL d and
+   samples are no-ops returning PO32_OK. Stopping is terminal because push
+   reports neither how many samples it consumed nor where it stopped, so the
+   discarded audio could not be re-fed. Reuse a stopped demodulator with
+   po32_demodulator_init(); po32_demodulator_desync() no more clears the stop
+   than it clears po32_demodulator_done(). */
+po32_status_t po32_demodulator_push(po32_demodulator_t *d, const float *samples, size_t count,
+                                    po32_packet_callback_t callback, void *user);
+
+/* Signal end-of-audio: resolve a final symbol still pending in the correlator.
+   The last bit of a frame is decided at the symbol boundary just past the last
+   rendered sample, so a capture that ends exactly at po32_render_sample_count()
+   samples needs this to finish. Call once after the final chunk has been
+   pushed, then query po32_demodulator_done(). A no-op when already done, not
+   yet synced, or when the pending symbol's estimated phase is less than half
+   a symbol. This avoids decisions from near-empty correlation windows; it
+   does not guarantee rejection of every truncated capture. */
+void po32_demodulator_flush(po32_demodulator_t *d, po32_packet_callback_t callback, void *user);
+
+/* Query streaming decode progress. */
+int po32_demodulator_done(const po32_demodulator_t *d);
+int po32_demodulator_stopped(const po32_demodulator_t *d);
+int po32_demodulator_packet_count(const po32_demodulator_t *d);
+const po32_final_tail_t *po32_demodulator_tail(const po32_demodulator_t *d);
+
+typedef struct po32_decode_result {
+  int packet_count;
+  int done;
+  po32_final_tail_t tail;
+} po32_decode_result_t;
+
+/*
+ * One-shot convenience decode.
+ *
+ * Reconstructs a normalized frame in out_frame from mono float audio.
+ */
+po32_status_t po32_decode_f32(const float *samples, size_t count, float sample_rate,
+                              po32_decode_result_t *out_result, uint8_t *out_frame,
+                              size_t out_capacity, size_t *out_len);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif
