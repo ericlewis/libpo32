@@ -34,6 +34,7 @@ add_library(po32 STATIC
   src/po33_data.c
   src/po35.c
   src/po35_synth.c
+  src/po_stereo.c
   src/po32_patch_import.c
   src/po32_synth.c
 )
@@ -204,6 +205,10 @@ add_executable(po35_synth_tests tests/test_po35_synth.c)
 target_link_libraries(po35_synth_tests PRIVATE po32)
 add_test(NAME po35_synth_tests COMMAND po35_synth_tests)
 
+add_executable(po_stereo_tests tests/test_po_stereo.c)
+target_link_libraries(po_stereo_tests PRIVATE po32)
+add_test(NAME po_stereo_tests COMMAND po_stereo_tests)
+
 # install
 
 install(TARGETS po32
@@ -219,6 +224,7 @@ install(FILES
   include/po33.h
   include/po35.h
   include/po35_synth.h
+  include/po_stereo.h
   include/po32_synth.h
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )
