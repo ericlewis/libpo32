@@ -116,6 +116,55 @@ static void test_patch_parse_mtdrum_text(void) {
   assert(fabsf(params.Level - 0.79358548f) < 0.0002f);
 }
 
+static void test_patch_mode_dependent_reference_points(void) {
+  static const char reordered[] = "ModAmt: -12 semi\nModRate: 17.782794 Hz\nNEnvAtk: 210.31912 "
+                                  "ms\nNEnvDcy: 210.81851 ms\nModMode: Sine\nNEnvMod: Linear\n";
+  static const char decay[] = "ModMode: Decay\nModAmt: 24 semi\nModRate: 353.333333 ms\n";
+  static const char random[] = "ModMode: Noise\nModAmt: 12 semi\nModRate: 100 Hz\n";
+  po32_patch_params_t params;
+  assert(po32_patch_parse_mtdrum_text(reordered, sizeof(reordered) - 1, &params) == PO32_OK);
+  assert(fabsf(params.ModAmt - 0.25f) < 0.0001f);
+  assert(fabsf(params.ModRate - 0.5f) < 0.0001f);
+  assert(fabsf(params.NEnvAtk - 0.5f) < 0.0001f);
+  assert(fabsf(params.NEnvDcy - 0.5f) < 0.0001f);
+  assert(po32_patch_parse_mtdrum_text(decay, sizeof(decay) - 1, &params) == PO32_OK);
+  assert(fabsf(params.ModAmt - 0.75f) < 0.0001f);
+  assert(fabsf(params.ModRate - 0.5f) < 0.0001f);
+  assert(po32_patch_parse_mtdrum_text(random, sizeof(random) - 1, &params) == PO32_OK);
+  assert(fabsf(params.ModAmt - 0.75f) < 0.0001f);
+  assert(fabsf(params.ModRate - 0.5f) < 0.0001f);
+}
+
+static void test_patch_import_without_final_newline(void) {
+  static const char *const texts[] = {
+      "ModAmt: -12 semi\nModRate: 17.782794 Hz\nModMode: Sine",
+      "ModMode: Sine\nModAmt: -12 semi\nModRate: 17.782794 Hz",
+  };
+  size_t i;
+
+  for (i = 0u; i < sizeof(texts) / sizeof(texts[0]); ++i) {
+    po32_patch_params_t params;
+    po32_status_t status = po32_patch_parse_mtdrum_text(texts[i], strlen(texts[i]), &params);
+    assert(status == PO32_OK);
+    assert(params.ModMode == 0.5f);
+    assert(fabsf(params.ModAmt - 0.25f) < 0.0001f);
+    assert(fabsf(params.ModRate - 0.5f) < 0.0001f);
+  }
+}
+
+static void test_patch_import_rejects_negative_sine_rate(void) {
+  static const char text[] = "ModAmt: -12 semi\nModRate: -1 Hz\nModMode: Sine";
+  po32_patch_params_t params;
+  po32_patch_params_t zero;
+  po32_status_t status;
+
+  memset(&params, 0xFF, sizeof(params));
+  memset(&zero, 0, sizeof(zero));
+  status = po32_patch_parse_mtdrum_text(text, sizeof(text) - 1u, &params);
+  assert(status == PO32_ERR_PARSE);
+  assert(memcmp(&params, &zero, sizeof(params)) == 0);
+}
+
 static void test_patch_parse_mtdrum_text_edge_cases(void) {
   po32_patch_params_t params;
   po32_status_t status;
@@ -286,7 +335,7 @@ static void test_patch_parse_mtdrum_text_edge_cases(void) {
   status = po32_patch_parse_mtdrum_text(noise_rate_text, sizeof(noise_rate_text) - 1u, &params);
   assert(status == PO32_OK);
   assert(fabsf(params.ModMode - 1.0f) < 0.0001f);
-  assert(fabsf(params.ModRate - 0.0f) < 0.0001f);
+  assert(fabsf(params.ModRate - 0.36071035f) < 0.0001f);
 
   memset(&params, 0, sizeof(params));
   status = po32_patch_parse_mtdrum_text(linear_env_text, sizeof(linear_env_text) - 1u, &params);
@@ -300,7 +349,7 @@ static void test_patch_parse_mtdrum_text_edge_cases(void) {
   assert(fabsf(params.OscWave - 0.0f) < 0.0001f);
   assert(fabsf(params.ModMode - 1.0f) < 0.0001f);
   assert(fabsf(params.ModRate - 0.0f) < 0.0001f);
-  assert(fabsf(params.ModAmt - 0.25f) < 0.0001f);
+  assert(fabsf(params.ModAmt - 0.0f) < 0.0001f);
   assert(fabsf(params.NFilMod - 0.0f) < 0.0001f);
   assert(fabsf(params.NEnvMod - 1.0f) < 0.0001f);
   assert(fabsf(params.DistAmt - 0.75f) < 0.0001f);
@@ -342,7 +391,7 @@ static void test_patch_parse_mtdrum_text_edge_cases(void) {
   assert(fabsf(params.OscWave - 1.0f) < 0.0001f);
   assert(fabsf(params.ModMode - 0.5f) < 0.0001f);
   assert(fabsf(params.ModRate - 0.0f) < 0.0001f);
-  assert(fabsf(params.ModAmt - 0.25f) < 0.0001f);
+  assert(fabsf(params.ModAmt - 0.0f) < 0.0001f);
   assert(fabsf(params.NFilMod - 1.0f) < 0.0001f);
   assert(fabsf(params.NEnvMod - 1.0f) < 0.0001f);
   assert(fabsf(params.Mix - 1.0f) < 0.0001f);
@@ -356,7 +405,7 @@ static void test_patch_parse_mtdrum_text_edge_cases(void) {
   assert(status == PO32_OK);
   assert(fabsf(params.OscWave - 0.5f) < 0.0001f);
   assert(fabsf(params.ModMode - 0.0f) < 0.0001f);
-  assert(params.ModRate > 0.5f);
+  assert(fabsf(params.ModRate - 0.37500837f) < 0.0001f);
   assert(params.ModAmt > 0.5f);
   assert(fabsf(params.NFilMod - 0.0f) < 0.0001f);
   assert(fabsf(params.NEnvMod - 0.0f) < 0.0001f);
@@ -2011,6 +2060,9 @@ int main(void) {
   printf("po32 core tests\n");
   printf("===============\n");
   test_patch_encode_decode();
+  test_patch_mode_dependent_reference_points();
+  test_patch_import_without_final_newline();
+  test_patch_import_rejects_negative_sine_rate();
   test_patch_parse_mtdrum_text();
   test_patch_parse_mtdrum_text_edge_cases();
   test_patch_parse_mtdrum_text_trim_and_clamp();
