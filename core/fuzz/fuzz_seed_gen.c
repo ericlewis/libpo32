@@ -239,8 +239,8 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  /* frame_parse: the full frame, and the body alone (the harness also
-     parses each input behind a fresh preamble). */
+  /* frame_parse: the full frame, and the packet body plus final tail (the
+     harness also parses each input behind a fresh preamble). */
   failures += seed_write("frame_parse", "full_frame", frame, frame_len);
   failures += seed_write("frame_parse", "frame_body", frame + PO32_PREAMBLE_BYTES,
                          frame_len - PO32_PREAMBLE_BYTES);

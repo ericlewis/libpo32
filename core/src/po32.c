@@ -1139,8 +1139,8 @@ static void po32_demod_on_byte(po32_demodulator_t *d, po32_packet_callback_t cb,
     pkt.offset = (size_t)PO32_PREAMBLE_BYTES + d->byte_offset - d->work_len;
 
     /* Commit before the callback runs: the packet is fully decoded and
-       verified by this point, so po32_demodulator_packet_count() counts every
-       packet the callback was handed, even the one it stops on. */
+       verified by this point, so the count since the most recent sync
+       acquisition includes this packet, even if its callback stops. */
     d->crc_state = s;
     d->packet_count++;
     d->work_len = 0u;
@@ -1363,9 +1363,9 @@ void po32_demodulator_flush(po32_demodulator_t *d, po32_packet_callback_t callba
    * one boundary decision here is equivalent to the silence a real capture
    * trails off into.
    *
-   * A capture cut short mid-symbol is a different case: its window holds only
-   * part of the symbol, and deciding from it would invent a bit the audio
-   * never carried. Leave the frame unfinished instead. */
+   * Require at least half a symbol of estimated phase before deciding from
+   * the pending window. This avoids decisions from near-empty windows, but
+   * cannot distinguish every truncated final symbol from a complete one. */
   if (d->symbol_phase < PO32_FLUSH_MIN_SYMBOL_PHASE)
     return;
 

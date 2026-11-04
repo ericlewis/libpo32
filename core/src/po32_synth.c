@@ -1,18 +1,18 @@
 /*
  * PO-32 drum synthesizer.
  *
- * All transcendentals (sinf, cosf, powf, expf, sqrtf) replaced with
- * lookup tables:
+ * Freestanding math helpers replace libm calls:
  *
  *   - 2048-entry sine table with linear interpolation
- *   - 256-entry exp2 fractional table + integer bit shift
- *   - log2 via float bit extraction + degree-3 minimax polynomial
+ *   - 1024-entry exp2 fractional table + exponent bit construction
+ *   - log2 via float bit extraction + 1024-entry fractional table
+ *   - Taylor-series rotation setup with angle doubling
  *   - Quake-style fast inverse sqrt + Newton refinement
  *
- * The render loop uses only adds, multiplies, and table lookups.
- * <math.h> is NOT included; only <stdint.h> and <string.h> are needed.
+ * No <math.h>, <string.h>, or hosted runtime calls are required.
  *
- * Total static table footprint: (2048 + 256) * 4 = ~9 KB.
+ * Floating-point tables occupy (2048 + 1024 + 1024) * sizeof(float),
+ * or 16 KiB with binary32 floats. Linked size depends on retained tables.
  */
 
 #include "po32_synth.h"
@@ -612,13 +612,14 @@ int po32_synth_voice_done(const po32_synth_voice_t *v) {
 
 /* ── Main render loop ───────────────────────────────────────────
  *
- * Only adds, multiplies, compares, and (for the sine oscillator and
- * ring envelope) table lookups per sample. Envelopes advance by one
- * multiply; exp2 runs only while pitch mod is active.
+ * Envelopes normally advance by one multiply. Pitch modulation uses a
+ * per-sample exp2 lookup while active; envelope transitions also evaluate
+ * exp2. Distortion and envelope transitions can perform divisions and
+ * other math-helper work.
  *
- * Every envelope and LFO here is a recursion whose state lives in the
- * voice, so splitting a render across calls emits exactly the samples a
- * single call would. po32_synth_render() is that single call.
+ * Persistent envelope and LFO state lives in the voice, so splitting a
+ * render across calls emits exactly the samples a single call would.
+ * po32_synth_render() is that single call.
  */
 po32_status_t po32_synth_voice_render_f32(po32_synth_voice_t *v, float *out, size_t out_capacity,
                                           size_t *out_len) {

@@ -17,7 +17,8 @@ typedef struct po_stereo_modulator {
   int initialized;
 } po_stereo_modulator_t;
 
-/* Borrow wire until rendering finishes. Nonempty input is required, but its
+/* Borrow wire while the state may render or reset, including later renders
+ * after reset. Keep it alive and immutable. Nonempty input is required, but its
  * packet grammar is not checked. Supported rates: 44100, 48000, 96000 Hz.
  * Output has 0.25 s silence on each side and a 128-symbol final phase hold.
  * Linear quadrant transitions approximate the observed capture; generated

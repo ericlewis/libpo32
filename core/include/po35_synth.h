@@ -27,7 +27,8 @@ typedef struct po35_synth {
 } po35_synth_t;
 
 /* Concrete caller-owned storage; DSP fields are private implementation state.
- * Keep records immutable and alive until rendering or reset is finished.
+ * Keep records immutable and alive whenever the voice may render them,
+ * including subsequent renders after reset. Reset does not copy the records.
  * No allocation, sample-rate conversion, clipping or normalization occurs.
  * This implementation requires IEEE-754 binary64 double and binary32 float. */
 typedef struct po35_synth_voice {

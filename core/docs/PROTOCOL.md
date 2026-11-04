@@ -61,10 +61,13 @@ After the last packet, the builder emits a five-byte final tail:
 1. marker `0xC3`
 2. marker `0x71`
 3. special byte derived from the current state
-4. final state low byte
-5. final state high byte
+4. low byte of the state after the special update, before the trailer
+5. high byte of that same state snapshot
 
-The tail is parsed into [`po32_final_tail_t`](../include/po32.h).
+The two marker bytes and two trailer bytes use normal whitening; the special
+third byte is emitted directly. All five bytes update the running state. The
+tail is parsed into [`po32_final_tail_t`](../include/po32.h), whose `final_state`
+is the state after both trailer bytes, not the snapshot stored in the trailer.
 
 ## Known Tags
 
@@ -108,16 +111,13 @@ For normal pattern construction, prefer the `po32_pattern_*` helpers in
 
 On the wire, each pattern payload is lane-chunked:
 
-1. `16` trigger bytes for lane 0
-2. `16` morph pairs for lane 0
-3. `16` trigger bytes for lane 1
-4. `16` morph pairs for lane 1
-5. `16` trigger bytes for lane 2
-6. `16` morph pairs for lane 2
-7. `16` trigger bytes for lane 3
-8. `16` morph pairs for lane 3
-9. `16` reserved zero bytes
-10. `2` bytes accent bitmask, little-endian
+1. `1` byte pattern number
+2. For each of lanes 0 through 3: `16` trigger bytes, then `16` two-byte morph pairs
+3. `16` reserved bytes
+4. `2` bytes accent bitmask, little-endian
+
+This totals `211` bytes. Construction helpers initialize the reserved bytes to
+zero; the typed codec preserves their supplied values.
 
 Each trigger byte is packed. The lane index, selector bits, accent bit, and
 low nibble together determine the triggered sound and step behavior. A zero low

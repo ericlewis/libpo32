@@ -228,19 +228,19 @@ static void test_final_tail_and_trailer_corruption(void) {
                                       &tmp);
     assert(status == PO32_OK);
 
-    /* Good tail decode — verify consumed output path (line 198) */
+    /* Good tail decode — verify the consumed byte count. */
     consumed = 0u;
     status = po32_final_tail_decode(body_state, frame + frame_len - PO32_FINAL_TAIL_BYTES,
                                     PO32_FINAL_TAIL_BYTES, &tail, &consumed);
     assert(status == PO32_OK);
     assert(consumed == PO32_FINAL_TAIL_BYTES);
 
-    /* Good tail decode with tail=NULL (line 185 false branch) */
+    /* Good tail decode with tail=NULL. */
     status = po32_final_tail_decode(body_state, frame + frame_len - PO32_FINAL_TAIL_BYTES,
                                     PO32_FINAL_TAIL_BYTES, NULL, NULL);
     assert(status == PO32_OK);
 
-    /* Corrupt the 4th byte of the tail (raw4) to trigger line 181-182 */
+    /* Corrupt the fourth byte of the tail (raw4). */
     memcpy(mutated, frame, frame_len);
     mutated[frame_len - 2u] ^= 0x01u;
     status = po32_final_tail_decode(body_state, mutated + frame_len - PO32_FINAL_TAIL_BYTES,
@@ -248,7 +248,7 @@ static void test_final_tail_and_trailer_corruption(void) {
     assert(status == PO32_ERR_FRAME);
   }
 
-  /* Corrupt the packet trailer (last 2 bytes of the body) to trigger line 250-252 */
+  /* Corrupt the packet trailer (last two bytes of the body). */
   memcpy(mutated, frame + PO32_PREAMBLE_BYTES, body_len);
   mutated[body_len - 1u] ^= 0x01u;
   state = PO32_INITIAL_STATE;
@@ -265,7 +265,7 @@ static void test_builder_finish_edge_cases(void) {
 
   make_demo_patch_packet(&packet);
 
-  /* builder_finish with frame_len = NULL (line 688 false branch) */
+  /* builder_finish with frame_len = NULL. */
   {
     uint8_t frame[512];
     po32_builder_init(&builder, frame, sizeof(frame));
@@ -276,7 +276,7 @@ static void test_builder_finish_edge_cases(void) {
     assert(builder.finished == 1);
   }
 
-  /* builder_finish when already finished with frame_len = NULL (line 661 branch) */
+  /* builder_finish when already finished with frame_len = NULL. */
   {
     uint8_t frame[512];
     po32_builder_init(&builder, frame, sizeof(frame));
@@ -288,7 +288,7 @@ static void test_builder_finish_edge_cases(void) {
     assert(status == PO32_OK);
   }
 
-  /* builder_reset with buffer = NULL (line 391-392) */
+  /* builder_reset with buffer = NULL. */
   {
     po32_zero(&builder, sizeof(builder));
     builder.capacity = 256u;
@@ -296,7 +296,7 @@ static void test_builder_finish_edge_cases(void) {
     assert(builder.length == 0u);
   }
 
-  /* builder_reset with capacity too small for preamble (line 391-392) */
+  /* builder_reset with capacity too small for the preamble. */
   {
     uint8_t tiny[4];
     po32_zero(&builder, sizeof(builder));
@@ -306,7 +306,7 @@ static void test_builder_finish_edge_cases(void) {
     assert(builder.length == 0u);
   }
 
-  /* builder_finish where capacity is exactly exhausted during tail writing (lines 673-685) */
+  /* builder_finish rejects capacity too small for the complete tail. */
   {
     /* Build a frame, then set capacity to allow only partial tail */
     uint8_t frame[512];
@@ -801,17 +801,16 @@ static void test_decode_internal_helpers(void) {
 }
 
 /*
- * Both carrier oscillators advance by a recursive rotation whose rotor comes
- * from the interpolated sine LUT, so |rotor| is ~1 - 1.1e-6 instead of 1. Each
- * loop rescales to hold the magnitude at unity; without that the oscillator
- * decays ~10x every 2M samples, which silences long renders and underflows the
- * demodulator's correlation to zero.
+ * The earlier interpolated-LUT carrier rotor had |rotor| ~1 - 1.1e-6.
+ * Without rescaling it decayed ~10x every 2M samples, silencing long renders
+ * and underflowing the demodulator's correlation to zero. The current rotor
+ * uses po32_lut_rot_step; these tests still check each loop's magnitude.
  *
  * These two checks look at each oscillator on its own, because an end-to-end
- * decode only notices a loop that is *still* unscaled once the combined decay
- * underflows: with either loop fixed, a round trip keeps working until roughly
- * 773 packets. Checking the invariant directly catches a regression in one
- * loop, needs no large buffers, and points at which loop broke.
+ * decode of the earlier implementation only noticed an unscaled loop once
+ * the combined decay underflowed: with either loop fixed, a round trip kept
+ * working until roughly 773 packets. Checking the invariant catches a
+ * regression in one loop, needs no large buffers, and identifies that loop.
  */
 #define PO32_OSC_RUN_SAMPLES 30000000u
 

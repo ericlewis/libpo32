@@ -165,7 +165,7 @@ static void test_numeric_failure_and_reset(void) {
 }
 
 static void test_lpc_and_audio_reference(void) {
-  /* Independent high-precision tanh/Schur and filter reference, using
+  /* Fixed tanh/Schur and filter regression values, using
      q[i] = 7 * (i % 7 - 3), pitch 440 Hz, gain 1, no noise. */
   static const double lpc[] = {1,
                                0.42478968335997452,
@@ -220,7 +220,7 @@ static void test_lpc_and_audio_reference(void) {
 }
 
 static void test_noise_golden_and_consumption(void) {
-  /* Independently generated xorshift32/Marsaglia values, seed 350. */
+  /* Fixed xorshift32/Marsaglia regression values, seed 350. */
   static const float expected[] = {
       -0.37978512048721313f, -0.041792649775743484f, 0.6129953861236572f,  -0.05307433009147644f,
       0.07902200520038605f,  0.6286685466766357f,    0.49596133828163147f, 0.12208618968725204f};
