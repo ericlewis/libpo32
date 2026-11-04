@@ -128,7 +128,10 @@ func (m *Modulator) RenderF32(maxSamples int) ([]float32, error) {
 		return nil, ErrInvalidArg
 	}
 	defer runtime.KeepAlive(m)
-	n := min(maxSamples, m.SamplesRemaining())
+	n := maxSamples
+	if remaining := C.po32_modulator_samples_remaining(m.cMod); remaining < C.size_t(n) {
+		n = int(remaining)
+	}
 	if n == 0 {
 		return nil, nil
 	}

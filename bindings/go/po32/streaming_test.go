@@ -537,3 +537,25 @@ func TestModulatorOwnsFrameAndResetsAfterGC(t *testing.T) {
 		t.Fatalf("closed modulator RenderF32 = %v", err)
 	}
 }
+
+func TestModulatorRendersSmallChunksFromLargeFrame(t *testing.T) {
+	// At 44100 Hz, this frame needs more than 2^31 samples. A 32-bit
+	// renderer must bound the native count before converting it to int.
+	frame := make([]byte, 8<<20)
+	for i := range frame[:32] {
+		frame[i] = byte(i)
+	}
+	want := streamingAudio(t, frame[:32])[:1024]
+	m := NewModulator(frame, 44100)
+	defer m.Close()
+	got, err := m.RenderF32(len(want))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatal("large frame prefix differs from one-shot audio")
+	}
+	if m.Done() {
+		t.Fatal("small chunk exhausted the large frame")
+	}
+}
