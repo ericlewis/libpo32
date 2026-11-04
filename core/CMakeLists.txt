@@ -66,6 +66,21 @@ target_link_libraries(po32_pattern_editor PRIVATE po32)
 add_executable(po32_decode_capture examples/po32_decode_capture.c)
 target_link_libraries(po32_decode_capture PRIVATE po32)
 
+add_library(po_capture STATIC examples/po_capture.c)
+target_link_libraries(po_capture PUBLIC po32)
+target_include_directories(po_capture PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/examples)
+add_library(po_stereo_wav STATIC examples/po_stereo_wav.c)
+target_link_libraries(po_stereo_wav PUBLIC po32)
+target_include_directories(po_stereo_wav PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/examples)
+add_executable(po33_decode_capture examples/po33_decode_capture.c)
+target_link_libraries(po33_decode_capture PRIVATE po_capture)
+add_executable(po33_encode_capture examples/po33_encode_capture.c)
+target_link_libraries(po33_encode_capture PRIVATE po_stereo_wav)
+add_executable(po35_decode_capture examples/po35_decode_capture.c)
+target_link_libraries(po35_decode_capture PRIVATE po_capture)
+add_executable(po35_encode_capture examples/po35_encode_capture.c)
+target_link_libraries(po35_encode_capture PRIVATE po_stereo_wav)
+
 # fuzz harnesses
 
 set(PO32_FUZZ_TARGETS
@@ -208,6 +223,31 @@ add_test(NAME po35_synth_tests COMMAND po35_synth_tests)
 add_executable(po_stereo_tests tests/test_po_stereo.c)
 target_link_libraries(po_stereo_tests PRIVATE po32)
 add_test(NAME po_stereo_tests COMMAND po_stereo_tests)
+
+add_executable(po33_capture_tests tests/test_po33_capture.c)
+target_link_libraries(po33_capture_tests PRIVATE po_capture)
+add_test(NAME po33_capture_tests COMMAND po33_capture_tests)
+set_tests_properties(po33_capture_tests PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+
+add_executable(po33_edit_tests tests/test_po33_edit.c)
+target_link_libraries(po33_edit_tests PRIVATE po_stereo_wav)
+add_test(NAME po33_edit_tests COMMAND po33_edit_tests)
+set_tests_properties(po33_edit_tests PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+
+add_executable(po33_output_tests tests/test_po33_output.c)
+target_link_libraries(po33_output_tests PRIVATE po_capture)
+add_test(NAME po33_output_tests COMMAND po33_output_tests)
+set_tests_properties(po33_output_tests PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+
+add_executable(po33_transmit_tests tests/test_po33_transmit.c)
+target_link_libraries(po33_transmit_tests PRIVATE po_stereo_wav po_capture)
+add_test(NAME po33_transmit_tests COMMAND po33_transmit_tests)
+set_tests_properties(po33_transmit_tests PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+
+add_executable(po35_example_tests tests/test_po35_examples.c)
+target_link_libraries(po35_example_tests PRIVATE po_capture po_stereo_wav)
+add_test(NAME po35_example_tests COMMAND po35_example_tests)
+set_tests_properties(po35_example_tests PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
 
 # install
 
