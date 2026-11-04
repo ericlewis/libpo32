@@ -3,6 +3,9 @@
 #endif
 #include <assert.h>
 #include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include "wav_test_helpers.h"
 #include <signal.h>
 #include <sys/resource.h>
@@ -10,9 +13,8 @@
 #include <unistd.h>
 
 #include "../examples/po_stereo_wav.h"
-#define main po33_receiver_example_main
-#include "../examples/po33_decode_capture.c"
-#undef main
+#include "po33.h"
+#include "po_capture.h"
 
 /* Independent bitwise CRC fixture: no transmitter or core builder helpers. */
 static uint16_t transmit_reference_crc(uint16_t state, uint8_t byte) {
@@ -99,8 +101,9 @@ static void test_transmit_roundtrip(void) {
     }
     status = po_capture_decode(&capture, PO_STEREO_CHANNEL_NORMAL, &decoded, &decoded_length);
     assert(status);
-    assert(po33_frame_parse(decoded, decoded_length, check_transmitted_packet, &packet_count,
-                            &result) == PO32_OK);
+    po_status_t parsed =
+        po33_frame_parse(decoded, decoded_length, check_transmitted_packet, &packet_count, &result);
+    assert(parsed == PO32_OK);
     assert(result.done && result.frame_bytes == length && packet_count == 39);
     assert(!memcmp(decoded, frame, length));
     free(capture.samples);

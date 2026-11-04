@@ -18,7 +18,10 @@ cmake -S "$root_dir" -B "$build_dir" \
 cmake --build "$build_dir" -j4
 ctest --test-dir "$build_dir" --output-on-failure --output-junit "$report_dir/junit.xml"
 
+# Internal tests compile source under renamed entry points. Aggregate each
+# physical source line across those instances instead of reporting duplicates.
 gcovr \
+  --merge-lines \
   --root "$root_dir" \
   --filter "$root_dir/core/src/" \
   --filter "$root_dir/core/examples/" \
@@ -26,6 +29,7 @@ gcovr \
   --print-summary
 
 gcovr \
+  --merge-lines \
   --root "$root_dir" \
   --filter "$root_dir/core/src/" \
   --filter "$root_dir/core/examples/" \
@@ -34,6 +38,7 @@ gcovr \
   --output "$report_dir/cobertura.xml"
 
 gcovr \
+  --merge-lines \
   --root "$root_dir" \
   --filter "$root_dir/core/src/" \
   --filter "$root_dir/core/examples/" \
@@ -42,6 +47,7 @@ gcovr \
   --output "$report_dir/index.html"
 
 gcovr \
+  --merge-lines \
   --root "$root_dir" \
   --filter "$root_dir/core/src/" \
   --filter "$root_dir/core/examples/" \
@@ -50,6 +56,7 @@ gcovr \
   --output "$report_dir/summary.txt"
 
 gcovr \
+  --merge-lines \
   --root "$root_dir" \
   --filter "$root_dir/core/src/" \
   --filter "$root_dir/core/examples/" \
