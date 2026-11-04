@@ -1,5 +1,6 @@
-/* Edit validated PO-33 frame templates without inferring metadata or resizing. */
+/* Edit validated PO-33 templates while preserving raw metadata and references. */
 #include "po33.h"
+#include "po_capture.h"
 #include "po_stereo_wav.h"
 #include <errno.h>
 #include <stdint.h>
@@ -8,12 +9,16 @@
 #include <string.h>
 
 typedef enum { EDIT_SAMPLE, EDIT_PATTERN, EDIT_PATTERN_BYTE } edit_kind_t;
+typedef enum { CHANNEL_UNSET, CHANNEL_LEFT, CHANNEL_RIGHT, CHANNEL_MIX } edit_channel_t;
 typedef struct {
   edit_kind_t kind;
   unsigned index;
   size_t offset;
   uint8_t value;
   const char *path;
+  uint8_t *extension;
+  size_t extension_bytes, extension_after;
+  size_t sample_count, allocation;
 } edit_t;
 typedef struct {
   po32_packet_t *packets;
@@ -21,19 +26,18 @@ typedef struct {
   int failed;
 } template_t;
 
-static uint16_t edit_read16(const uint8_t *p) {
-  return (uint16_t)p[0] | (uint16_t)((uint16_t)p[1] << 8);
-}
-static uint32_t edit_read32(const uint8_t *p) {
-  return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
-}
 static void edit_usage(const char *program) {
   fprintf(stderr,
-          "Usage: %s frame.bin output.wav [--sample INDEX mono.wav]\n"
+          "Usage: %s frame.bin output.wav [--sample INDEX audio.wav]\n"
           "       [--pattern INDEX pattern.bin] [--pattern-byte INDEX OFFSET VALUE]\n"
-          "       [--rate 44100|48000|96000]\n"
+          "       [--rate 44100|48000|96000] [--channel left|right|mix]\n"
           "Indexes and offsets are zero-based; numeric values accept decimal or 0x hex.\n"
-          "Sample input: mono PCM16 WAV at 23438 Hz, exactly the existing pool length.\n"
+          "Samples: mono/stereo PCM16/24/32 or float32 WAV at 8000..192000 Hz.\n"
+          "Stereo requires --channel. Audio is resampled to the native clock;\n"
+          "23438 Hz is the native WAV alias. Short inputs are padded with silence;\n"
+          "long inputs grow existing block-aligned pools in 4096-sample blocks.\n"
+          "Headers, trims and slice references stay unchanged: stored tails may\n"
+          "extend past the original playback range. Device capacity is unverified.\n"
           "Pattern replacements must have the existing concatenated byte length.\n"
           "Default transfer rate: 48000 Hz. Output must not already exist.\n",
           program);
@@ -52,10 +56,12 @@ static int edit_number(const char *text, unsigned long long maximum, unsigned lo
   *out = value;
   return 1;
 }
-static int edit_options(int argc, char **argv, edit_t *edits, size_t *count, uint32_t *rate) {
-  int have_rate = 0;
+static int edit_options(int argc, char **argv, edit_t *edits, size_t *count, uint32_t *rate,
+                        edit_channel_t *channel) {
+  int have_rate = 0, have_sample = 0;
   *count = 0;
   *rate = 48000;
+  *channel = CHANNEL_UNSET;
   for (int i = 3; i < argc;) {
     edit_t edit = {0};
     unsigned long long index, offset, value;
@@ -70,12 +76,27 @@ static int edit_options(int argc, char **argv, edit_t *edits, size_t *count, uin
       i += 2;
       continue;
     }
+    if (!strcmp(argv[i], "--channel")) {
+      if (*channel != CHANNEL_UNSET || i + 1 >= argc)
+        return 0;
+      if (!strcmp(argv[i + 1], "left"))
+        *channel = CHANNEL_LEFT;
+      else if (!strcmp(argv[i + 1], "right"))
+        *channel = CHANNEL_RIGHT;
+      else if (!strcmp(argv[i + 1], "mix"))
+        *channel = CHANNEL_MIX;
+      else
+        return 0;
+      i += 2;
+      continue;
+    }
     if (!strcmp(argv[i], "--sample") || !strcmp(argv[i], "--pattern")) {
       if (i + 2 >= argc || !edit_number(argv[i + 1], 255, &index)) {
         fprintf(stderr, "Expected index in 0..255 and input file after %s.\n", argv[i]);
         return 0;
       }
       edit.kind = !strcmp(argv[i], "--sample") ? EDIT_SAMPLE : EDIT_PATTERN;
+      have_sample |= edit.kind == EDIT_SAMPLE;
       edit.index = (unsigned)index;
       edit.path = argv[i + 2];
       i += 3;
@@ -108,7 +129,7 @@ static int edit_options(int argc, char **argv, edit_t *edits, size_t *count, uin
     }
     edits[(*count)++] = edit;
   }
-  return 1;
+  return *channel == CHANNEL_UNSET || have_sample;
 }
 static int edit_load_file(const char *path, uint8_t **out, size_t *out_size) {
   FILE *fp = fopen(path, "rb");
@@ -200,65 +221,101 @@ static void edit_replace_region(template_t *frame, uint16_t selector_tag, uint16
     }
   }
 }
-static int edit_load_pcm(const char *path, size_t expected_samples, uint8_t **out_file,
-                         const uint8_t **out_pcm) {
-  uint8_t *file = NULL;
-  const uint8_t *pcm = NULL;
-  size_t size = 0, position = 12, pcm_size = 0;
-  int format_seen = 0, data_seen = 0, ok = 0;
-  if (!edit_load_file(path, &file, &size) || size < 12 || memcmp(file, "RIFF", 4) ||
-      memcmp(file + 8, "WAVE", 4) || edit_read32(file + 4) < 4 ||
-      (size_t)edit_read32(file + 4) != size - 8)
-    goto cleanup;
-  while (position < size) {
-    const uint8_t *chunk;
-    size_t length;
-    if (size - position < 8)
-      goto cleanup;
-    chunk = file + position;
-    length = edit_read32(chunk + 4);
-    if (length > size - position - 8)
-      goto cleanup;
-    if (!memcmp(chunk, "fmt ", 4)) {
-      if (format_seen || length < 16 || edit_read16(chunk + 8) != 1 ||
-          edit_read16(chunk + 10) != 1 || edit_read32(chunk + 12) != 23438 ||
-          edit_read32(chunk + 16) != 23438u * 2u || edit_read16(chunk + 20) != 2 ||
-          edit_read16(chunk + 22) != 16)
-        goto cleanup;
-      format_seen = 1;
-    } else if (!memcmp(chunk, "data", 4)) {
-      if (data_seen)
-        goto cleanup;
-      data_seen = 1;
-      pcm = chunk + 8;
-      pcm_size = length;
-    }
-    position += 8 + length;
-    if (length & 1u) {
-      if (position == size)
-        goto cleanup;
-      position++;
+/* The region scan has already checked selector uniqueness and shape. Growth
+ * needs an unambiguous insertion point; do not move an unknown extension. */
+static int edit_growth_location(const template_t *frame, unsigned index, size_t *after) {
+  int selected = 0;
+  *after = SIZE_MAX;
+  for (size_t i = 0; i < frame->count; ++i) {
+    const po32_packet_t *p = frame->packets + i;
+    if (p->tag_code == PO33_TAG_SOUND_SELECT)
+      selected = p->payload[0] == index;
+    else if (selected && p->tag_code == PO33_TAG_SOUND_DATA)
+      *after = i;
+    else if (selected && p->tag_code != PO33_TAG_END) {
+      fprintf(stderr, "Sound %u contains an extension; growing it is ambiguous.\n", index);
+      return 0;
     }
   }
-  if (!format_seen || !data_seen || pcm_size % 2 || pcm_size / 2 != expected_samples)
+  return *after != SIZE_MAX;
+}
+static int edit_sample(template_t *frame, edit_t *edit, uint8_t *region, size_t size,
+                       edit_channel_t channel) {
+  po_audio_t audio = {0};
+  uint8_t *encoded = NULL;
+  size_t count = 0, allocation, written = 0;
+  int ok = 0;
+  if (size <= PO33_SOUND_HEADER_BYTES) {
+    fprintf(stderr, "Sound %u has no populated pool to replace.\n", edit->index);
+    return 0;
+  }
+  size -= PO33_SOUND_HEADER_BYTES;
+  if (!po_audio_read(edit->path, &audio)) {
+    fprintf(stderr, "Cannot read nonempty mono/stereo PCM or float WAV: %s\n", edit->path);
     goto cleanup;
-  *out_file = file;
-  *out_pcm = pcm;
+  }
+  if ((audio.channels == 2 && channel == CHANNEL_UNSET) ||
+      (audio.channels == 1 && channel == CHANNEL_RIGHT)) {
+    fprintf(stderr, "Stereo input requires --channel left|right|mix; mono has no right channel.\n");
+    goto cleanup;
+  }
+  for (size_t i = 0; i < audio.frames * audio.channels; ++i)
+    if (audio.samples[i] < -1.0f || audio.samples[i] > 1.0f) {
+      fprintf(stderr, "Sample PCM must be normalized to [-1,1].\n");
+      goto cleanup;
+    }
+  if (audio.channels == 2)
+    for (size_t i = 0; i < audio.frames; ++i) {
+      float left = audio.samples[2 * i], right = audio.samples[2 * i + 1];
+      audio.samples[i] = channel == CHANNEL_LEFT    ? left
+                         : channel == CHANNEL_RIGHT ? right
+                                                    : left * 0.5f + right * 0.5f;
+    }
+  if (po33_sample_count_for_pcm(audio.frames, audio.rate, &count) != PO_OK || count == 0)
+    goto cleanup;
+  allocation = size;
+  if (count > size) {
+    if (size % 4096u || count > SIZE_MAX - 4095u ||
+        !edit_growth_location(frame, edit->index, &edit->extension_after)) {
+      fprintf(stderr, "Sound %u must have unambiguous whole blocks before it can grow.\n",
+              edit->index);
+      goto cleanup;
+    }
+    allocation = ((count + 4095u) / 4096u) * 4096u;
+  }
+  encoded = (uint8_t *)calloc(allocation, 1);
+  if (!encoded ||
+      po33_samples_encode_f32(audio.samples, audio.frames, audio.rate, encoded, allocation,
+                              &written) != PO_OK ||
+      written != count)
+    goto cleanup;
+  /* Native-rate PCM export/import is lossless, including the negative-zero
+   * alias. Replaced tail padding is canonical silence, never stale audio. */
+  if (audio.rate == 23438u)
+    for (size_t i = 0; i < count && i < size; ++i)
+      if (audio.samples[i] * 32768.0f == po33_sample_decode(region[PO33_SOUND_HEADER_BYTES + i]))
+        encoded[i] = region[PO33_SOUND_HEADER_BYTES + i];
+  if (allocation > size) {
+    edit->extension_bytes = allocation - size;
+    edit->extension = (uint8_t *)malloc(edit->extension_bytes);
+    if (!edit->extension)
+      goto cleanup;
+    memcpy(edit->extension, encoded + size, edit->extension_bytes);
+  }
+  memcpy(region + PO33_SOUND_HEADER_BYTES, encoded, size);
+  edit->sample_count = count;
+  edit->allocation = allocation;
   ok = 1;
 cleanup:
-  if (!ok) {
-    free(file);
-    fprintf(stderr, "Sample WAV must be mono PCM16 at 23438 Hz with exactly %zu frames.\n",
-            expected_samples);
-  }
+  free(encoded);
+  free(audio.samples);
   return ok;
 }
-static int edit_apply(template_t *frame, const edit_t *edit) {
+static int edit_apply(template_t *frame, edit_t *edit, edit_channel_t channel) {
   uint16_t selector = edit->kind == EDIT_SAMPLE ? PO33_TAG_SOUND_SELECT : PO33_TAG_PATTERN_SELECT;
   uint16_t data_tag = edit->kind == EDIT_SAMPLE ? PO33_TAG_SOUND_DATA : PO33_TAG_PATTERN_DATA;
   uint8_t *region = NULL, *file = NULL;
   size_t size = 0, replacement_size = 0;
-  const uint8_t *pcm = NULL;
   int ok = 0;
   if (!edit_region(frame, selector, data_tag, edit->index, &region, &size))
     goto cleanup;
@@ -276,21 +333,8 @@ static int edit_apply(template_t *frame, const edit_t *edit) {
     }
     memcpy(region, file, size);
   } else {
-    if (size <= 9) {
-      fprintf(stderr,
-              "Sound %u has metadata only; replacing a referenced or empty pool is unsupported.\n",
-              edit->index);
+    if (!edit_sample(frame, edit, region, size, channel))
       goto cleanup;
-    }
-    if (!edit_load_pcm(edit->path, size - 9, &file, &pcm))
-      goto cleanup;
-    for (size_t i = 0; i < size - 9; i++) {
-      uint16_t word = edit_read16(pcm + 2 * i);
-      int16_t sample = (int16_t)(word >= 0x8000u ? (int32_t)word - 65536 : (int32_t)word);
-      /* Retain every unchanged code, including the FF negative-zero alias. */
-      if (sample != po33_sample_decode(region[9 + i]))
-        region[9 + i] = po33_sample_encode(sample);
-    }
   }
   edit_replace_region(frame, selector, data_tag, edit->index, region);
   ok = 1;
@@ -299,7 +343,8 @@ cleanup:
   free(file);
   return ok;
 }
-static int edit_rebuild(const template_t *frame, uint8_t *output, size_t capacity, size_t *length) {
+static int edit_rebuild(const template_t *frame, const edit_t *edits, size_t edit_count,
+                        uint8_t *output, size_t capacity, size_t *length) {
   po33_builder_t builder;
   if (po33_builder_init(&builder, output, capacity) != PO32_OK)
     return 0;
@@ -310,13 +355,31 @@ static int edit_rebuild(const template_t *frame, uint8_t *output, size_t capacit
     if (po33_builder_append_packet(&builder, p->tag_code, p->payload, p->payload_len, NULL) !=
         PO32_OK)
       return 0;
+    for (size_t j = 0; j < edit_count; ++j) {
+      const edit_t *edit = edits + j;
+      if (!edit->extension_bytes || edit->extension_after != i)
+        continue;
+      /* Each additional 4096-byte block starts its own packet sequence:
+       * sixteen 255-byte payloads followed by one 16-byte payload. */
+      for (size_t block = 0; block < edit->extension_bytes; block += 4096u)
+        for (size_t offset = 0; offset < 4096u;) {
+          size_t bytes = 4096u - offset;
+          if (bytes > 255u)
+            bytes = 255u;
+          if (po33_builder_append_packet(&builder, PO33_TAG_SOUND_DATA,
+                                         edit->extension + block + offset, bytes, NULL) != PO_OK)
+            return 0;
+          offset += bytes;
+        }
+    }
   }
   return po33_builder_finish(&builder, length) == PO32_OK;
 }
 int main(int argc, char **argv) {
   uint8_t *input = NULL, *output = NULL;
-  size_t input_length = 0, output_length = 0, edit_count = 0;
+  size_t input_length = 0, output_length = 0, edit_count = 0, output_capacity = 0;
   uint32_t rate;
+  edit_channel_t channel;
   edit_t *edits = NULL;
   template_t frame = {0};
   po33_decode_result_t result;
@@ -332,7 +395,7 @@ int main(int argc, char **argv) {
   edits = (edit_t *)calloc((size_t)argc, sizeof(*edits));
   if (!edits)
     goto cleanup;
-  if (!edit_options(argc, argv, edits, &edit_count, &rate)) {
+  if (!edit_options(argc, argv, edits, &edit_count, &rate, &channel)) {
     rc = 2;
     goto cleanup;
   }
@@ -350,20 +413,31 @@ int main(int argc, char **argv) {
     goto cleanup;
   frame.capacity = result.packet_count;
   frame.packets = (po32_packet_t *)calloc(frame.capacity, sizeof(*frame.packets));
-  output = (uint8_t *)malloc(input_length);
-  if (!frame.packets || !output)
+  if (!frame.packets)
     goto cleanup;
   if (po33_frame_parse(input, input_length, edit_collect, &frame, &result) != PO32_OK ||
       !result.done || frame.failed)
     goto cleanup;
   for (size_t i = 0; i < edit_count; i++)
-    if (!edit_apply(&frame, edits + i))
+    if (!edit_apply(&frame, edits + i, channel))
       goto cleanup;
-  if (!edit_rebuild(&frame, output, input_length, &output_length) ||
-      output_length != input_length ||
+  output_capacity = input_length;
+  for (size_t i = 0; i < edit_count; ++i) {
+    size_t blocks = edits[i].extension_bytes / 4096u;
+    if (blocks > (SIZE_MAX - output_capacity) / (4096u + 17u * 5u)) {
+      fprintf(stderr, "Expanded frame is too large.\n");
+      goto cleanup;
+    }
+    output_capacity += blocks * (4096u + 17u * 5u);
+  }
+  output = (uint8_t *)malloc(output_capacity);
+  if (!output)
+    goto cleanup;
+  if (!edit_rebuild(&frame, edits, edit_count, output, output_capacity, &output_length) ||
+      output_length != output_capacity ||
       po33_frame_parse(output, output_length, NULL, NULL, &result) != PO32_OK || !result.done ||
       result.frame_bytes != output_length) {
-    fprintf(stderr, "Failed to rebuild the template without changing its packet layout.\n");
+    fprintf(stderr, "Failed to rebuild the edited template.\n");
     goto cleanup;
   }
   /* Output creation happens only after all input and edit validation. */
@@ -371,9 +445,15 @@ int main(int argc, char **argv) {
     fprintf(stderr, "Cannot write transfer WAV; use a new output path.\n");
     goto cleanup;
   }
-  printf("Encoded %zu packets with %zu edits at %u Hz.\n", frame.count, edit_count, rate);
+  printf("Encoded %zu packets with %zu edits at %u Hz.\n", result.packet_count, edit_count, rate);
+  for (size_t i = 0; i < edit_count; ++i)
+    if (edits[i].kind == EDIT_SAMPLE)
+      printf("Sound %u: %zu converted samples, %zu allocated; original metadata retained.\n",
+             edits[i].index, edits[i].sample_count, edits[i].allocation);
   rc = 0;
 cleanup:
+  for (size_t i = 0; i < edit_count; ++i)
+    free(edits[i].extension);
   free(edits);
   free(frame.packets);
   free(input);

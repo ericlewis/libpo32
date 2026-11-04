@@ -82,7 +82,7 @@ target_link_libraries(po_stereo_wav PUBLIC po32)
 target_include_directories(po_stereo_wav PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/examples)
 
 add_executable(po33_encode_capture examples/po33_encode_capture.c)
-target_link_libraries(po33_encode_capture PRIVATE po_stereo_wav)
+target_link_libraries(po33_encode_capture PRIVATE po_capture po_stereo_wav)
 
 # fuzz harnesses
 
@@ -133,9 +133,14 @@ add_test(NAME po33_transmit_tests COMMAND po33_transmit_tests)
 set_tests_properties(po33_transmit_tests PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
 
 add_executable(po33_edit_tests tests/test_po33_edit.c)
-target_link_libraries(po33_edit_tests PRIVATE po_stereo_wav)
+target_link_libraries(po33_edit_tests PRIVATE po_capture po_stereo_wav)
 add_test(NAME po33_edit_tests COMMAND po33_edit_tests)
 set_tests_properties(po33_edit_tests PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+
+add_executable(po33_audio_edit_tests tests/test_po33_audio_edit.c)
+target_link_libraries(po33_audio_edit_tests PRIVATE po_capture po_stereo_wav)
+add_test(NAME po33_audio_edit_tests COMMAND po33_audio_edit_tests)
+set_tests_properties(po33_audio_edit_tests PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
 
 add_executable(po33_capture_tests tests/test_po33_capture.c)
 target_link_libraries(po33_capture_tests PRIVATE po_capture)
