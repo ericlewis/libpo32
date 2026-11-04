@@ -1,0 +1,9 @@
+@PACKAGE_INIT@
+
+# The existing archive/export remains available during the naming migration.
+include("${CMAKE_CURRENT_LIST_DIR}/../LibPO32/LibPO32Targets.cmake")
+if(NOT TARGET LibPO::po)
+  add_library(LibPO::po INTERFACE IMPORTED)
+  set_property(TARGET LibPO::po PROPERTY INTERFACE_LINK_LIBRARIES LibPO32::po32)
+endif()
+check_required_components(LibPO)

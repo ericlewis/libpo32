@@ -11,3 +11,5 @@ demo_*.wav
 *.o
 *.a
 Testing/
+__pycache__
+superpowers

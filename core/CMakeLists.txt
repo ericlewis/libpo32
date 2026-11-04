@@ -39,8 +39,13 @@ add_library(po32 STATIC
   src/po32_synth.c
 )
 add_library(LibPO32::po32 ALIAS po32)
+add_library(LibPO::po ALIAS po32)
 
 set_target_properties(po32 PROPERTIES OUTPUT_NAME po32)
+# Keep the shipped core archive free of compiler-generated hosted runtime calls.
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+  target_compile_options(po32 PRIVATE -ffreestanding -fno-builtin -fno-stack-protector)
+endif()
 
 target_include_directories(po32
   PUBLIC
@@ -48,9 +53,6 @@ target_include_directories(po32
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
-if(UNIX AND NOT APPLE)
-  target_link_libraries(po32 PUBLIC m)
-endif()
 
 # examples
 
@@ -69,17 +71,16 @@ target_link_libraries(po32_decode_capture PRIVATE po32)
 add_library(po_capture STATIC examples/po_capture.c)
 target_link_libraries(po_capture PUBLIC po32)
 target_include_directories(po_capture PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/examples)
+
+add_executable(po33_decode_capture examples/po33_decode_capture.c)
+target_link_libraries(po33_decode_capture PRIVATE po_capture)
+
 add_library(po_stereo_wav STATIC examples/po_stereo_wav.c)
 target_link_libraries(po_stereo_wav PUBLIC po32)
 target_include_directories(po_stereo_wav PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/examples)
-add_executable(po33_decode_capture examples/po33_decode_capture.c)
-target_link_libraries(po33_decode_capture PRIVATE po_capture)
+
 add_executable(po33_encode_capture examples/po33_encode_capture.c)
 target_link_libraries(po33_encode_capture PRIVATE po_stereo_wav)
-add_executable(po35_decode_capture examples/po35_decode_capture.c)
-target_link_libraries(po35_decode_capture PRIVATE po_capture)
-add_executable(po35_encode_capture examples/po35_encode_capture.c)
-target_link_libraries(po35_encode_capture PRIVATE po_stereo_wav)
 
 # fuzz harnesses
 
@@ -115,6 +116,34 @@ endif()
 
 add_executable(po32_core_tests tests/test_core.c)
 target_link_libraries(po32_core_tests PRIVATE po32)
+
+add_executable(po33_tests tests/test_po33.c)
+target_link_libraries(po33_tests PRIVATE po32)
+add_test(NAME po33_tests COMMAND po33_tests)
+
+add_executable(po33_encode_tests tests/test_po33_encode.c)
+target_link_libraries(po33_encode_tests PRIVATE po32)
+add_test(NAME po33_encode_tests COMMAND po33_encode_tests)
+
+add_executable(po33_transmit_tests tests/test_po33_transmit.c)
+target_link_libraries(po33_transmit_tests PRIVATE po_stereo_wav po_capture)
+add_test(NAME po33_transmit_tests COMMAND po33_transmit_tests)
+set_tests_properties(po33_transmit_tests PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+
+add_executable(po33_edit_tests tests/test_po33_edit.c)
+target_link_libraries(po33_edit_tests PRIVATE po_stereo_wav)
+add_test(NAME po33_edit_tests COMMAND po33_edit_tests)
+set_tests_properties(po33_edit_tests PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+
+add_executable(po33_capture_tests tests/test_po33_capture.c)
+target_link_libraries(po33_capture_tests PRIVATE po_capture)
+add_test(NAME po33_capture_tests COMMAND po33_capture_tests)
+set_tests_properties(po33_capture_tests PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+
+add_executable(po33_output_tests tests/test_po33_output.c)
+target_link_libraries(po33_output_tests PRIVATE po_capture)
+add_test(NAME po33_output_tests COMMAND po33_output_tests)
+set_tests_properties(po33_output_tests PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
 
 add_executable(po32_core_internal_tests tests/test_core_internal.c)
 target_include_directories(po32_core_internal_tests PRIVATE
@@ -196,58 +225,56 @@ add_test(
     -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/run_decode_capture_smoke.cmake
 )
 
-add_executable(po33_tests tests/test_po33.c)
-target_link_libraries(po33_tests PRIVATE po32)
-add_test(NAME po33_tests COMMAND po33_tests)
-
-add_executable(po33_encode_tests tests/test_po33_encode.c)
-target_link_libraries(po33_encode_tests PRIVATE po32)
-add_test(NAME po33_encode_tests COMMAND po33_encode_tests)
-
-add_executable(po33_data_tests tests/test_po33_data.c)
-target_link_libraries(po33_data_tests PRIVATE po32)
-add_test(NAME po33_data_tests COMMAND po33_data_tests)
-
-add_executable(po_wire_tests tests/test_po_wire.c)
-target_link_libraries(po_wire_tests PRIVATE po32)
-add_test(NAME po_wire_tests COMMAND po_wire_tests)
-
-add_executable(po35_tests tests/test_po35.c)
-target_link_libraries(po35_tests PRIVATE po32)
-add_test(NAME po35_tests COMMAND po35_tests)
-
-add_executable(po35_synth_tests tests/test_po35_synth.c)
-target_link_libraries(po35_synth_tests PRIVATE po32)
-add_test(NAME po35_synth_tests COMMAND po35_synth_tests)
-
-add_executable(po_stereo_tests tests/test_po_stereo.c)
-target_link_libraries(po_stereo_tests PRIVATE po32)
-add_test(NAME po_stereo_tests COMMAND po_stereo_tests)
-
-add_executable(po33_capture_tests tests/test_po33_capture.c)
-target_link_libraries(po33_capture_tests PRIVATE po_capture)
-add_test(NAME po33_capture_tests COMMAND po33_capture_tests)
-set_tests_properties(po33_capture_tests PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
-
-add_executable(po33_edit_tests tests/test_po33_edit.c)
-target_link_libraries(po33_edit_tests PRIVATE po_stereo_wav)
-add_test(NAME po33_edit_tests COMMAND po33_edit_tests)
-set_tests_properties(po33_edit_tests PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
-
-add_executable(po33_output_tests tests/test_po33_output.c)
-target_link_libraries(po33_output_tests PRIVATE po_capture)
-add_test(NAME po33_output_tests COMMAND po33_output_tests)
-set_tests_properties(po33_output_tests PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
-
-add_executable(po33_transmit_tests tests/test_po33_transmit.c)
-target_link_libraries(po33_transmit_tests PRIVATE po_stereo_wav po_capture)
-add_test(NAME po33_transmit_tests COMMAND po33_transmit_tests)
-set_tests_properties(po33_transmit_tests PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
-
+add_executable(po35_decode_capture examples/po35_decode_capture.c)
+target_link_libraries(po35_decode_capture PRIVATE po_capture)
+add_executable(po35_encode_capture examples/po35_encode_capture.c)
+target_link_libraries(po35_encode_capture PRIVATE po_stereo_wav)
 add_executable(po35_example_tests tests/test_po35_examples.c)
 target_link_libraries(po35_example_tests PRIVATE po_capture po_stereo_wav)
 add_test(NAME po35_example_tests COMMAND po35_example_tests)
 set_tests_properties(po35_example_tests PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+
+# Family codecs, shared transport, and the freestanding speech renderer.
+foreach(test_name IN ITEMS po33_data po35 po35_synth po_stereo po_wire)
+  add_executable(${test_name}_tests tests/test_${test_name}.c)
+  target_link_libraries(${test_name}_tests PRIVATE po32)
+  add_test(NAME ${test_name}_tests COMMAND ${test_name}_tests)
+endforeach()
+
+if(UNIX)
+  if(PO32_SANITIZE OR PO32_BUILD_FUZZERS)
+    # Instrumentation intentionally depends on a host runtime; audit sources
+    # separately instead of claiming the instrumented archive is freestanding.
+    add_test(NAME po_freestanding_source_symbols
+      COMMAND sh ${PROJECT_SOURCE_DIR}/scripts/check-freestanding.sh ${CMAKE_C_COMPILER} ${CMAKE_NM})
+  else()
+    add_test(NAME po_freestanding_symbols
+      COMMAND sh ${PROJECT_SOURCE_DIR}/scripts/check-freestanding.sh
+        ${CMAKE_C_COMPILER} ${CMAKE_NM} $<TARGET_FILE:po32> ${CMAKE_AR})
+  endif()
+endif()
+
+if(UNIX AND NOT CMAKE_CROSSCOMPILING AND NOT PO32_SANITIZE AND NOT PO32_BUILD_FUZZERS)
+  add_test(NAME po_package_smoke
+    COMMAND ${CMAKE_COMMAND}
+      "-DPO_BUILD_DIR=${PROJECT_BINARY_DIR}"
+      "-DPO_C_COMPILER=${CMAKE_C_COMPILER}"
+      "-DPO_CONFIG=$<CONFIG>"
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/run_package_smoke.cmake)
+endif()
+
+# Only the core archive is freestanding. Hosted examples/tests may use libm.
+if(UNIX AND NOT APPLE)
+  get_property(host_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+  foreach(host_target IN LISTS host_targets)
+    if(NOT host_target STREQUAL "po32")
+      get_target_property(host_type ${host_target} TYPE)
+      if(host_type STREQUAL "EXECUTABLE" OR host_type STREQUAL "STATIC_LIBRARY")
+        target_link_libraries(${host_target} PRIVATE m)
+      endif()
+    endif()
+  endforeach()
+endif()
 
 # install
 
@@ -259,12 +286,13 @@ install(TARGETS po32
 )
 
 install(FILES
-  include/po32.h
+  include/po.h
   include/po_common.h
-  include/po33.h
+  include/po32.h
   include/po35.h
   include/po35_synth.h
   include/po_stereo.h
+  include/po33.h
   include/po32_synth.h
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )
@@ -304,3 +332,22 @@ configure_file(
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/po32.pc
   DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig
 )
+
+# Canonical umbrella package; existing LibPO32/po32 discovery remains valid.
+configure_package_config_file(
+  ${CMAKE_CURRENT_SOURCE_DIR}/cmake/LibPOConfig.cmake.in
+  ${CMAKE_CURRENT_BINARY_DIR}/LibPOConfig.cmake
+  INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/LibPO
+)
+write_basic_package_version_file(
+  ${CMAKE_CURRENT_BINARY_DIR}/LibPOConfigVersion.cmake
+  VERSION ${PROJECT_VERSION}
+  COMPATIBILITY SameMajorVersion
+)
+install(FILES
+  ${CMAKE_CURRENT_BINARY_DIR}/LibPOConfig.cmake
+  ${CMAKE_CURRENT_BINARY_DIR}/LibPOConfigVersion.cmake
+  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/LibPO
+)
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/cmake/po.pc.in ${CMAKE_CURRENT_BINARY_DIR}/po.pc @ONLY)
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/po.pc DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig)
