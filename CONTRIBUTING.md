@@ -82,10 +82,9 @@ Additional local checks:
 ```
 
 `ci-coverage.sh` requires `gcovr` on `PATH`.
-Patch coverage must reach 95%. Cover meaningful success, boundary and failure
-behavior; retain useful defensive checks rather than removing them solely to
-raise coverage. Reports merge executions of the same source line across test
-and production function instances.
+Cover meaningful success, boundary and failure behavior. Retain useful defensive
+checks rather than removing them solely to raise coverage. Reports merge
+executions of the same source line across test and production function instances.
 
 `ci-verify.sh sanitize` rebuilds and runs the test suite under
 AddressSanitizer and UndefinedBehaviorSanitizer.
