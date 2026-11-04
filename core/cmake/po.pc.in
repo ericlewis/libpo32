@@ -1,0 +1,10 @@
+prefix=${pcfiledir}/../..
+libdir=${prefix}/@CMAKE_INSTALL_LIBDIR@
+includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@
+
+Name: libpo
+Description: Freestanding Pocket Operator transfer codecs and sound engines
+URL: https://github.com/ericlewis/libpo32
+Version: @PROJECT_VERSION@
+Libs: -L${libdir} -lpo32
+Cflags: -I${includedir}

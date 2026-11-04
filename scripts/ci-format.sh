@@ -5,7 +5,7 @@ root_dir=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 
 . "$root_dir/scripts/resolve-clang-format.sh"
 
-find "$root_dir" -maxdepth 4 \
-  \( -path "$root_dir/.git" -o -path "$root_dir/build*" \) -prune -o \
-  -type f \( -name '*.c' -o -name '*.h' \) -print0 |
+# Use the source inventory, not ignored build output or generated caches.
+cd "$root_dir"
+git ls-files --cached --others --exclude-standard -z -- '*.c' '*.h' |
   xargs -0 "$CLANG_FORMAT" -style=file --dry-run -Werror
