@@ -187,6 +187,7 @@ install(TARGETS po32
 
 install(FILES
   include/po32.h
+  include/po_common.h
   include/po32_synth.h
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )
