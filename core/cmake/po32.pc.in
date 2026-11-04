@@ -1,6 +1,6 @@
 # Relocatable: prefix is derived from this file's installed location
 # (<prefix>/<libdir>/pkgconfig/po32.pc).
-prefix=${pcfiledir}/../..
+prefix=${pcfiledir}/@PO_PKGCONFIG_PREFIX_RELATIVE@
 libdir=${prefix}/@CMAKE_INSTALL_LIBDIR@
 includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@
 
