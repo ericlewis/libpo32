@@ -100,6 +100,13 @@ The callback receives a pointer to a [`po32_packet_t`](../include/po32.h) with
 an inline payload buffer. Copy the packet struct to retain it after the
 callback returns; the callback pointer itself is borrowed.
 
+Returning nonzero from the callback stops parsing with `PO32_OK` before
+validating the remainder. Validated packets may be delivered before a later
+error. `out_tail` is written only when a valid final tail is reached and is
+unchanged on early stop or error. Bytes after that tail are ignored. A
+successful status from an early-stopping callback does not establish that
+the complete frame is valid.
+
 ## PO-32 Typed Packet Helpers
 
 The core provides typed packet structs for the common packet families:
@@ -140,8 +147,9 @@ For pattern triggers, use:
 These helpers handle the packed lane-byte format used by
 `po32_pattern_packet_t.steps[]`.
 
-Pattern packets are serialized per lane: `16` trigger bytes, then `16` morph
-pairs, repeated four times, followed by reserved bytes and `accent_bits`.
+Pattern payloads begin with a one-byte pattern number, followed by four lane
+blocks: `16` trigger bytes, then `16` two-byte morph pairs. The payload ends
+with `16` reserved bytes and the two-byte little-endian `accent_bits`.
 A trigger is active only when its low nibble is non-zero. A low nibble of
 `0x00` is empty on the wire.
 
@@ -150,6 +158,12 @@ A trigger is active only when its low nibble is non-zero. A low nibble of
 Use `po32_patch_parse_mtdrum_text(...)` to import patch parameters from
 Microtonic `.mtdrum` text format. This is the text representation used by
 Sonic Charge Microtonic's copy/paste and file export features.
+The importer resolves `ModMode` and `NEnvMod` before converting dependent
+values, regardless of field order. `ModRate`/`ModAmt` use the selected
+modulation mode, and `NEnvAtk`/`NEnvDcy` use the selected noise-envelope mode.
+Attack and pitch-modulation conversions share the renderer's maps; see the
+[parameter reference](PATCH_PARAMETERS.md#mapping-functions) for units,
+nonlinear curves, and zero-rate behavior.
 
 ## PO-32 Streaming Modulator
 
@@ -180,14 +194,16 @@ Each bit is decided at the symbol boundary that closes its correlation
 window, which for the frame's final bit lies just past the last rendered
 sample. Call `po32_demodulator_flush(...)` after the last chunk so a capture
 that ends exactly at `po32_render_sample_count(...)` samples (no trailing
-silence) still completes, then query `po32_demodulator_done(...)`. Like
-`po32_demodulator_desync(...)` it returns nothing and is a no-op on a NULL,
-already-done, or not-yet-synced demodulator.
+silence) still completes, then query `po32_demodulator_done(...)`. Flush returns
+nothing and is a no-op on a NULL, already-done, or not-yet-synced demodulator.
+`po32_demodulator_desync(...)` also returns nothing, but clears synchronization
+and buffered packet data for any non-NULL state while retaining done/stop flags.
 
-A flush only resolves a symbol whose correlation window is mostly present.
-Audio that stops part-way through a symbol leaves the frame unfinished
-instead, so a truncated capture is still reported as `PO32_ERR_FRAME` rather
-than completed with an invented final bit.
+A flush resolves one pending symbol only when its estimated phase has reached
+at least half a symbol. This avoids decisions from near-empty correlation
+windows, but does not guarantee rejection of every truncated capture. Query
+`po32_demodulator_done(...)` after flushing to check whether a valid final tail
+was recovered.
 
 `po32_decode_f32(...)` is a one-shot convenience wrapper around this API and
 flushes internally.
@@ -204,15 +220,16 @@ reports for the same packet, so it can be used to index a reconstructed frame.
 
 Returning nonzero from the callback stops the stream, and the stop is
 terminal. The unconsumed remainder of the current chunk is discarded, and
-every later `po32_demodulator_push(...)` is a no-op returning `PO32_OK` —
+later `po32_demodulator_push(...)` calls with non-NULL state and sample pointers
+are no-ops returning `PO32_OK` —
 `po32_demodulator_stopped(...)` reports this state. Stopping has to be
 terminal because `push` reports neither how many samples it consumed nor
 where in the chunk it stopped, so the discarded audio cannot be re-fed; a
 demodulator that simply resumed would restart mid-frame and desync.
 
-A packet is committed before its callback runs, so
-`po32_demodulator_packet_count(...)` counts every packet the callback was
-handed — including the one it stopped on.
+`po32_demodulator_packet_count(...)` counts packets since the most recent sync
+acquisition and resets when sync is reacquired. A packet is committed before
+its callback runs, including the packet that stops the stream.
 
 To reuse a stopped demodulator, re-initialize it with
 `po32_demodulator_init(...)`. `po32_demodulator_desync(...)` resets sync state
@@ -220,8 +237,8 @@ only; it no more clears the stop than it clears `po32_demodulator_done(...)`.
 
 ## PO-32 Streaming Synth Voice
 
-For streaming (chunk-based) synthesis, the voice API pre-computes all
-per-render constants at init time and persists DSP state across calls:
+For streaming (chunk-based) synthesis, the voice API pre-computes voice
+constants at init time and persists DSP state across calls:
 
 - `po32_synth_voice_init(...)` — snapshot parameters and prepare for rendering
 - `po32_synth_voice_render_f32(...)` — render the next chunk of samples
@@ -229,8 +246,11 @@ per-render constants at init time and persists DSP state across calls:
 - `po32_synth_voice_done(...)` — check if all samples have been rendered
 - `po32_synth_voice_samples_remaining(...)` — query how many samples remain
 
-`po32_synth_render(...)` is a one-shot convenience wrapper that renders
-the full duration in a single call.
+`po32_synth_render(...)` is a one-shot convenience wrapper that renders up to
+the smaller of the requested sample count and `out_capacity`. Insufficient
+capacity truncates the hit and still returns `PO32_OK`. Use
+`po32_synth_samples_for_duration(...)` to size the complete output, or keep a
+streaming voice to render successive chunks.
 
 ## PO-32 Body Bytes and Frame Bytes
 
@@ -343,7 +363,8 @@ See [Backup formats](PO_FORMATS.md) for record offsets and unresolved fields.
 ## Shared Stereo Modem
 
 `po_stereo_modulator_init` borrows a nonempty wire buffer for chunked rendering.
-The buffer must remain alive and immutable until rendering ends. It accepts
+The buffer must remain alive and immutable whenever the state may render or
+reset, including subsequent renders after reset. It accepts
 44,100, 48,000 and 96,000 Hz and produces interleaved left/right floats.
 `po_stereo_modulator_render_f32` capacities and output counts are **stereo
 frames**, so a capacity of 256 requires storage for 512 floats. Chunk boundaries

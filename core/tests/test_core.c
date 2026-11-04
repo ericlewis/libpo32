@@ -770,13 +770,13 @@ static void test_frame_tail_corruption(void) {
   status = po32_builder_finish(&builder, &frame_len);
   assert(status == PO32_OK);
 
-  /* Corrupt the 4th byte from end (raw4 in final tail) → triggers line 181-182 */
+  /* Corrupt the fourth byte of the five-byte final tail (raw4). */
   memcpy(corrupted, frame, frame_len);
   corrupted[frame_len - 2u] ^= 0x01u;
   status = po32_frame_parse(corrupted, frame_len, NULL, NULL, &tail);
   assert(status == PO32_ERR_FRAME);
 
-  /* Corrupt a packet trailer byte → triggers line 250-252 */
+  /* Corrupt a packet trailer byte. */
   memcpy(corrupted, frame, frame_len);
   corrupted[PO32_PREAMBLE_BYTES + PO32_PATCH_PAYLOAD_BYTES + 3u] ^= 0x01u;
   status = po32_frame_parse(corrupted, frame_len, NULL, NULL, &tail);
@@ -802,7 +802,7 @@ static void test_builder_finish_null_frame_len(void) {
   status = po32_builder_append(&builder, &dpkt);
   assert(status == PO32_OK);
 
-  /* finish with frame_len = NULL (line 688 false branch) */
+  /* finish with frame_len = NULL. */
   status = po32_builder_finish(&builder, NULL);
   assert(status == PO32_OK);
 }
@@ -927,12 +927,11 @@ static void test_streaming_modulator_matches_block_render(void) {
 }
 
 static void test_long_frame_carrier_does_not_decay(void) {
-  /* The modulator and demodulator both advance their carrier by a recursive
-   * rotation whose rotor comes from the interpolated sine LUT, so its
-   * magnitude is slightly under 1. Without renormalization the carrier fades
-   * ~10x every 2M samples: audio rendered from a long frame goes silent, and
-   * the demodulator's correlation underflows to zero and decodes every bit as
-   * a 1. A 400-packet frame is ~25.4M samples, well past both failure points. */
+  /* The earlier interpolated-LUT rotor had magnitude slightly under 1.
+   * Without renormalization its carrier faded ~10x every 2M samples, silencing
+   * long renders and underflowing the demodulator's correlation to zero.
+   * The current rotor uses po32_lut_rot_step; retain this ~25.4M-sample
+   * regression to check long-run magnitude and decoding. */
   const uint32_t sample_rate = 44100u;
   const int packet_count = 400;
   const size_t peak_window = 4096u;
@@ -1884,10 +1883,9 @@ static void assert_demodulator_survives_poison(const float *samples, size_t samp
     prefix++;
   }
 
-  /* Exactly one sample is the dangerous shape. A burst of the same infinity
-     accumulates +Inf and -Inf across the window and collapses to NaN, which
-     the divisor test already rejects, so a burst never reaches the phase-error
-     range check that a lone infinity does. */
+  /* A single infinity can reach the phase-error NaN guard. A longer burst
+     can accumulate both signs of infinity, making the window itself NaN
+     and failing the earlier divisor comparison instead. */
   assert(po32_demodulator_push(&demod, &poison_value, 1u, streaming_demod_collect, &packet_count) ==
          PO32_OK);
 
@@ -1896,7 +1894,7 @@ static void assert_demodulator_survives_poison(const float *samples, size_t samp
   assert(demod.symbol_phase == demod.symbol_phase);
 
   /* Feed the rest of the frame. A wedged demodulator never reaches another
-     symbol boundary, so byte_offset stays pinned at zero and the frame never
+     symbol boundary, so byte_offset stops advancing and the frame never
      finishes; a healthy one rides out the single bad sample and still
      completes the transfer. */
   assert(po32_demodulator_push(&demod, samples + prefix, sample_count - prefix,
@@ -1939,7 +1937,7 @@ static void test_demodulator_survives_non_finite_samples(void) {
   assert(po32_render_dpsk_f32(frame, frame_len, 44100u, samples, sample_count) == PO32_OK);
 
   /* Against a positive window, -Inf is the one that reaches the phase-error
-     range check; +Inf matches the window's sign so the comparison never opens,
+     NaN guard; +Inf matches the window's sign so the comparison never opens,
      and NaN is caught earlier by the divisor test. All three must be safe. */
   assert_demodulator_survives_poison(samples, sample_count, -(float)(1.0 / 0.0));
   assert_demodulator_survives_poison(samples, sample_count, (float)(1.0 / 0.0));

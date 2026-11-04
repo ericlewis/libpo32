@@ -1,8 +1,8 @@
 # Fuzzing
 
-libFuzzer harnesses for every surface that consumes untrusted input, plus
-differential checks that the builder, parser, modulator, and demodulator
-always agree.
+The six PO-32 libFuzzer harnesses below exercise selected input surfaces and
+compare the builder, parser, modulator and demodulator. They do not yet cover
+the PO-33/133, PO-35/137 or shared stereo APIs.
 
 | Harness | Target | Key properties checked |
 | --- | --- | --- |
@@ -48,6 +48,8 @@ binaries that replay corpus or crash files:
    include `fuzz_driver.h`.
 2. Add `<name>` to `PO32_FUZZ_TARGETS` in `core/CMakeLists.txt`.
 3. Teach `fuzz_seed_gen.c` to emit at least one valid seed for it.
+4. Add `<name>` to the target loop in `scripts/ci-fuzz.sh` so local and CI
+   smoke runs execute it.
 
 Assert invariants with `fuzz_check()`; prefer strong differential
 properties (round trips, idempotence, cross-checking two implementations)

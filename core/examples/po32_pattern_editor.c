@@ -200,7 +200,8 @@ static void print_help(void) {
   puts("Notes:");
   puts("  - Steps are 1-16.");
   puts("  - Lanes are 1-4. The PO-32 can play one instrument per lane at a time.");
-  puts("  - Pattern transfers operate on one bank at a time.");
+  puts("  - This editor restricts each pattern to the selected bank.");
+  puts("    Changing banks clears the current pattern.");
   puts("      bank 0: sounds 1-8");
   puts("      bank 1: sounds 9-16");
   puts("  - Instrument groups by lane:");

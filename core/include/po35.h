@@ -45,9 +45,10 @@ typedef struct po35_builder {
 } po35_builder_t;
 
 /* Validate counter preamble, packets and special final tail. Unknown packets
- * are delivered as owned raw payloads; no BEGIN/END pair is required. A
- * nonzero callback return stops with PO_OK, stopped=1 and done=0. frame_bytes
- * and final_state describe the validated prefix even on later failure.
+ * are delivered raw through borrowed packet pointers; copy the packet struct
+ * to retain its contents. No BEGIN/END pair is required. A nonzero callback
+ * return stops with PO_OK, stopped=1 and done=0. frame_bytes and final_state
+ * describe the validated prefix even on later failure.
  * Trailing data after the tail is ignored and excluded from frame_bytes.
  * result may be NULL. Packet offsets include the full counter preamble.
  * This validates framing, not speech-group completeness or packet ordering. */

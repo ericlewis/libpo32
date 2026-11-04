@@ -5,7 +5,7 @@
  * Build:
  *   cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
  *   cmake --build build --target po32_demo
- *   ./build/po32_demo
+ *   ./build/core/po32_demo
  */
 
 #include "po32.h"
@@ -71,7 +71,7 @@ int main(void) {
   po32_patch_params_t kick = {0};
   po32_patch_params_zero(&kick);
   kick.OscWave = 0.0f;  /* sine */
-  kick.OscFreq = 0.18f; /* ~130 Hz */
+  kick.OscFreq = 0.18f; /* ~69 Hz before pitch modulation */
   kick.OscAtk = 0.0f;
   kick.OscDcy = 0.45f;
   kick.ModMode = 0.0f; /* decay mod */

@@ -33,7 +33,7 @@ typedef struct po32_packet {
   uint16_t tag_code;
   size_t offset;
   size_t payload_len;
-  uint8_t payload[PO32_MAX_PAYLOAD]; /* owned copy — safe to keep after callback returns */
+  uint8_t payload[PO32_MAX_PAYLOAD]; /* inline bytes, retained when the packet struct is copied */
   po32_packet_trailer_t trailer;
 } po32_packet_t;
 
@@ -48,8 +48,9 @@ typedef struct po32_final_tail {
 
 /*
  * Packet callback for po32_frame_parse() and po32_demodulator_push(). The
- * packet struct (including its payload array) is owned and safe to keep after
- * the callback returns. packet->offset is the packet's byte offset within the
+ * packet pointer is borrowed for the duration of the callback. Copy the packet
+ * struct, including its inline payload array, to retain its contents after the
+ * callback returns. packet->offset is the packet's byte offset within the
  * full transmitted frame, counting the 128-byte preamble, from both callers
  * and from po32_builder_append_packet().
  * Return 0 to continue parsing, nonzero to stop early. Stopping is terminal

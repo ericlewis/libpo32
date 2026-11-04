@@ -91,8 +91,11 @@ uint8_t po32_unwhiten_byte(uint16_t state, uint8_t coded_byte);
 /*
  * Parse a full transmitted frame.
  *
- * The callback receives owned packet structs in wire order. If out_tail is
- * non-NULL, the decoded final tail is returned after a successful parse.
+ * The callback receives borrowed packet pointers in wire order; copy the
+ * packet struct to retain it. Returning nonzero stops parsing with PO32_OK
+ * before validating the remainder. Validated packets may be delivered before
+ * a later error. out_tail is written only when a valid final tail is reached,
+ * and is unchanged on early stop or error. Bytes after the tail are ignored.
  */
 po32_status_t po32_frame_parse(const uint8_t *frame, size_t frame_len,
                                po32_packet_callback_t callback, void *user,
@@ -108,7 +111,7 @@ void po32_builder_init(po32_builder_t *builder, uint8_t *buffer, size_t capacity
 /* Reset the builder and write the preamble back to the output buffer. */
 void po32_builder_reset(po32_builder_t *builder);
 
-/* Append one packet payload in encoded body form. */
+/* Encode and append one raw packet payload to the frame. */
 po32_status_t po32_builder_append_packet(po32_builder_t *builder, uint16_t tag_code,
                                          const uint8_t *payload, size_t payload_len,
                                          size_t *packet_offset);
@@ -295,14 +298,15 @@ void po32_demodulator_desync(po32_demodulator_t *d);
 /* Push a chunk of mono float audio. Callback invoked on each decoded packet.
    May be called repeatedly with successive chunks.
 
-   Each packet is committed before its callback runs, so
-   po32_demodulator_packet_count() counts every packet the callback was handed.
+   po32_demodulator_packet_count() counts packets since the most recent sync
+   acquisition and resets when sync is reacquired. Each packet is committed
+   before its callback runs, including the packet that stops the stream.
 
    A nonzero callback return stops the stream for good: the unconsumed
-   remainder of the chunk is discarded and every later push is a no-op
-   returning PO32_OK. Stopping is terminal because push reports neither how
-   many samples it consumed nor where it stopped, so the discarded audio could
-   not be re-fed. Reuse a stopped demodulator by re-initializing it with
+   remainder of the chunk is discarded and later pushes with non-NULL d and
+   samples are no-ops returning PO32_OK. Stopping is terminal because push
+   reports neither how many samples it consumed nor where it stopped, so the
+   discarded audio could not be re-fed. Reuse a stopped demodulator with
    po32_demodulator_init(); po32_demodulator_desync() no more clears the stop
    than it clears po32_demodulator_done(). */
 po32_status_t po32_demodulator_push(po32_demodulator_t *d, const float *samples, size_t count,
@@ -313,8 +317,9 @@ po32_status_t po32_demodulator_push(po32_demodulator_t *d, const float *samples,
    rendered sample, so a capture that ends exactly at po32_render_sample_count()
    samples needs this to finish. Call once after the final chunk has been
    pushed, then query po32_demodulator_done(). A no-op when already done, not
-   yet synced, or when the audio stopped part-way through a symbol, so a
-   truncated capture stays unfinished rather than gaining an invented bit. */
+   yet synced, or when the pending symbol's estimated phase is less than half
+   a symbol. This avoids decisions from near-empty correlation windows; it
+   does not guarantee rejection of every truncated capture. */
 void po32_demodulator_flush(po32_demodulator_t *d, po32_packet_callback_t callback, void *user);
 
 /* Query streaming decode progress. */

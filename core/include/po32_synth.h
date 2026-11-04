@@ -5,8 +5,8 @@
  * PO-32 drum synthesizer.
  *
  * Renders drum sounds from po32_patch_params_t parameters.
- * All output is float [-1, 1]. Internally uses lookup tables for all
- * transcendentals (no libm trig required).
+ * All output is float [-1, 1]. Internally uses lookup-table and
+ * polynomial/iterative math helpers without libm.
  */
 
 #include "po32.h"
@@ -33,6 +33,10 @@ size_t po32_synth_samples_for_duration(const po32_synth_t *synth, float seconds)
  * out:      caller-allocated float buffer, receives samples in [-1, 1]
  * out_capacity: max floats that fit in out
  * out_len:  set to actual number of samples written
+ *
+ * Renders at most out_capacity samples and returns PO32_OK even when the
+ * buffer is too small for the full duration. Use po32_synth_samples_for_duration
+ * to size a complete hit, or a streaming voice to preserve the remaining samples.
  */
 po32_status_t po32_synth_render(const po32_synth_t *synth, const po32_patch_params_t *params,
                                 int velocity, float duration, float *out, size_t out_capacity,
@@ -43,7 +47,7 @@ po32_status_t po32_synth_render(const po32_synth_t *synth, const po32_patch_para
 /*
  * Streaming voice renderer.
  *
- * Pre-computes all per-render constants at init time and persists DSP
+ * Pre-computes voice constants at init time and persists DSP
  * state (phase, filters, PRNG) across render_f32 calls. This allows
  * rendering a drum hit in fixed-size chunks suitable for real-time
  * audio callbacks and memory-constrained targets.

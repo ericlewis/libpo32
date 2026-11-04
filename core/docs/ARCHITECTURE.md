@@ -29,7 +29,7 @@ cross-compilation alone is not runtime validation.
 | `po_common.h` | Shared status, raw packets and trailers; preserves old PO-32 tags/layouts and supplies neutral aliases |
 | `po32.c`, `po32.h` | PO-32 typed packets, mono modem, builders and receivers |
 | `po32_patch_import.c` | `.mtdrum` text parser |
-| `po32_synth.c`, `po32_synth.h` | Microtonic-compatible drum model |
+| `po32_synth.c`, `po32_synth.h` | Host drum rendering from PO-32 patch parameters |
 | `po33.c`, `po33_audio.c`, `po33_data.c`, `po33.h` | PO-33/133 framing, PCM conversion, sample companding and lossless logical records |
 | `po35.c`, `po35.h` | PO-35/137 framing, speech records, settings and patterns |
 | `po35_analysis.c`, `po35_analysis.h` | Experimental one-shot PCM analysis with fixed caller-owned workspace |
@@ -55,23 +55,27 @@ not identify the physical device that produced a recording.
 
 Keep raw packet payloads, encoded packet bodies and complete frames distinct.
 Typed settings/pattern/speech records are another domain: one logical record
-can span multiple packets. All reserved or unresolved fields remain raw,
-including unused chain entries and anomalous sample ranges.
+can span multiple packets. The PO-33/35 record codecs preserve raw fields,
+including unused chain entries and anomalous sample ranges. PO-32 typed
+pattern conversion can normalize unsupported trigger bits; retain raw packet
+payloads when byte-for-byte preservation is required.
 
-Raw callbacks receive inline-owned payload bytes; copying the packet retains
-its contents. Offsets include the complete model preamble. A callback stop is
-separate from successful completion, and validated prefixes can precede a later
-CRC failure. Consult each parser's documented result semantics.
+Raw callbacks borrow a packet struct with inline payload bytes; copying the
+struct retains its contents. Offsets include the complete model preamble. A
+callback stop is separate from successful completion, and validated prefixes
+can precede a later CRC failure. Consult each parser's documented result semantics.
 
 Builders use caller-owned storage and check whole writes before changing it.
-Borrowed renderer input must remain alive and immutable through rendering or
-reset. There is no hidden ownership transfer or background work.
+Borrowed renderer input must remain alive and immutable whenever the state may
+render or reset, including subsequent renders after reset. There is no hidden
+ownership transfer or background work.
 
 ## Audio boundaries
 
-Core input/output audio is `float`; stereo capacities/counts are explicitly in
-stereo frames. The shared transmitter is chunked and retains phase
-and integer timing across calls. The PO-32 receiver remains streaming.
+Modem, synthesis and bulk PCM buffers use `float`; the scalar PO-33 sample codec
+converts between signed-order mu-law bytes and PCM16. Stereo capacities/counts
+are explicitly in stereo frames. The shared transmitter is chunked and retains
+phase and integer timing across calls. The PO-32 receiver remains streaming.
 
 The stereo receiver is deliberately **offline**. Forward/backward audio and
 pilot filters need the complete capture. Call `po_stereo_decode_requirements`
@@ -97,7 +101,8 @@ partial final record. It does not allocate, normalize input or create a frame.
 Frame boundaries use cumulative integer rounding; reset and arbitrary chunks
 produce the same output. Core speech output is finite, unnormalized audio and
 may exceed `[-1,1]`. Numerical failure is explicit and latched until reset.
-Normalization, PCM conversion, clip concatenation and WAV writing stay hosted.
+Speech-preview normalization, conversion to WAV PCM, clip concatenation and
+file writing stay hosted.
 The speech model uses deterministic Gaussian noise with a caller-selected seed.
 
 ## Hosted adapters

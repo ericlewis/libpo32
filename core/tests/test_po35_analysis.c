@@ -220,7 +220,7 @@ static void test_stress(void) {
   puts("60 signal/rate combinations, both banks finite");
 }
 static void test_native_golden(void) {
-  /* Independent prototype result for deterministic, exactly representable PCM. */
+  /* Fixed regression result for deterministic, exactly representable PCM. */
   static const uint8_t expected[44] = {
       40, 252, 51, 16, 199, 16, 246, 11, 249, 8, 252, 6, 254, 5, 181, 0, 0, 0, 0, 0, 0, 0,
       0,  0,   1,  1,  1,   1,  1,   1,  1,   1, 1,   1, 1,   1, 1,   1, 1, 1, 1, 1, 1, 1};
