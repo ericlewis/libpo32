@@ -143,7 +143,8 @@ func TestDemodulatorExactLengthNeedsFlush(t *testing.T) {
 	}
 }
 
-func TestDemodulatorFlushDeliversAndStopsOnFinalPacket(t *testing.T) {
+func pendingPacketAudio(t *testing.T) []float32 {
+	t.Helper()
 	b := NewBuilder(1 << 15)
 	defer b.Close()
 	for i := 0; i < 64; i++ {
@@ -164,7 +165,11 @@ func TestDemodulatorFlushDeliversAndStopsOnFinalPacket(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Remove the tail so the pending symbol completes a packet in Flush.
-	audio := streamingAudio(t, frame[:len(frame)-FinalTailBytes])
+	return streamingAudio(t, frame[:len(frame)-FinalTailBytes])
+}
+
+func TestDemodulatorFlushDeliversAndStopsOnFinalPacket(t *testing.T) {
+	audio := pendingPacketAudio(t)
 	d, err := NewDemodulator(44100)
 	if err != nil {
 		t.Fatal(err)
@@ -287,6 +292,73 @@ func TestDemodulatorCloseFromCallback(t *testing.T) {
 	}
 	if err := d.Push([]float32{0}, nil); err != ErrInvalidArg {
 		t.Fatalf("push after close = %v", err)
+	}
+}
+
+func TestDemodulatorCallbackUnwindCloses(t *testing.T) {
+	for _, operation := range []string{"Push", "Flush"} {
+		for _, exit := range []string{"panic", "Goexit"} {
+			t.Run(operation+"/"+exit, func(t *testing.T) {
+				d, err := NewDemodulator(44100)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer d.Close()
+				audio := streamingAudio(t, streamingFrame(t, 1, 2, 3))
+				call := func(fn func(*Packet) bool) error { return d.Push(audio, fn) }
+				if operation == "Flush" {
+					if err := d.Push(pendingPacketAudio(t), nil); err != nil {
+						t.Fatal(err)
+					}
+					if d.PacketCount() != 63 {
+						t.Fatalf("expected one pending packet, have %d", d.PacketCount())
+					}
+					call = d.Flush
+				}
+
+				called, returned := false, false
+				var recovered any
+				done := make(chan struct{})
+				go func() {
+					defer close(done)
+					defer func() { recovered = recover() }()
+					_ = call(func(*Packet) bool {
+						called = true
+						if exit == "Goexit" {
+							runtime.Goexit()
+						}
+						panic("callback panic")
+					})
+					returned = true
+				}()
+				<-done
+				if !called || returned {
+					t.Fatalf("callback unwind: called=%v returned=%v", called, returned)
+				}
+				if exit == "panic" && recovered != "callback panic" {
+					t.Fatalf("panic changed during cleanup: %v", recovered)
+				}
+				if exit == "Goexit" && recovered != nil {
+					t.Fatalf("Goexit panicked: %v", recovered)
+				}
+				// Empty input must also reject the closed receiver without entering C.
+				if err := d.Push(nil, nil); err != ErrInvalidArg {
+					t.Fatalf("Push after %s = %v, want ErrInvalidArg", exit, err)
+				}
+				if err := d.Push(audio, nil); err != ErrInvalidArg {
+					t.Fatalf("nonempty Push after %s = %v, want ErrInvalidArg", exit, err)
+				}
+				if err := d.Flush(nil); err != ErrInvalidArg {
+					t.Fatalf("Flush after %s = %v, want ErrInvalidArg", exit, err)
+				}
+				d.Desync()
+				if d.Done() || d.Stopped() || d.PacketCount() != 0 {
+					t.Fatal("closed decoder reported progress")
+				}
+				d.Close()
+				d.Close()
+			})
+		}
 	}
 }
 
