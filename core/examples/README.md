@@ -11,7 +11,7 @@
 | [`po33_decode_capture.c`](po33_decode_capture.c) | Decode PO-33/133 records and export sample WAVs |
 | [`po33_encode_capture.c`](po33_encode_capture.c) | Re-encode a PO-33/133 frame, with optional sample and pattern edits |
 | [`po35_decode_capture.c`](po35_decode_capture.c) | Decode PO-35/137 records and render approximate speech previews |
-| [`po35_encode_capture.c`](po35_encode_capture.c) | Re-encode a PO-35/137 frame as stereo modem audio |
+| [`po35_encode_capture.c`](po35_encode_capture.c) | Replace speech from PCM WAVs in a PO-35/137 frame and emit stereo modem audio |
 
 ## Build
 
@@ -110,9 +110,64 @@ backup with no nonempty speech slots still exports its data successfully and
 omits `all-speech.wav`. The summary counts all stored groups in `speech_groups`
 and the nonempty per-slot WAVs in `speech_audio_files`.
 
-The encoder rebuilds an existing frame unchanged. It does not analyze PCM into
-new speech records. Speech previews use an approximate model; exact device
-voice characters, effects and gain/noise behavior are not implemented.
+Without speech edits, the encoder rebuilds the existing frame byte for byte.
+Speech previews use an approximate model; exact device voice characters,
+effects and gain/noise behavior are not implemented.
+
+## PO-35 / PO-137 Speech Replacement
+
+Replace one or more existing speech slots with mono PCM WAVs:
+
+```sh
+./build/core/po35_encode_capture decoded-po35/frame.bin edited-po35.wav \
+  --speech 0 spoken-intro.wav --speech 3 spoken-outro.wav --fps 80
+./build/core/po35_decode_capture edited-po35.wav checked-edited-po35
+```
+
+Slots are zero-based (`0..14`) and must already have a speech header in the
+input frame. Repeating `--speech` is allowed for different slots; duplicate
+slot edits are rejected. `--fps 20|40|60|80` applies to every replacement and
+defaults to 80. `--rate 44100|48000|96000` selects only the transfer WAV rate
+and defaults to 48000; it does not change the speech input or frame rate.
+
+Speech inputs must be nonempty mono/stereo PCM16, PCM24, PCM32 or IEEE float32
+WAVs at 8–192 kHz, including extensible WAV. Samples must be finite and in
+`[-1,1]`. The tool does not clip, truncate or normalize them. Integer PCM is
+scaled to float. Stereo speech requires an explicit global channel choice:
+
+```sh
+./build/core/po35_encode_capture decoded-po35/frame.bin edited-stereo-po35.wav \
+  --speech 2 stereo-speech.wav --channel mix --fps 40 --rate 48000
+```
+
+`--channel left` and `--channel right` select one channel; `mix` takes their
+arithmetic mean. Mono input needs no channel option, accepts `left` or `mix`,
+and rejects `right`. The channel option applies to all supplied speech WAVs.
+
+Each replacement is limited to 640 records. A partial final record is zero-padded:
+
+| Frame rate | Maximum input duration |
+| ---: | ---: |
+| 80 fps | 8 seconds |
+| 60 fps | 10⅔ seconds |
+| 40 fps | 16 seconds |
+| 20 fps | 32 seconds |
+
+This is the editor's creation policy, not the raw parser's limit. The exact
+lower-rate durations follow from `640 / fps` and are not hardware-validated.
+See [format limits and source](../docs/PO_FORMATS.md#po-35--po-137).
+
+The editor updates each selected header's record count and frame rate, then
+replaces its speech data. It preserves opaque header bytes 4–8, settings,
+drum patches, patterns and unselected groups. It rejects incomplete or
+inconsistent groups, unknown extensions within a selected group, missing
+slots and empty inputs. It cannot create a new slot. Outputs must not exist.
+
+PCM analysis and preview synthesis are approximate models, not the original
+Bitspeek or PO-35 implementation. Core synthesis is unnormalized and transient
+peaks may exceed `[-1,1]`; the decoder applies the preview normalization
+described above. A successful software decode does not establish that an
+edited transfer will be accepted or play correctly on hardware.
 
 ## Offline Capture Checks
 
@@ -151,9 +206,9 @@ byte; it does not establish device acceptance.
 ## Core and Host Responsibilities
 
 The shared `po_capture` and `po_stereo_wav` adapters handle file I/O and
-allocation. Modem and synthesis code live in the freestanding C core. See
-[Architecture](../docs/ARCHITECTURE.md), the [C API](../docs/C_API.md), and
-[Backup formats](../docs/PO_FORMATS.md).
+allocation. Modem, speech analysis and synthesis code live in the freestanding
+C core. See [Architecture](../docs/ARCHITECTURE.md), the [C API](../docs/C_API.md),
+and [Backup formats](../docs/PO_FORMATS.md).
 
 Software roundtrips verify byte preservation. Generated stereo-family
 transfers and speech previews have not been validated against physical-device

@@ -105,7 +105,22 @@ unvoiced byte, ten signed low-bank LAR values, thirty signed high-bank values.
 In the reconstruction model, pitch is signed Q11 octaves relative to C4.
 The low and high filter banks use 10 and 30 coefficients at 8 and 24 kHz.
 Gain, noise, voice characters and effects are not fully mapped. See the
-[speech API](C_API.md#po-35-speech-rendering) for rendering limits.
+[speech analysis API](C_API.md#po-35-speech-analysis) and
+[speech renderer](C_API.md#po-35-speech-rendering) for model limits.
+
+The raw header can represent up to 65,535 records. The hosted speech editor
+uses a separate 640-record creation policy: 8 seconds at 80 fps, 10⅔ seconds
+at 60 fps, 16 seconds at 40 fps or 32 seconds at 20 fps. Magnus Lidström
+[documents the four rates, the 80 fps default and longer recording at lower rates](https://soniccharge.com/forum/topic/1060-po-35-secret-powers).
+The durations above follow from `640 / fps`; the exact lower-rate limits are
+an inference used by the editor, not verified hardware acceptance limits.
+Parsers retain larger valid raw groups without imposing this creation policy.
+
+Speech replacement preserves the slot and opaque header bytes 4–8, updates
+only the BE16 record count and frame-rate byte, and replaces the group's
+record packets. It retains settings, drum patches, patterns and other groups.
+Unknown extensions inside a selected group make replacement ambiguous and
+are rejected by the hosted editor.
 
 ## Limits
 

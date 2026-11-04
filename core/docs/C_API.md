@@ -14,6 +14,7 @@ Shared statuses and raw packets are in `po_common.h`. The `po_status_t`,
 | [`po32_synth.h`](../include/po32_synth.h) | Drum synthesis |
 | `po33.h` | PO-33/133 framing, sample codec and raw-preserving logical records |
 | `po35.h` | PO-35/137 framing, speech records, settings and patterns |
+| `po35_analysis.h` | One-shot PCM-to-speech analysis with caller-owned workspace |
 | `po35_synth.h` | Borrowed-record speech voices and one-shot rendering |
 | `po_stereo.h` | Shared chunked stereo TX and caller-workspace offline RX |
 
@@ -341,10 +342,61 @@ The receiver accepts finite interleaved float input at 32,000 through
 recovers wire bytes, potentially including bytes beyond the final packet.
 Always pass those bytes to the relevant model parser to establish completion.
 
+## PO-35 Speech Analysis
+
+`po35_analysis.h` converts finite normalized mono `float` PCM in `[-1,1]`
+at 8,000–192,000 Hz into packed 44-byte speech records. It is a one-shot,
+approximate LPC analysis model, not the original Bitspeek or PO-35 encoder.
+Both the 10-coefficient low bank and 30-coefficient high bank are emitted using
+a common bandlimited 24 kHz clock, with the low bank decimated to 8 kHz.
+
+Call `po35_analysis_size_for_pcm` before providing output storage. Supported
+frame rates are 20, 40, 60 and 80 fps. The required record count is
+`ceil(sample_count * fps / sample_rate)`, with a partial final record zero-padded.
+The core allows at most `PO35_ANALYSIS_MAX_RECORDS` (65,535) records, matching
+the header's 16-bit count. The hosted editor's smaller
+[creation limit](../examples/README.md#po-35--po-137-speech-replacement) does not
+restrict raw parsing or this API.
+
+For example, encode one second of 24 kHz mono PCM at 80 fps:
+
+```c
+#include "po35_analysis.h"
+
+po_status_t encode_second(po35_analysis_workspace_t *workspace,
+                          const float pcm[24000],
+                          uint8_t records[80 * PO35_ANALYSIS_RECORD_BYTES]) {
+  size_t required = 0, written = 0;
+  po_status_t status = po35_analysis_size_for_pcm(24000, 24000, 80, &required);
+  if (status != PO_OK)
+    return status;
+  return po35_analysis_encode_f32(workspace, pcm, 24000, 24000, 80,
+                                   records, required, &written);
+}
+```
+
+The caller owns the workspace, input and output arrays. The workspace is
+currently 49,632 bytes on supported IEEE-754 targets; use
+`sizeof(po35_analysis_workspace_t)` and choose storage appropriate to the
+application's stack budget. Its members are implementation details and need
+no initialization. Workspace, PCM, records and output-length storage must be
+disjoint. No allocation or persistent global state is used.
+
+Invalid sample values, rate, fps or duration return `PO_ERR_RANGE`; insufficient
+capacity returns `PO_ERR_BUFFER_TOO_SMALL`. Argument and sample validation
+precedes record writes. On error, records remain untouched and the output byte
+count is zero. Empty PCM requires zero record bytes, but still requires a
+workspace; PCM and record pointers may be null when their required size is zero.
+
+Analysis does not normalize input. Shared gain is calibrated to the louder
+bank under reconstruction model 1; synthesized transients can still exceed
+`[-1,1]`. Applications collect records into speech groups and update their
+headers before using the frame builder and stereo transmitter.
+
 ## PO-35 Speech Rendering
 
-`po35_synth.h` provides approximate speech reconstruction. It does not implement
-PCM-to-speech analysis or exact hardware voice characters and effects.
+`po35_synth.h` provides approximate speech reconstruction. Exact hardware voice
+characters and effects are not implemented. Use `po35_analysis.h` for PCM input.
 The low bank renders at 8 kHz; the high bank renders at 24 kHz. Supported record
 rates are 20, 40, 60 and 80 fps.
 
@@ -375,8 +427,9 @@ including after reset. Record bytes must be a multiple of 44. Use
 oscillator phase, noise and filter state persist across calls; chunked rendering
 and reset reproduce the same output within a build.
 
-Output is finite, unnormalized float and may exceed `[-1, 1]`. The core performs
-no resampling, clipping or normalization. Numerical overflow or instability
-returns a latched `PO_ERR_RANGE`; `written` counts only committed finite samples.
+Output is finite, unnormalized float and may exceed `[-1, 1]`. The renderer
+performs no resampling, clipping or normalization. Numerical overflow or
+instability returns a latched `PO_ERR_RANGE`; `written` counts only committed
+finite samples.
 Reset clears the error. `po35_synth_render` wraps the same voice implementation
 for one-shot use and writes nothing when output capacity is insufficient.

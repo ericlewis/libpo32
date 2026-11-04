@@ -27,7 +27,7 @@ primitives while keeping drum synthesis, sample pools and speech records distinc
 | --- | --- | --- |
 | PO-32 | Mono DPSK encode/decode | Patches, patterns and drum synthesis |
 | PO-33 / PO-133 | Stereo DQPSK encode/decode | Sample companding, settings, patterns and template editing |
-| PO-35 / PO-137 | Stereo DQPSK encode/decode | Drum patches, speech records and approximate speech synthesis |
+| PO-35 / PO-137 | Stereo DQPSK encode/decode | Drum patches, speech records, PCM analysis and approximate speech synthesis |
 
 The core uses caller-owned memory and standard freestanding C99 headers, with
 no heap allocation or calls to libc, libm, filesystem or device APIs. On Unix,
@@ -37,10 +37,11 @@ symbols. Compiler runtime requirements depend on the target; see
 applications own allocation, WAV files and audio playback.
 
 [PO-33 editing](core/examples/README.md#po-33--po-133-template-editing) preserves
-existing allocation and unknown metadata. PO-35 supports framing and speech
-rendering; analysis of PCM into new speech records is not implemented. Unknown
-fields remain raw. Generated stereo-family transfers have not been validated
-on physical hardware.
+existing allocation and unknown metadata. [PO-35 speech editing](core/examples/README.md#po-35--po-137-speech-replacement)
+analyzes PCM into new speech records for existing slots while retaining their
+metadata and controls. Speech analysis and rendering use an approximate model,
+not the original Bitspeek or device implementation. Unknown fields remain raw.
+Generated stereo-family transfers have not been validated on physical hardware.
 
 ## Using It With a PO-32
 
@@ -129,7 +130,7 @@ Additional hosted tools:
 | `./build/core/po33_decode_capture input.wav new-directory` | PO-33/133 raw records and sample WAV export |
 | `./build/core/po33_encode_capture frame.bin new.wav` | PO-33/133 template re-encoding and explicit edits |
 | `./build/core/po35_decode_capture input.wav new-directory` | PO-35/137 raw records and speech previews |
-| `./build/core/po35_encode_capture frame.bin new.wav` | PO-35/137 frame-to-modem encoding |
+| `./build/core/po35_encode_capture frame.bin new.wav` | PO-35/137 frame-to-modem encoding, with optional `--speech SLOT audio.wav` replacements |
 
 ## Projects Built with libpo32
 
@@ -145,6 +146,7 @@ Additional hosted tools:
 | [`core/include/po_common.h`](core/include/po_common.h) | Shared statuses and raw packets |
 | [`core/include/po33.h`](core/include/po33.h) | Sampler-family data and framing |
 | [`core/include/po35.h`](core/include/po35.h) | Speech-family data and framing |
+| [`core/include/po35_analysis.h`](core/include/po35_analysis.h) | Caller-workspace PCM-to-speech analysis |
 | [`core/include/po35_synth.h`](core/include/po35_synth.h) | Caller-owned native speech renderer |
 | [`core/include/po_stereo.h`](core/include/po_stereo.h) | Shared chunked stereo TX and explicit offline RX |
 | [`core/include/po32.h`](core/include/po32.h) | Transfer builder, packet helpers, renderer, and decoder |
