@@ -30,6 +30,8 @@ endif()
 
 add_library(po32 STATIC
   src/po32.c
+  src/po33.c
+  src/po33_data.c
   src/po32_patch_import.c
   src/po32_synth.c
 )
@@ -176,6 +178,22 @@ add_test(
     -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/run_decode_capture_smoke.cmake
 )
 
+add_executable(po33_tests tests/test_po33.c)
+target_link_libraries(po33_tests PRIVATE po32)
+add_test(NAME po33_tests COMMAND po33_tests)
+
+add_executable(po33_encode_tests tests/test_po33_encode.c)
+target_link_libraries(po33_encode_tests PRIVATE po32)
+add_test(NAME po33_encode_tests COMMAND po33_encode_tests)
+
+add_executable(po33_data_tests tests/test_po33_data.c)
+target_link_libraries(po33_data_tests PRIVATE po32)
+add_test(NAME po33_data_tests COMMAND po33_data_tests)
+
+add_executable(po_wire_tests tests/test_po_wire.c)
+target_link_libraries(po_wire_tests PRIVATE po32)
+add_test(NAME po_wire_tests COMMAND po_wire_tests)
+
 # install
 
 install(TARGETS po32
@@ -188,6 +206,7 @@ install(TARGETS po32
 install(FILES
   include/po32.h
   include/po_common.h
+  include/po33.h
   include/po32_synth.h
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )
