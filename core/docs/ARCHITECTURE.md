@@ -32,6 +32,7 @@ cross-compilation alone is not runtime validation.
 | `po32_synth.c`, `po32_synth.h` | Microtonic-compatible drum model |
 | `po33.c`, `po33_data.c`, `po33.h` | PO-33/133 framing, sample companding and lossless logical records |
 | `po35.c`, `po35.h` | PO-35/137 framing, speech records, settings and patterns |
+| `po35_analysis.c`, `po35_analysis.h` | Experimental one-shot PCM analysis with fixed caller-owned workspace |
 | `po35_synth.c`, `po35_synth.h` | Experimental speech reconstruction with caller-owned streaming voices |
 | `po_stereo.c`, `po_stereo.h` | Shared stereo DQPSK transmitter and explicit offline receiver |
 | `po.h` | Optional umbrella include |
@@ -78,6 +79,13 @@ for typed workspace sizes and provide those arrays to `po_stereo_decode_f32`.
 It preserves the input, recovers wire bytes from the counter preamble onward,
 and leaves model grammar and final-frame trimming to the family parser.
 
+`po35_analysis_encode_f32` analyzes complete finite mono PCM in `[-1,1]` at
+8–192 kHz. It resamples onto a bandlimited 24 kHz analysis clock and derives
+both the 24 kHz high bank and decimated 8 kHz low bank. A fixed caller-owned
+workspace holds scratch state; input duration only changes the required output
+size. Analysis emits 44-byte records at 20, 40, 60 or 80 fps and zero-pads a
+partial final record. It does not allocate, normalize input or create a frame.
+
 `po35_synth_voice_*` streams one borrowed speech group with fixed-size state.
 Frame boundaries use cumulative integer rounding; reset and arbitrary chunks
 produce the same output. Core speech output is finite, unnormalized audio and
@@ -87,10 +95,17 @@ The speech model uses deterministic Gaussian noise with a caller-selected seed.
 
 ## Hosted adapters
 
-`examples/po_capture.c` reads WAV files, allocates workspace and calls the core
-stereo receiver. `examples/po_stereo_wav.c` validates family frames, wraps the
-core transmitter in WAV/PCM output, and handles exclusive file creation.
-The PO-33 and PO-35 examples collect logical records and export their contents.
+`examples/po_capture.c` reads mono/stereo PCM or float WAV files without mixing
+channels; its capture adapter allocates workspace and calls the core stereo
+receiver. `examples/po_stereo_wav.c` validates family frames, wraps the core
+transmitter in WAV/PCM output, and handles exclusive file creation. The PO-33
+and PO-35 examples collect logical records and export their contents.
+
+`po35_encode_capture` selects or explicitly mixes speech WAV channels, calls
+the core analysis API, and replaces existing speech groups. Its 640-record
+creation limit is a hosted policy, separate from the core's 16-bit record-count
+limit. It changes only selected speech data and header count/frame rate;
+opaque metadata, controls, patterns and unselected content are retained.
 
 ## Build and package names
 
@@ -104,4 +119,5 @@ name remains `libpo32`.
 
 Builds, byte-preserving roundtrips and numerical checks do not establish device
 acceptance. Unmapped controls remain raw. Stereo-family transfers have not been
-validated on physical hardware, and speech reconstruction is approximate.
+validated on physical hardware. Speech analysis and reconstruction are
+approximate; neither reproduces the original Bitspeek or PO-35 implementation.
