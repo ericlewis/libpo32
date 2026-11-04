@@ -229,11 +229,16 @@ add_test(
 add_executable(po35_decode_capture examples/po35_decode_capture.c)
 target_link_libraries(po35_decode_capture PRIVATE po_capture)
 add_executable(po35_encode_capture examples/po35_encode_capture.c)
-target_link_libraries(po35_encode_capture PRIVATE po_stereo_wav)
+target_link_libraries(po35_encode_capture PRIVATE po_capture po_stereo_wav)
 add_executable(po35_example_tests tests/test_po35_examples.c)
 target_link_libraries(po35_example_tests PRIVATE po_capture po_stereo_wav)
 add_test(NAME po35_example_tests COMMAND po35_example_tests)
 set_tests_properties(po35_example_tests PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+
+add_executable(po35_encoding_tests tests/test_po35_encoding.c)
+target_link_libraries(po35_encoding_tests PRIVATE po_capture po_stereo_wav)
+add_test(NAME po35_encoding_tests COMMAND po35_encoding_tests)
+set_tests_properties(po35_encoding_tests PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
 
 # Family codecs, shared transport, and the freestanding speech renderer.
 foreach(test_name IN ITEMS po33_data po35 po35_analysis po35_synth po_stereo po_wire)
