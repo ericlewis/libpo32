@@ -63,6 +63,14 @@ parser and trim at `FrameBytes`. Stereo capacities count frames, two floats
 each. PO-35 rendering may return a finite audio prefix together with a
 numerical error; output is approximate and unnormalized.
 
+If a PO-32 streaming callback panics or calls `runtime.Goexit`, the demodulator
+closes because the native call could not finish committing its state. The panic
+still propagates; create a new demodulator after recovering.
+
+Release tags for this nested module use the prefix `bindings/go/`, for example
+`bindings/go/v0.4.0`. A repository-root tag such as `v0.4.0` alone does not
+publish that version of the Go module.
+
 See the [C API](C_API.md) and [formats](PO_FORMATS.md) for the underlying
 contracts and limitations. Software success does not prove device acceptance.
 
