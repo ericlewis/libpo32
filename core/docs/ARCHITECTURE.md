@@ -16,8 +16,8 @@ GCC/Clang CMake core builds use `-ffreestanding -fno-builtin
 -fno-stack-protector` to prevent compiler-generated hosted runtime calls.
 Other toolchains need equivalent settings. On Unix, noninstrumented builds
 audit the actual archive with a relocatable link and undefined-symbol check.
-Sanitizer/fuzzer builds intentionally use a host runtime and instead audit a
-separate uninstrumented source compilation. Hosted examples/tests retain their
+Sanitizer, coverage and fuzzer builds intentionally use a host runtime and audit
+a separate uninstrumented source compilation. Hosted examples/tests retain their
 normal runtime and math libraries. Architecture-specific compiler-builtins
 (such as ARM software floating-point arithmetic) remain a toolchain concern;
 cross-compilation alone is not runtime validation.
