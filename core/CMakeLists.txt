@@ -303,12 +303,24 @@ endif()
 
 if(UNIX AND NOT CMAKE_CROSSCOMPILING AND NOT PO32_SANITIZE AND NOT PO32_COVERAGE
     AND NOT PO32_BUILD_FUZZERS)
+  find_package(PkgConfig QUIET)
   add_test(NAME po_package_smoke
     COMMAND ${CMAKE_COMMAND}
       "-DPO_BUILD_DIR=${PROJECT_BINARY_DIR}"
       "-DPO_C_COMPILER=${CMAKE_C_COMPILER}"
       "-DPO_CONFIG=$<CONFIG>"
+      "-DPO_PKG_CONFIG=${PKG_CONFIG_EXECUTABLE}"
       -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/run_package_smoke.cmake)
+  if(PKG_CONFIG_FOUND)
+    add_test(NAME po_package_multiarch_smoke
+      COMMAND ${CMAKE_COMMAND}
+        "-DPO_BUILD_DIR=${PROJECT_BINARY_DIR}"
+        "-DPO_SOURCE_DIR=${PROJECT_SOURCE_DIR}"
+        "-DPO_C_COMPILER=${CMAKE_C_COMPILER}"
+        "-DPO_INSTALL_LIBDIR=lib/x86_64-linux-gnu"
+        "-DPO_PKG_CONFIG=${PKG_CONFIG_EXECUTABLE}"
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/run_package_smoke.cmake)
+  endif()
 endif()
 
 # Only the core archive is freestanding. Hosted examples/tests may use libm.
@@ -371,6 +383,10 @@ install(FILES
   ${CMAKE_CURRENT_BINARY_DIR}/LibPO32ConfigVersion.cmake
   DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/LibPO32
 )
+
+# Derive the relocatable prefix for single-level and multiarch library paths.
+file(RELATIVE_PATH PO_PKGCONFIG_PREFIX_RELATIVE
+  "${CMAKE_INSTALL_FULL_LIBDIR}/pkgconfig" "${CMAKE_INSTALL_PREFIX}")
 
 configure_file(
   ${CMAKE_CURRENT_SOURCE_DIR}/cmake/po32.pc.in
