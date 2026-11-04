@@ -3,6 +3,7 @@
 #endif
 
 #include <assert.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "../src/po32_synth.c"
@@ -126,6 +127,7 @@ static void test_normalised_control_reference_points(void) {
   po32_synth_voice_t v;
   float output[256];
   size_t made;
+  po32_status_t status;
   /* Independent physical reference points, not a forward/inverse round trip. */
   assert(abs_diff(synth_attack_time(0.25f), 0.0396223f) < 0.00001f);
   assert(abs_diff(synth_attack_time(0.5f), 0.315479f) < 0.0001f);
@@ -150,14 +152,16 @@ static void test_normalised_control_reference_points(void) {
   po32_synth_voice_init(&v, 44100, &p, 127, 1.0f);
   assert(v.mod_pitch_scale == 4.0f && v.mod_osc_s == 1.0f);
   assert(v.mod_dcy_coeff == 1.0f);
-  assert(po32_synth_voice_render_f32(&v, output, 256, &made) == PO32_OK);
+  status = po32_synth_voice_render_f32(&v, output, 256, &made);
+  assert(status == PO32_OK);
   assert(v.mod_env_v == 1.0f && v.mod_osc_s == 1.0f);
   p.ModMode = 1.0f;
   po32_synth_voice_init(&v, 44100, &p, 127, 1.0f);
   {
     float held = v.mod_state;
     assert(held != 0.0f && v.mod_alpha_precomp == 0.0f);
-    assert(po32_synth_voice_render_f32(&v, output, 256, &made) == PO32_OK);
+    status = po32_synth_voice_render_f32(&v, output, 256, &made);
+    assert(status == PO32_OK);
     assert(v.mod_state == held);
   }
   p.EQGain = 0.75f;
@@ -172,8 +176,65 @@ static void test_normalised_control_reference_points(void) {
   assert(abs_diff(v.level / synth_level_gain(p.Level), 1.0f) < 0.0001f);
 }
 
+static void test_sine_modulation_stays_constant_across_long_renders(void) {
+  static const uint32_t sample_rates[] = {44100u, 48000u};
+  static const float rates[] = {0.0f, 0.5f, 0.7f, 1.0f};
+  size_t sr_index, rate_index;
+
+  for (sr_index = 0u; sr_index < sizeof(sample_rates) / sizeof(sample_rates[0]); ++sr_index) {
+    const uint32_t sample_rate = sample_rates[sr_index];
+    const size_t sample_count = (size_t)sample_rate * 10u;
+    float *whole_output = (float *)malloc(sample_count * sizeof(float));
+    assert(whole_output != NULL);
+
+    for (rate_index = 0u; rate_index < sizeof(rates) / sizeof(rates[0]); ++rate_index) {
+      po32_patch_params_t params;
+      po32_synth_voice_t whole, chunked;
+      float chunk_output[997];
+      size_t made, offset = 0u;
+      po32_status_t status;
+
+      memset(&params, 0, sizeof(params));
+      params.OscFreq = 0.5f;
+      params.OscAtk = 1.0f;
+      params.OscDcy = 1.0f;
+      params.ModMode = 0.5f;
+      params.ModRate = rates[rate_index];
+      params.ModAmt = 1.0f;
+      params.EQGain = 0.5f;
+      params.Level = 0.5f;
+      po32_synth_voice_init(&whole, sample_rate, &params, 127, 10.0f);
+      po32_synth_voice_init(&chunked, sample_rate, &params, 127, 10.0f);
+
+      status = po32_synth_voice_render_f32(&whole, whole_output, sample_count, &made);
+      assert(status == PO32_OK && made == sample_count);
+      while (offset < sample_count) {
+        size_t requested = 1u + (offset * 17u) % 997u;
+        if (requested > sample_count - offset)
+          requested = sample_count - offset;
+        status = po32_synth_voice_render_f32(&chunked, chunk_output, requested, &made);
+        assert(status == PO32_OK && made == requested);
+        assert(memcmp(whole_output + offset, chunk_output, made * sizeof(float)) == 0);
+        offset += made;
+
+        /* The undamped source must preserve its +/-48-semitone depth,
+         * including during a long attack. Uncorrected rotation drifts by
+         * several semitones over ten seconds at these rates. */
+        assert(
+            abs_diff(chunked.mod_osc_s * chunked.mod_osc_s + chunked.mod_osc_c * chunked.mod_osc_c,
+                     1.0f) < 0.001f);
+        assert(chunked.mod_env_v == 1.0f);
+      }
+      assert(whole.mod_osc_s == chunked.mod_osc_s && whole.mod_osc_c == chunked.mod_osc_c);
+      assert(po32_synth_voice_done(&whole) && po32_synth_voice_done(&chunked));
+    }
+    free(whole_output);
+  }
+}
+
 int main(void) {
   test_normalised_control_reference_points();
+  test_sine_modulation_stays_constant_across_long_renders();
   test_lut_functions();
   test_synth_helper_functions();
   test_public_helper_guards();

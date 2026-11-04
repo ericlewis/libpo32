@@ -199,7 +199,7 @@ The `po32_patch_parse_mtdrum_text()` function in the C API handles parsing.
 ## Mapping validation and remaining synthesis limits
 
 The corrected attack and pitch-modulation maps were checked against the
-Microtonic3.3.4 Audio Unit parameter-value interface at16 normalised values
+Microtonic 3.3.4 Audio Unit parameter-value interface at 16 normalised values
 per control and mode. Examples above are independently observed physical
 reference points, not just importer/renderer round trips. The documented ranges
 and zero-rate behaviour are also described in the
@@ -212,13 +212,19 @@ voice reset deliberately remains deterministic, so repeated resets repeat the
 same random sequence. That is a reproducibility policy, not a claim to reproduce
 the device's trigger-to-trigger random state.
 
+The undamped sine source is normalized every 256 absolute samples to prevent
+rounding error from changing the modulation depth during long renders. The
+schedule uses the voice's absolute sample position, so rendering in chunks
+produces the same samples as rendering in one call. Regression tests cover
+ten-second renders at 44.1 and 48 kHz, including zero rate and varying chunk sizes.
+
 Correct control maps do not establish complete sound equivalence. Oscillator
 antialiasing, waveform gain/phase, the modulated noise
 envelope and stochastic filtering still require independent audio comparisons.
-The normalised packet encoding and21-field public struct layout are unchanged.
+The normalised packet encoding and 21-field public struct layout are unchanged.
 
 EQ compensation was checked with eight controlled offline renders at low level:
-positive boosts of5/10/20/40dB attenuated a far-off-centre tone by half the boost;
-a tone at the EQ centre gained approximately half the boost. A negative20dB
+positive boosts of 5/10/20/40 dB attenuated a far-off-centre tone by half the boost;
+a tone at the EQ centre gained approximately half the boost. A negative 20 dB
 cut did not apply the positive-boost compensation. This is separate from the
 unchanged output Level control.

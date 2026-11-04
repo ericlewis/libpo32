@@ -669,6 +669,14 @@ po32_status_t po32_synth_voice_render_f32(po32_synth_voice_t *v, float *out, siz
       float ms = v->mod_osc_s * v->mod_rot_c + v->mod_osc_c * v->mod_rot_s;
       float mc = v->mod_osc_c * v->mod_rot_c - v->mod_osc_s * v->mod_rot_s;
       mod_sig = v->mod_osc_s * v->mod_env_v;
+      /* The undamped rotor accumulates rounding error. Normalize every
+       * 256 absolute samples so modulation depth stays constant regardless
+       * of render chunk boundaries. This is the modem's unit-circle step. */
+      if (((v->samples_rendered + i) & 255u) == 255u) {
+        float gain = 1.5f - 0.5f * (ms * ms + mc * mc);
+        ms *= gain;
+        mc *= gain;
+      }
       v->mod_osc_s = ms;
       v->mod_osc_c = mc;
       v->mod_env_v *= v->mod_dcy_coeff;
