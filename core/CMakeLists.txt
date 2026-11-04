@@ -7,8 +7,14 @@ set(CMAKE_C_EXTENSIONS OFF)
 enable_testing()
 
 option(PO32_SANITIZE "Build library, tests, and examples with ASan+UBSan" OFF)
+option(PO32_COVERAGE "Build library, tests, and examples with coverage instrumentation" OFF)
 option(PO32_BUILD_FUZZERS "Build libFuzzer harnesses (requires Clang)" OFF)
 option(PO32_FUZZ_STANDALONE "Build fuzz harnesses as file-driven replay binaries" OFF)
+
+if(PO32_COVERAGE)
+  add_compile_options(--coverage -O0 -g)
+  add_link_options(--coverage)
+endif()
 
 if(PO32_SANITIZE)
   add_compile_options(-fsanitize=address,undefined -fno-sanitize-recover=all
@@ -254,7 +260,7 @@ foreach(test_name IN ITEMS po33_audio po33_data po35 po35_analysis po35_synth po
 endforeach()
 
 if(UNIX)
-  if(PO32_SANITIZE OR PO32_BUILD_FUZZERS)
+  if(PO32_SANITIZE OR PO32_COVERAGE OR PO32_BUILD_FUZZERS)
     # Instrumentation intentionally depends on a host runtime; audit sources
     # separately instead of claiming the instrumented archive is freestanding.
     add_test(NAME po_freestanding_source_symbols
@@ -266,7 +272,8 @@ if(UNIX)
   endif()
 endif()
 
-if(UNIX AND NOT CMAKE_CROSSCOMPILING AND NOT PO32_SANITIZE AND NOT PO32_BUILD_FUZZERS)
+if(UNIX AND NOT CMAKE_CROSSCOMPILING AND NOT PO32_SANITIZE AND NOT PO32_COVERAGE
+    AND NOT PO32_BUILD_FUZZERS)
   add_test(NAME po_package_smoke
     COMMAND ${CMAKE_COMMAND}
       "-DPO_BUILD_DIR=${PROJECT_BINARY_DIR}"

@@ -13,8 +13,7 @@ mkdir -p "$report_dir"
 cmake -S "$root_dir" -B "$build_dir" \
   -DCMAKE_BUILD_TYPE=Debug \
   -DCMAKE_C_COMPILER="$CC" \
-  -DCMAKE_C_FLAGS="--coverage -O0 -g" \
-  -DCMAKE_EXE_LINKER_FLAGS="--coverage"
+  -DPO32_COVERAGE=ON
 
 cmake --build "$build_dir" -j4
 ctest --test-dir "$build_dir" --output-on-failure --output-junit "$report_dir/junit.xml"
