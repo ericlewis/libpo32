@@ -1,16 +1,12 @@
-# libpo32
+# libpo
 
 [![Tests](https://github.com/ericlewis/libpo32/actions/workflows/tests.yml/badge.svg?branch=main&event=push)](https://github.com/ericlewis/libpo32/actions/workflows/tests.yml)
 [![Codecov](https://codecov.io/gh/ericlewis/libpo32/branch/main/graph/badge.svg)](https://codecov.io/gh/ericlewis/libpo32)
 [![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fericlewis%2Flibpo32.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2Fericlewis%2Flibpo32?ref=badge_shield)
 
-A small C99 library for Teenage Engineering PO-32 acoustic data transfers
-and drum synthesis.
-
-`libpo32` reimplements the PO-32 Tonic transfer stack and a compatible drum
-voice model. It is not a full PO-32 firmware or UI emulator; it covers the
-packet format, acoustic modem, frame decoder, and local drum synthesis needed
-to build, send, receive, and preview PO-32 transfers.
+Freestanding C99 transfer codecs and sound engines for Teenage Engineering
+Pocket Operators. Model-family APIs share framing, stereo modem and numerical
+primitives while keeping drum synthesis, sample pools and speech records distinct.
 
 ## Contents
 
@@ -27,17 +23,24 @@ to build, send, receive, and preview PO-32 transfers.
 
 ## Overview
 
-| Area | What `libpo32` provides |
-| --- | --- |
-| Transfer protocol | Build and parse PO-32 patch, pattern, and state packets |
-| Acoustic modem | Render transfer frames to DPSK audio for playback into the device |
-| Decoder | Recover normalized frames and packets from transfer audio |
-| Drum synthesis | Render the PO-32's 21-parameter drum voice locally for preview and testing |
+| Family | Transport | Content and sound |
+| --- | --- | --- |
+| PO-32 | Mono DPSK encode/decode | Patches, patterns and drum synthesis |
+| PO-33 / PO-133 | Stereo DQPSK encode/decode | Sample companding, settings, patterns and template editing |
+| PO-35 / PO-137 | Stereo DQPSK encode/decode | Drum patches, speech records and approximate speech synthesis |
 
-The core is freestanding C99: no libc runtime, no external DSP libraries,
-no platform audio APIs, no file I/O. Only the freestanding headers
-`<stddef.h>` and `<stdint.h>` are used. Suitable for embedded targets and
-bare-metal environments.
+The core uses caller-owned memory and standard freestanding C99 headers, with
+no heap allocation or calls to libc, libm, filesystem or device APIs. On Unix,
+noninstrumented builds include a CTest check of the built archive for unresolved
+symbols. Compiler runtime requirements depend on the target; see
+[Architecture](core/docs/ARCHITECTURE.md#freestanding-contract). Hosted
+applications own allocation, WAV files and audio playback.
+
+[PO-33 editing](core/examples/README.md#po-33--po-133-template-editing) preserves
+existing allocation and unknown metadata. PO-35 supports framing and speech
+rendering; analysis of PCM into new speech records is not implemented. Unknown
+fields remain raw. Generated stereo-family transfers have not been validated
+on physical hardware.
 
 ## Using It With a PO-32
 
@@ -71,7 +74,7 @@ From the repository root, configure, build, run tests, then the demo:
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j4
 ctest --test-dir build --output-on-failure
-./build/po32_demo
+./build/core/po32_demo
 ```
 
 Optional, but recommended for local development:
@@ -98,22 +101,35 @@ WAV files: `demo_modem.wav` and `demo_kick.wav`.
 pkg-config file, so both consumption paths work out of the box:
 
 ```cmake
-find_package(LibPO32 0.2 REQUIRED)
-target_link_libraries(app PRIVATE LibPO32::po32)
+find_package(LibPO 0.2 REQUIRED)
+target_link_libraries(app PRIVATE LibPO::po)
 ```
 
 ```sh
-cc app.c $(pkg-config --cflags --libs po32) -lm
+cc app.c $(pkg-config --cflags --libs po)
 ```
+
+The legacy `LibPO32::po32` and `pkg-config po32` interfaces remain available.
+The build target is `po32`, producing `libpo32.a` on Unix. Existing PO-32 public
+names, layouts and status values are preserved.
 
 ## Examples
 
 | Command | Purpose |
 | --- | --- |
-| `./build/po32_example` | Minimal roundtrip: encode, render, decode, and verify |
-| `./build/po32_demo` | End-to-end demo: transfer frame build/render/decode plus local drum synthesis |
-| `./build/po32_pattern_editor` | Interactive PO-32 pattern editing and WAV export |
-| `./build/po32_decode_capture <input.wav> <out-dir>` | Packet and pattern dumps from a transfer WAV |
+| `./build/core/po32_example` | Minimal roundtrip: encode, render, decode, and verify |
+| `./build/core/po32_demo` | End-to-end demo: transfer frame build/render/decode plus local drum synthesis |
+| `./build/core/po32_pattern_editor` | Interactive PO-32 pattern editing and WAV export |
+| `./build/core/po32_decode_capture <input.wav> <out-dir>` | Packet and pattern dumps from a transfer WAV |
+
+Additional hosted tools:
+
+| Command | Purpose |
+| --- | --- |
+| `./build/core/po33_decode_capture input.wav new-directory` | PO-33/133 raw records and sample WAV export |
+| `./build/core/po33_encode_capture frame.bin new.wav` | PO-33/133 template re-encoding and explicit edits |
+| `./build/core/po35_decode_capture input.wav new-directory` | PO-35/137 raw records and speech previews |
+| `./build/core/po35_encode_capture frame.bin new.wav` | PO-35/137 frame-to-modem encoding |
 
 ## Projects Built with libpo32
 
@@ -125,6 +141,12 @@ cc app.c $(pkg-config --cflags --libs po32) -lm
 
 | Header | Responsibility |
 | --- | --- |
+| [`core/include/po.h`](core/include/po.h) | Optional umbrella include |
+| [`core/include/po_common.h`](core/include/po_common.h) | Shared statuses and raw packets |
+| [`core/include/po33.h`](core/include/po33.h) | Sampler-family data and framing |
+| [`core/include/po35.h`](core/include/po35.h) | Speech-family data and framing |
+| [`core/include/po35_synth.h`](core/include/po35_synth.h) | Caller-owned native speech renderer |
+| [`core/include/po_stereo.h`](core/include/po_stereo.h) | Shared chunked stereo TX and explicit offline RX |
 | [`core/include/po32.h`](core/include/po32.h) | Transfer builder, packet helpers, renderer, and decoder |
 | [`core/include/po32_synth.h`](core/include/po32_synth.h) | Drum synthesizer |
 
@@ -132,12 +154,13 @@ cc app.c $(pkg-config --cflags --libs po32) -lm
 
 | Document | Purpose |
 | --- | --- |
-| [Architecture](core/docs/ARCHITECTURE.md) | How the codec works |
-| [Protocol](core/docs/PROTOCOL.md) | Wire format details |
+| [Architecture](core/docs/ARCHITECTURE.md) | Core and application boundaries |
+| [Protocol](core/docs/PROTOCOL.md) | PO-32 wire format |
+| [Format families](core/docs/PO_FORMATS.md) | PO-33/35/133/137 layouts and evidence limits |
 | [C API](core/docs/C_API.md) | C function reference |
 | [Synth](core/docs/SYNTH.md) | Synthesizer signal path |
 | [Patch Parameters](core/docs/PATCH_PARAMETERS.md) | The 21 parameters |
-| [Bindings](core/docs/BINDINGS.md) | How to write a new language binding |
+| [Bindings](core/docs/BINDINGS.md) | PO-32 binding conventions |
 | [Examples](core/examples/README.md) | Supported example programs |
 | [Fuzzing](core/fuzz/README.md) | Fuzz harnesses and differential properties |
 | [Contributing](CONTRIBUTING.md) | Local setup, checks, and commit conventions |
@@ -150,9 +173,9 @@ cc app.c $(pkg-config --cflags --libs po32) -lm
 | [`core/include`](core/include) | Public C headers |
 | [`core/examples`](core/examples) | Supported C examples |
 | [`core/tests`](core/tests) | Core test coverage |
-| [`core/fuzz`](core/fuzz) | libFuzzer harnesses for every untrusted-input surface |
+| [`core/fuzz`](core/fuzz) | Existing PO-32 libFuzzer harnesses |
 | [`core/docs`](core/docs) | Architecture, protocol, and API notes |
-| [`bindings/go`](bindings/go) | Go bindings (cgo, wraps full public API) |
+| [`bindings/go`](bindings/go) | Existing PO-32 Go bindings (cgo) |
 
 ## Contributing
 
