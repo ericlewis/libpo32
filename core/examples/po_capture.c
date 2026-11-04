@@ -12,11 +12,14 @@ static uint32_t le32(const uint8_t *p) {
   return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
 }
 
-int po_capture_read(const char *path, po_capture_t *out) {
+int po_audio_read(const char *path, po_audio_t *out) {
   FILE *fp;
-  if (path == NULL || out == NULL)
+  po_audio_t audio = {0};
+  if (out == NULL)
     return 0;
-  *out = (po_capture_t){0};
+  *out = (po_audio_t){0};
+  if (path == NULL)
+    return 0;
   fp = fopen(path, "rb");
   uint8_t *file = NULL;
   const uint8_t *pcm = NULL;
@@ -78,19 +81,19 @@ int po_capture_read(const char *path, po_capture_t *out) {
       ++pos;
     }
   }
-  if (!pcm || channels != 2 || rate < 32000 || rate > 192000 ||
+  if (!pcm || (channels != 1 && channels != 2) || rate < 8000 || rate > 192000 ||
       !((format == 1 && (bits == 16 || bits == 24 || bits == 32)) || (format == 3 && bits == 32)))
     goto cleanup;
   width = bits / 8;
-  if (block_align != 2 * width || pcm_size % block_align)
+  if (block_align != channels * width || pcm_size % block_align)
     goto cleanup;
-  out->frames = pcm_size / block_align;
-  if (out->frames < rate / 2 || out->frames > SIZE_MAX / (2 * sizeof(float)))
+  audio.frames = pcm_size / block_align;
+  if (audio.frames == 0 || audio.frames > SIZE_MAX / (channels * sizeof(float)))
     goto cleanup;
-  out->samples = (float *)malloc(out->frames * 2 * sizeof(float));
-  if (!out->samples)
+  audio.samples = (float *)malloc(audio.frames * channels * sizeof(float));
+  if (!audio.samples)
     goto cleanup;
-  for (size_t i = 0; i < out->frames * 2; ++i) {
+  for (size_t i = 0; i < audio.frames * channels; ++i) {
     const uint8_t *p = pcm + i * width;
     double value;
     if (format == 3) {
@@ -108,19 +111,39 @@ int po_capture_read(const char *path, po_capture_t *out) {
       uint32_t word = le32(p);
       value = ((double)word - (word >= 0x80000000u ? 4294967296.0 : 0.0)) / 2147483648.0;
     }
-    if (!isfinite(value)) {
-      free(out->samples);
-      out->samples = NULL;
+    if (!isfinite(value))
       goto cleanup;
-    }
-    out->samples[i] = value;
+    audio.samples[i] = (float)value;
   }
-  out->rate = rate;
+  audio.rate = rate;
+  audio.channels = channels;
   ok = 1;
 cleanup:
   free(file);
-  fclose(fp);
+  if (fclose(fp) != 0)
+    ok = 0;
+  if (ok)
+    *out = audio;
+  else
+    free(audio.samples);
   return ok;
+}
+
+int po_capture_read(const char *path, po_capture_t *out) {
+  po_audio_t audio = {0};
+  if (out == NULL)
+    return 0;
+  *out = (po_capture_t){0};
+  if (!po_audio_read(path, &audio))
+    return 0;
+  if (audio.channels != 2 || audio.rate < 32000 || audio.frames < audio.rate / 2) {
+    free(audio.samples);
+    return 0;
+  }
+  out->samples = audio.samples;
+  out->frames = audio.frames;
+  out->rate = audio.rate;
+  return 1;
 }
 
 int po_capture_decode(const po_capture_t *capture, po_stereo_channel_order_t order,
