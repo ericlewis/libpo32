@@ -688,7 +688,7 @@ po32_status_t po32_patch_parse_mtdrum_text(const char *text, size_t text_len,
         if ((pass == 0) != (po32_patch_import_key_equals(key, "ModMode") ||
                             po32_patch_import_key_equals(key, "NEnvMod"))) {
           cursor = line_end;
-          if (cursor < end && *cursor == '\n')
+          if (cursor < end)
             cursor += 1;
           continue;
         }
@@ -701,7 +701,7 @@ po32_status_t po32_patch_parse_mtdrum_text(const char *text, size_t text_len,
       }
 
       cursor = line_end;
-      if (cursor < end && *cursor == '\n') {
+      if (cursor < end) {
         cursor += 1;
       }
     }

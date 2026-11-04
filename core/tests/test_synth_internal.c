@@ -176,6 +176,14 @@ static void test_normalised_control_reference_points(void) {
   assert(abs_diff(v.level / synth_level_gain(p.Level), 1.0f) < 0.0001f);
 }
 
+static void test_parameter_map_clamping(void) {
+  assert(po32_param_clamp01(-0.5f) == 0.0f);
+  assert(po32_param_clamp01(0.0f) == 0.0f);
+  assert(po32_param_clamp01(0.5f) == 0.5f);
+  assert(po32_param_clamp01(1.0f) == 1.0f);
+  assert(po32_param_clamp01(1.5f) == 1.0f);
+}
+
 static void test_sine_modulation_stays_constant_across_long_renders(void) {
   static const uint32_t sample_rates[] = {44100u, 48000u};
   static const float rates[] = {0.0f, 0.5f, 0.7f, 1.0f};
@@ -234,6 +242,7 @@ static void test_sine_modulation_stays_constant_across_long_renders(void) {
 
 int main(void) {
   test_normalised_control_reference_points();
+  test_parameter_map_clamping();
   test_sine_modulation_stays_constant_across_long_renders();
   test_lut_functions();
   test_synth_helper_functions();
