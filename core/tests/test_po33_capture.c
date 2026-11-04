@@ -3,11 +3,12 @@
 #endif
 #include <assert.h>
 #include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include "wav_test_helpers.h"
-
-#define main po33_capture_example_main
-#include "../examples/po33_decode_capture.c"
-#undef main
+#include "po33.h"
+#include "po_capture.h"
 #define PI 3.14159265358979323846
 
 /* A separate bit-at-a-time CCITT implementation builds the transmitted data.
