@@ -31,6 +31,7 @@ endif()
 add_library(po32 STATIC
   src/po32.c
   src/po33.c
+  src/po33_audio.c
   src/po33_data.c
   src/po35.c
   src/po35_analysis.c
@@ -241,7 +242,7 @@ add_test(NAME po35_encoding_tests COMMAND po35_encoding_tests)
 set_tests_properties(po35_encoding_tests PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
 
 # Family codecs, shared transport, and the freestanding speech renderer.
-foreach(test_name IN ITEMS po33_data po35 po35_analysis po35_synth po_stereo po_wire)
+foreach(test_name IN ITEMS po33_audio po33_data po35 po35_analysis po35_synth po_stereo po_wire)
   add_executable(${test_name}_tests tests/test_${test_name}.c)
   target_link_libraries(${test_name}_tests PRIVATE po32)
   add_test(NAME ${test_name}_tests COMMAND ${test_name}_tests)
