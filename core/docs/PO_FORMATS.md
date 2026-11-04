@@ -56,6 +56,16 @@ of sixteen drum slices. Copy operations can reference a different group's
 source. Stored ranges can exceed the received allocation; encoders preserve
 these values without clamping them.
 
+For populated pools, the first 4,096 sample bytes and nine-byte header are
+packetized as sixteen 255-byte payloads followed by 25 bytes. Each additional
+4,096-byte block uses sixteen 255-byte payloads followed by 16 bytes. The hosted
+editor retains original packets and follows this layout when appending blocks.
+It keeps all nine header bytes and all reference headers unchanged, padding
+short replacements with silence rather than shrinking the original allocation.
+The original trim can therefore hide appended audio. Total device storage
+capacity is not established; a complete software roundtrip is not proof that a
+larger allocation fits or restores on hardware.
+
 `po33_settings_*`, `po33_pattern_*` and `po33_sound_header_*` provide structural
 codecs. They preserve raw fields; they are not a complete sequencer or editor.
 

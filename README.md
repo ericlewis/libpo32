@@ -26,7 +26,7 @@ primitives while keeping drum synthesis, sample pools and speech records distinc
 | Family | Transport | Content and sound |
 | --- | --- | --- |
 | PO-32 | Mono DPSK encode/decode | Patches, patterns and drum synthesis |
-| PO-33 / PO-133 | Stereo DQPSK encode/decode | Sample companding, settings, patterns and template editing |
+| PO-33 / PO-133 | Stereo DQPSK encode/decode | PCM sample conversion, settings, patterns and template editing |
 | PO-35 / PO-137 | Stereo DQPSK encode/decode | Drum patches, speech records, PCM analysis and approximate speech synthesis |
 
 The core uses caller-owned memory and standard freestanding C99 headers, with
@@ -36,8 +36,10 @@ symbols. Compiler runtime requirements depend on the target; see
 [Architecture](core/docs/ARCHITECTURE.md#freestanding-contract). Hosted
 applications own allocation, WAV files and audio playback.
 
-[PO-33 editing](core/examples/README.md#po-33--po-133-template-editing) preserves
-existing allocation and unknown metadata. [PO-35 speech editing](core/examples/README.md#po-35--po-137-speech-replacement)
+[PO-33 editing](core/examples/README.md#po-33--po-133-template-editing) accepts
+different PCM rates and lengths while preserving sample headers and references.
+Short inputs are padded; longer inputs grow the stored pool without extending
+existing trims. [PO-35 speech editing](core/examples/README.md#po-35--po-137-speech-replacement)
 analyzes PCM into new speech records for existing slots while retaining their
 metadata and controls. Speech analysis and rendering use an approximate model,
 not the original Bitspeek or device implementation. Unknown fields remain raw.

@@ -307,6 +307,24 @@ zero. The nominal sample clock is 23,437.5 Hz. Header bytes and allocation
 padding must be handled by the application; the sample codec does not apply
 trims or resolve slice references.
 
+`po33_sample_count_for_pcm(count, rate, &required)` sizes a bulk conversion from
+finite normalized mono PCM at 8,000–192,000 Hz. Except for the native WAV alias
+23,438 Hz, the output count is `ceil(count * 46875 / (2 * rate))`, targeting the
+nominal 23,437.5 Hz clock. The alias keeps the input count unchanged.
+
+`po33_samples_encode_f32(pcm, count, rate, output, capacity, &written)` performs
+bandlimited sample-rate conversion and emits one mu-law byte per output sample.
+For example, one second at 48 kHz needs 23,438 output bytes. Input samples must
+be finite and in `[-1,1]`; invalid samples are rejected before any output writes.
+Resampling overshoot is saturated before PCM quantization. No input gain
+normalization is performed.
+
+Both functions set their output count to zero on error. Empty input produces
+zero samples; input and output buffers may be null when their required lengths
+are zero. Buffers and count storage must not overlap. The caller supplies memory;
+there is no heap allocation, libc or libm dependency. The bulk API creates only
+sample bytes, leaving block padding, headers and template edits to the caller.
+
 ## PO-35 Records
 
 `po35_settings_*`, `po35_pattern_*`, `po35_speech_header_*` and
