@@ -6,6 +6,21 @@ The format is based on Keep a Changelog, and the project follows Semantic Versio
 
 ## [Unreleased]
 
+### Added
+- PO-33/133 and PO-35/137 frame codecs and shared stereo transfer DSP.
+- Hosted capture export and template editing, including PO-33 sample
+  replacement with PCM sample-rate conversion and PO-35 speech replacement
+  from PCM WAVs.
+- Approximate PO-35 speech analysis and synthesis. Generated stereo-family
+  transfers and speech previews have not been validated on physical hardware.
+- Canonical `LibPO::po` CMake and `pkg-config po` package interfaces, retaining
+  the legacy `LibPO32::po32` and `pkg-config po32` interfaces.
+
+### Fixed
+- PO-32 attack, modulation and EQ mappings from Joseph Holland's
+  [PR #20](https://github.com/ericlewis/libpo32/pull/20), with additional
+  long-duration sine-modulator stabilization and regression coverage.
+
 ## [0.3.0] - 2026-08-30
 
 ### Added

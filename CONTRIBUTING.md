@@ -54,9 +54,13 @@ That configures:
 
 After that:
 
-- the `pre-commit` hook formats staged `.c` and `.h` files with `clang-format`
+- the `pre-commit` hook formats the complete working-tree copy of each staged
+  `.c` or `.h` path with `clang-format` and stages the full file again
 - the `commit-msg` hook validates commit subjects against Conventional Commits
 - the `pre-push` hook runs `./scripts/ci-static-analysis.sh`
+
+The pre-commit hook includes previously unstaged changes in those files; it
+does not preserve partial staging.
 
 ## Build And Test
 
