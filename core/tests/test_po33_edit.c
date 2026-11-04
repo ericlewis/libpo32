@@ -258,6 +258,23 @@ int main(void) {
     exit_status = unlink(output);
     assert(exit_status == 0);
   }
+  {
+    char *a[] = {"encode", input, output, "--sample", "7", wrong_rate};
+    int exit_status = CALL(a);
+    assert(exit_status == 0);
+    compare_preserved(0, 1);
+    exit_status = unlink(output);
+    assert(exit_status == 0);
+  }
+  {
+    char *a[] = {"encode", input, output, "--sample", "7", short_wav};
+    int exit_status = CALL(a);
+    assert(exit_status == 0);
+    compare_preserved(0, 1);
+    assert(edited[12].payload[9] == 0);
+    exit_status = unlink(output);
+    assert(exit_status == 0);
+  }
   calls = render_calls;
   {
     char *a[] = {"encode", input, output, "--pattern-byte", "2", "0", "1", "--pattern-byte",
@@ -277,16 +294,6 @@ int main(void) {
   }
   {
     char *a[] = {"encode", input, output, "--sample", "100", wav};
-    int exit_status = CALL(a);
-    assert(exit_status != 0);
-  }
-  {
-    char *a[] = {"encode", input, output, "--sample", "7", wrong_rate};
-    int exit_status = CALL(a);
-    assert(exit_status != 0);
-  }
-  {
-    char *a[] = {"encode", input, output, "--sample", "7", short_wav};
     int exit_status = CALL(a);
     assert(exit_status != 0);
   }
