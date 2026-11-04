@@ -6,6 +6,11 @@ This repo keeps the contribution path intentionally small:
 - keep the core checks green
 - use Conventional Commits so release notes and SemVer changes stay easy to read
 
+Keep maintained implementations and validation tools in C, POSIX shell or
+CMake, alongside the existing Go binding. Keep exploratory scripts and research
+artifacts outside the versioned tree. Document supported APIs and reproducible
+checks rather than local experiment logs.
+
 ## Local Setup
 
 ### clang-format
@@ -80,6 +85,9 @@ AddressSanitizer and UndefinedBehaviorSanitizer.
 `ci-fuzz.sh` requires Clang with the libFuzzer runtime and smoke-fuzzes
 every harness in [`core/fuzz`](core/fuzz/README.md); set
 `PO32_FUZZ_SECONDS` for a longer run.
+
+For locally supplied PO-33/35 family captures, see the
+[offline capture checks](core/examples/README.md#offline-capture-checks).
 
 ## Commit Messages
 

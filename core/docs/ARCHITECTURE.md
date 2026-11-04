@@ -1,133 +1,107 @@
 # Architecture
 
-`libpo32` is intentionally small. The project is built around one core idea:
+`libpo` is one freestanding C library with model-family modules. Application
+layers own allocation, files, UI, devices and OS integration. Model-specific
+APIs keep the substantially different sound representations explicit; shared
+private code handles the common wire and numerical operations.
 
-| Layer | Responsibility |
+## Freestanding contract
+
+The core uses C99 and standard freestanding headers. It performs no heap
+allocation, filesystem or device access, and calls neither libc nor libm.
+Callers provide state, audio buffers and any whole-capture workspace. Floating
+point assumes IEEE-754 binary32 and binary64 where documented.
+
+GCC/Clang CMake core builds use `-ffreestanding -fno-builtin
+-fno-stack-protector` to prevent compiler-generated hosted runtime calls.
+Other toolchains need equivalent settings. On Unix, noninstrumented builds
+audit the actual archive with a relocatable link and undefined-symbol check.
+Sanitizer/fuzzer builds intentionally use a host runtime and instead audit a
+separate uninstrumented source compilation. Hosted examples/tests retain their
+normal runtime and math libraries. Architecture-specific compiler-builtins
+(such as ARM software floating-point arithmetic) remain a toolchain concern;
+cross-compilation alone is not runtime validation.
+
+## Modules
+
+| Module | Responsibility |
 | --- | --- |
-| C core | Owns the PO-32 protocol and DSP math |
-| Application layers | Own files, UI, devices, and OS integration |
+| `po_common.h` | Shared status, raw packets and trailers; preserves old PO-32 tags/layouts and supplies neutral aliases |
+| `po32.c`, `po32.h` | PO-32 typed packets, mono modem, builders and receivers |
+| `po32_patch_import.c` | `.mtdrum` text parser |
+| `po32_synth.c`, `po32_synth.h` | Microtonic-compatible drum model |
+| `po33.c`, `po33_data.c`, `po33.h` | PO-33/133 framing, sample companding and lossless logical records |
+| `po35.c`, `po35.h` | PO-35/137 framing, speech records, settings and patterns |
+| `po35_synth.c`, `po35_synth.h` | Experimental speech reconstruction with caller-owned streaming voices |
+| `po_stereo.c`, `po_stereo.h` | Shared stereo DQPSK transmitter and explicit offline receiver |
+| `po.h` | Optional umbrella include |
 
-That split keeps the tree manageable.
+`po_wire_internal.h` is the shared source for CRC, whitening, ordinary packets,
+4 KiB counter preambles and the special final tail. Family parsers retain their
+own grammar and validation. PO-32's tag whitelist remains strict; the newer
+families preserve unknown packets where their grammar allows them.
 
-## Freestanding
+`po_math_internal.h` supplies bounded private double-precision DSP helpers.
+PO-35 uses a double LAR table and double filter state for its 30th-order filter.
+PO-32 retains its own lookup-table math.
 
-The library is freestanding C99. The only standard headers it uses are
-`<stddef.h>` and `<stdint.h>`, which are guaranteed available in
-freestanding implementations (C99 section 4 paragraph 6). All memory operations
-(`memset`, `memcpy`, `memcmp`), string functions (`strlen`), float parsing
-(`strtof`), and math functions (`sinf`, `cosf`, `powf`, etc.) are replaced
-with self-contained implementations. There is no libc runtime dependency.
+PO-35 drum patches reuse `po32_patch_packet_t`, its existing packet codec and
+`po32_synth`; there is no duplicate drum engine. PO-133 and PO-137 use the
+33/35 format families, not separate implementations. A compatible format does
+not identify the physical device that produced a recording.
 
-At optimisation levels like `-O2`, the compiler may recognise byte-loop
-patterns and emit platform-optimised intrinsics (e.g. replacing a zero-fill
-loop with `bzero`). This is standard compiler behaviour and produces faster
-code. To prevent it on truly bare-metal targets, compile with `-fno-builtin`.
+## Byte domains and ownership
 
-## Core Modules
+Keep raw packet payloads, encoded packet bodies and complete frames distinct.
+Typed settings/pattern/speech records are another domain: one logical record
+can span multiple packets. All reserved or unresolved fields remain raw,
+including unused chain entries and anomalous sample ranges.
 
-The core is three translation units:
+Raw callbacks receive inline-owned payload bytes; copying the packet retains
+its contents. Offsets include the complete model preamble. A callback stop is
+separate from successful completion, and validated prefixes can precede a later
+CRC failure. Consult each parser's documented result semantics.
 
-| File | Purpose |
-| --- | --- |
-| [`../src/po32.c`](../src/po32.c) | Transfer framing, packet encode/decode, render, and decode |
-| [`../src/po32_patch_import.c`](../src/po32_patch_import.c) | `.mtdrum` patch text importer |
-| [`../src/po32_synth.c`](../src/po32_synth.c) | Drum synth implementation |
+Builders use caller-owned storage and check whole writes before changing it.
+Borrowed renderer input must remain alive and immutable through rendering or
+reset. There is no hidden ownership transfer or background work.
 
-Public headers:
+## Audio boundaries
 
-| Header | Purpose |
-| --- | --- |
-| [`../include/po32.h`](../include/po32.h) | Transfer API |
-| [`../include/po32_synth.h`](../include/po32_synth.h) | Drum synth API |
+Core input/output audio is `float`; stereo capacities/counts are explicitly in
+stereo frames. The shared transmitter is chunked and retains phase
+and integer timing across calls. The PO-32 receiver remains streaming.
 
-`po32.c` contains four related layers:
+The stereo receiver is deliberately **offline**. Forward/backward audio and
+pilot filters need the complete capture. Call `po_stereo_decode_requirements`
+for typed workspace sizes and provide those arrays to `po_stereo_decode_f32`.
+It preserves the input, recovers wire bytes from the counter preamble onward,
+and leaves model grammar and final-frame trimming to the family parser.
 
-1. protocol primitives
-2. frame parsing and frame building
-3. typed packet encode/decode helpers
-4. render and decode DSP
+`po35_synth_voice_*` streams one borrowed speech group with fixed-size state.
+Frame boundaries use cumulative integer rounding; reset and arbitrary chunks
+produce the same output. Core speech output is finite, unnormalized audio and
+may exceed `[-1,1]`. Numerical failure is explicit and latched until reset.
+Normalization, PCM conversion, clip concatenation and WAV writing stay hosted.
+The speech model uses deterministic Gaussian noise with a caller-selected seed.
 
-`po32_synth.c` is separate because it is orthogonal to transfer framing and has
-its own internal math model.
+## Hosted adapters
 
-## Data Model
+`examples/po_capture.c` reads WAV files, allocates workspace and calls the core
+stereo receiver. `examples/po_stereo_wav.c` validates family frames, wraps the
+core transmitter in WAV/PCM output, and handles exclusive file creation.
+The PO-33 and PO-35 examples collect logical records and export their contents.
 
-There are three important byte domains:
+## Build and package names
 
-1. typed packet structs
-2. encoded packet body bytes
-3. full transmitted frame bytes
+Use `po.h` or individual model headers. `LibPO::po` and `pkg-config po` provide
+umbrella discovery; `LibPO32::po32`, `pkg-config po32`, the `po32` build target
+and legacy library filename (`libpo32.a` on Unix) remain available. Public PO-32
+symbols, concrete layouts and numeric status values are preserved. The repository
+name remains `libpo32`.
 
-The encoded packet body is the packet stream between the preamble and final
-tail. It is protocol-level data: tag, payload length, payload, trailer.
+## Validation boundaries
 
-The full transmitted frame is:
-
-1. preamble
-2. encoded packet body
-3. final tail
-
-It is useful to preserve both:
-
-- `frame_bytes`
-- `body_bytes`
-
-That is deliberate. The body is useful for packet-level inspection, while the
-full frame is what the renderer and parser operate on.
-
-## Transmit Path
-
-The normal transmit flow is:
-
-1. build typed packet payloads
-2. append them to a `po32_builder_t`
-3. finish the builder to emit the final tail
-4. render the resulting frame to mono `float` audio
-
-The builder is the frame-construction primitive in the release surface.
-
-## Receive Path
-
-There are two receive models in the release surface:
-
-- call `po32_decode_f32(...)` on a whole capture
-- drive `po32_demodulator_t` chunk by chunk
-
-`po32_decode_f32(...)` demodulates mono float audio and rebuilds a normalized
-frame from the recovered packets. It is a one-shot wrapper over the streaming
-demodulator, so both paths share one implementation and agree on packet
-offsets.
-
-The streaming demodulator suits callers that never hold the whole capture:
-`po32_demodulator_push(...)` accepts audio in arbitrarily sized chunks, and
-`po32_demodulator_flush(...)` signals end-of-audio so a symbol still pending at
-the last sample is resolved. The drum synth mirrors this shape, with
-`po32_synth_voice_t` rendering a hit in chunks and `po32_synth_render(...)` as
-its one-shot wrapper.
-
-## Why The Output Is “Normalized”
-
-The decoder does not try to preserve every transport artifact from the original
-capture. It reconstructs a clean frame from the recovered packet stream.
-
-That means:
-
-- packet order is preserved
-- payloads and trailers are rebuilt consistently
-- the output is suitable for rendering, parsing, and roundtrip testing
-
-It does not mean:
-
-- a byte-for-byte forensic copy of the noisy capture
-
-That distinction matters when comparing decoded output to a recorded transfer.
-
-## Float-Only Signal Boundary
-
-The signal boundary is float-only:
-
-- render output is `float`
-- decode input is `float`
-
-The core does not parse WAV, AIFF, Core Audio buffers, or device APIs. That
-work belongs in examples or applications.
+Builds, byte-preserving roundtrips and numerical checks do not establish device
+acceptance. Unmapped controls remain raw. Stereo-family transfers have not been
+validated on physical hardware, and speech reconstruction is approximate.

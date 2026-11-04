@@ -1,20 +1,21 @@
-# Writing Language Bindings
+# PO-32 Language Bindings
 
-This document describes the conventions and constraints for adding a new
-language binding to libpo32. The Go binding at `bindings/go/` is the
-reference implementation.
+This document describes the PO-32 binding conventions used by
+[`bindings/go`](../../bindings/go). That binding targets `po32.h` and
+`po32_synth.h`; the PO-33, PO-35 and shared stereo APIs are not wrapped.
 
 ## Rules
 
-1. **Consume the public API only.** Bindings include `core/include/po32.h`
-   and `core/include/po32_synth.h`. Never include files from `core/src/`.
+1. **Wrap the public API only.** Use declarations from `core/include/po32.h`
+   and `core/include/po32_synth.h`. Do not expose private helpers or state from
+   `core/src/`.
 
-2. **Compile the C sources directly.** Each binding compiles the three C
+2. **Compile the C sources directly.** The PO-32 binding compiles three C
    source files (`po32.c`, `po32_patch_import.c`, `po32_synth.c`) as part
-   of its own build. No prebuilt `.a` or cmake step required for binding
-   users.
+   of its own build. The Go binding includes each source through a separate
+   cgo wrapper. Binding users do not need a prebuilt archive or CMake step.
 
-3. **Three separate translation units.** The internal headers `po32_lut.h`
+3. **Use separate translation units.** The internal headers `po32_lut.h`
    and `po32_synth_tables.h` define `static` data tables. Including
    multiple `.c` files in a single translation unit causes redefinition
    errors. Compile each `.c` file separately.
@@ -54,7 +55,7 @@ bindings/go/
 
 ## What to Wrap
 
-Every binding should expose the full public API surface from both headers.
+PO-32 bindings should expose the public API from both PO-32 headers.
 Organize the wrapper into these areas:
 
 | Area | C functions |
@@ -86,9 +87,9 @@ Organize the wrapper into these areas:
 
 ## Constants
 
-C `#define` macros have no symbol and cannot be accessed through FFI.
-Re-declare all protocol constants as native constants in the binding.
-Add a test that spot-checks a few critical values to catch drift.
+C `#define` macros are not linkable symbols. Expose protocol constants through
+the binding's native constant mechanism, using the C declarations where the
+toolchain supports them. Test critical values to catch drift.
 
 ## The Callback Problem
 
@@ -107,7 +108,7 @@ a closure directly as a C function pointer. The standard solution:
 The Go binding does this with `trampoline.c` + a Go-side callback
 registry protected by a mutex. The same pattern applies to Rust
 (`extern "C" fn` + closure box), Swift (`@convention(c)` + context
-pointer), and Python (`ctypes.CFUNCTYPE` + closure reference).
+pointer).
 
 ## Memory Ownership
 
@@ -119,13 +120,13 @@ The C core never allocates. All buffers are caller-owned. Bindings must:
   them to the caller.
 - Keep frame data alive for the lifetime of a streaming modulator.
 
-Types that hold C-allocated state (builder buffers, modulator copies)
+Types that own native buffers or state (builder buffers, modulator copies)
 should implement the language's cleanup pattern: `Close()` in Go,
 `Drop` in Rust, `deinit` in Swift.
 
 ## Testing
 
-Every binding must include tests covering:
+PO-32 bindings must include tests covering:
 
 - Tag name lookup for all six tags
 - Whiten/unwhiten roundtrip
@@ -146,12 +147,12 @@ binding on both `ubuntu-latest` and `macos-latest`. Use the language's
 native test runner with race/thread-safety checking enabled where
 available.
 
-## Checklist for a New Binding
+## Checklist for a New PO-32 Binding
 
 - [ ] Create `bindings/<lang>/` with language-standard package metadata
 - [ ] Compile all three C sources as separate translation units
 - [ ] Include only public headers (`core/include/`)
-- [ ] Wrap every public function with idiomatic types and error handling
+- [ ] Wrap every PO-32 public function with idiomatic types and error handling
 - [ ] Implement the callback trampoline for `po32_frame_parse`
 - [ ] Re-declare all `#define` constants as native constants
 - [ ] Write the full test suite listed above

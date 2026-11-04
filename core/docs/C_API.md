@@ -1,11 +1,27 @@
 # C API Guide
 
-This document is the practical guide to the raw C surface in
-[`../include/po32.h`](../include/po32.h)
-and
-[`../include/po32_synth.h`](../include/po32_synth.h).
+This guide covers the public C API. Include `po.h` for all modules, or include
+only the model headers your application needs.
 
-## Core Responsibilities
+## Model-family APIs
+
+Shared statuses and raw packets are in `po_common.h`. The `po_status_t`,
+`po_packet_t` and `PO_*` names alias the existing PO-32 types and status values.
+
+| Header | Role |
+| --- | --- |
+| [`po32.h`](../include/po32.h) | PO-32 packets, builders and mono modem |
+| [`po32_synth.h`](../include/po32_synth.h) | Drum synthesis |
+| `po33.h` | PO-33/133 framing, sample codec and raw-preserving logical records |
+| `po35.h` | PO-35/137 framing, speech records, settings and patterns |
+| `po35_synth.h` | Borrowed-record speech voices and one-shot rendering |
+| `po_stereo.h` | Shared chunked stereo TX and caller-workspace offline RX |
+
+All modules use caller-owned memory. Files, device access, normalization and
+audio playback belong to the application. See [Architecture](ARCHITECTURE.md)
+for build requirements and [Examples](../examples/README.md) for hosted use.
+
+## PO-32 Core Responsibilities
 
 | Included | Scope |
 | --- | --- |
@@ -24,7 +40,7 @@ and
 | OS audio sessions | No Core Audio, ALSA, WASAPI, etc. |
 | UI or file management | No app framework, editor, or filesystem workflow |
 
-## Typical Transmit Flow
+## PO-32 Transmit Flow
 
 The normal transmit path is:
 
@@ -53,7 +69,7 @@ float *samples = malloc(sample_count * sizeof(*samples));
 po32_render_dpsk_f32(frame, frame_len, 44100u, samples, sample_count);
 ```
 
-## Typical Receive Flow
+## PO-32 Receive Flow
 
 Use [`po32_decode_f32(...)`](../include/po32.h)
 when you already have the full mono sample buffer.
@@ -75,15 +91,15 @@ po32_decode_f32(samples,
 `po32_decode_f32(...)` reconstructs a normalized frame from the recovered
 packet stream.
 
-## Parsing Frames
+## PO-32 Frame Parsing
 
 If you already have a frame, use [`po32_frame_parse(...)`](../include/po32.h).
 
-The callback receives an owned [`po32_packet_t`](../include/po32.h),
-including an owned payload buffer, so it is safe to keep after the callback
-returns.
+The callback receives a pointer to a [`po32_packet_t`](../include/po32.h) with
+an inline payload buffer. Copy the packet struct to retain it after the
+callback returns; the callback pointer itself is borrowed.
 
-## Typed Packet Helpers
+## PO-32 Typed Packet Helpers
 
 The core provides typed packet structs for the common packet families:
 
@@ -134,7 +150,7 @@ Use `po32_patch_parse_mtdrum_text(...)` to import patch parameters from
 Microtonic `.mtdrum` text format. This is the text representation used by
 Sonic Charge Microtonic's copy/paste and file export features.
 
-## Streaming Modulator
+## PO-32 Streaming Modulator
 
 For streaming (chunk-based) rendering, the modulator API provides incremental
 control:
@@ -145,7 +161,7 @@ control:
 - `po32_modulator_done(...)` — check if all samples have been rendered
 - `po32_modulator_samples_remaining(...)` — query how many samples remain
 
-## Streaming Demodulator
+## PO-32 Streaming Demodulator
 
 For streaming (chunk-based) decoding, the demodulator API accepts audio in
 arbitrary-sized chunks and invokes a callback on each decoded packet:
@@ -201,7 +217,7 @@ To reuse a stopped demodulator, re-initialize it with
 `po32_demodulator_init(...)`. `po32_demodulator_desync(...)` resets sync state
 only; it no more clears the stop than it clears `po32_demodulator_done(...)`.
 
-## Streaming Synth Voice
+## PO-32 Streaming Synth Voice
 
 For streaming (chunk-based) synthesis, the voice API pre-computes all
 per-render constants at init time and persists DSP state across calls:
@@ -215,7 +231,7 @@ per-render constants at init time and persists DSP state across calls:
 `po32_synth_render(...)` is a one-shot convenience wrapper that renders
 the full duration in a single call.
 
-## Body Bytes vs Frame Bytes
+## PO-32 Body Bytes and Frame Bytes
 
 The C core works with full transmitted frames and encoded packet-body bytes.
 
@@ -228,7 +244,7 @@ Use:
 That keeps packet-body inspection available without adding another public
 abstraction.
 
-## Error Handling
+## PO-32 Error Handling
 
 Most C functions return [`po32_status_t`](../include/po32.h):
 
@@ -247,7 +263,7 @@ Common causes:
 - `FRAME`: malformed frame or decode failure
 - `PARSE`: text import failed to parse a field value
 
-## Synth API
+## PO-32 Synth API
 
 The synth is separate from transfer framing.
 
@@ -260,3 +276,107 @@ Use:
 Deep synth parameter notes live in:
 
 - [`./PATCH_PARAMETERS.md`](./PATCH_PARAMETERS.md)
+
+## PO-33 and PO-35 Frames
+
+`po33_frame_parse` and `po35_frame_parse` validate their model's counter
+preamble, packet checksums and termination. Unknown packet tags remain raw.
+Callbacks can receive a valid prefix before a later error. A successful status
+alone does not establish completion: inspect `result.done` and `result.stopped`.
+Trailing bytes are excluded from `result.frame_bytes`; compare that value with
+the input length when exact consumption is required.
+
+Both families provide `*_builder_init`, `*_builder_append_packet` and
+`*_builder_finish`. Builders use caller-owned storage and reject capacity
+errors before writing a partial packet. PO-33 emits its BEGIN/END packets
+automatically; PO-35 emits its special final tail at finish. Do not append these
+terminators as ordinary packets. Finish is idempotent.
+
+## PO-33 Records and Samples
+
+`po33_settings_*`, `po33_pattern_*` and `po33_sound_header_*` encode and decode
+fixed-size logical records. A logical record can span several wire packets;
+the application collects those payloads before calling the record codec.
+Unknown fields, unused chain entries and raw sample ranges are preserved.
+Input and output storage must not overlap.
+
+`po33_sample_decode` expands one signed-order mu-law byte to PCM16.
+`po33_sample_encode` selects the nearest representable level, with ties toward
+zero. The nominal sample clock is 23,437.5 Hz. Header bytes and allocation
+padding must be handled by the application; the sample codec does not apply
+trims or resolve slice references.
+
+## PO-35 Records
+
+`po35_settings_*`, `po35_pattern_*`, `po35_speech_header_*` and
+`po35_speech_record_*` provide lossless structural codecs. The nine-byte speech
+header contains a slot, record count, frame rate and five raw metadata bytes.
+Each speech record is 44 bytes. Group collection, ordering and completeness
+checks belong to the application, not the frame parser.
+
+Settings contain a variable pattern chain, limited to `PO35_CHAIN_MAX_COUNT`
+entries by the packet payload capacity. The record codecs preserve fields
+without normalizing their values. PO-35 drum patches use `po32_patch_packet_t`
+and `po32_packet_encode` / `po32_packet_decode`.
+
+See [Backup formats](PO_FORMATS.md) for record offsets and unresolved fields.
+
+## Shared Stereo Modem
+
+`po_stereo_modulator_init` borrows a nonempty wire buffer for chunked rendering.
+The buffer must remain alive and immutable until rendering ends. It accepts
+44,100, 48,000 and 96,000 Hz and produces interleaved left/right floats.
+`po_stereo_modulator_render_f32` capacities and output counts are **stereo
+frames**, so a capacity of 256 requires storage for 512 floats. Chunk boundaries
+do not change the waveform. The modem does not validate packet grammar.
+
+The stereo receiver is offline and requires the complete capture. Call
+`po_stereo_decode_requirements` for workspace and wire-buffer capacities, then
+provide those buffers to `po_stereo_decode_f32`. Workspace sizes are element
+counts: `double` elements for scalars, bytes for scratch and recovered wire.
+Input samples remain unchanged, and all buffers must be nonoverlapping.
+
+The receiver accepts finite interleaved float input at 32,000 through
+192,000 Hz. Channel order is explicit. It finds the counter preamble and
+recovers wire bytes, potentially including bytes beyond the final packet.
+Always pass those bytes to the relevant model parser to establish completion.
+
+## PO-35 Speech Rendering
+
+`po35_synth.h` provides approximate speech reconstruction. It does not implement
+PCM-to-speech analysis or exact hardware voice characters and effects.
+The low bank renders at 8 kHz; the high bank renders at 24 kHz. Supported record
+rates are 20, 40, 60 and 80 fps.
+
+```c
+#include "po35_synth.h"
+
+po_status_t render_speech(const uint8_t *records, size_t record_bytes,
+                          uint32_t fps) {
+  po35_synth_t synth;
+  po35_synth_voice_t voice;
+  float block[256];
+  size_t written;
+  po_status_t status = po35_synth_init(&synth, PO35_SYNTH_BANK_HIGH,
+                                     PO35_SYNTH_DEFAULT_SEED);
+  if (status == PO_OK)
+    status = po35_synth_voice_init(&voice, &synth, records, record_bytes, fps);
+  while (status == PO_OK && !po35_synth_voice_done(&voice)) {
+    status = po35_synth_voice_render_f32(&voice, block, 256, &written);
+    /* Consume written samples, including a finite prefix on numerical error. */
+  }
+  return status;
+}
+```
+
+Records are borrowed and must remain immutable while the voice can use them,
+including after reset. Record bytes must be a multiple of 44. Use
+`po35_synth_samples_for_records` to calculate output length. Frame timing,
+oscillator phase, noise and filter state persist across calls; chunked rendering
+and reset reproduce the same output within a build.
+
+Output is finite, unnormalized float and may exceed `[-1, 1]`. The core performs
+no resampling, clipping or normalization. Numerical overflow or instability
+returns a latched `PO_ERR_RANGE`; `written` counts only committed finite samples.
+Reset clears the error. `po35_synth_render` wraps the same voice implementation
+for one-shot use and writes nothing when output capacity is insufficient.
