@@ -78,8 +78,11 @@ typedef struct po33_sound_header {
 po_status_t po33_pattern_control_decode(uint8_t raw, po33_pattern_control_t *out);
 po_status_t po33_pattern_control_encode(const po33_pattern_control_t *value, uint8_t *out_raw);
 
-/* Decode requires an exact fixed-record length. Encode permits a larger
- * destination. All validation precedes writes. Input/output must not overlap. */
+/* Fixed-record codecs: null input/output returns PO_ERR_INVALID_ARG; a wrong
+ * decode length returns PO_ERR_FRAME; insufficient encode capacity returns
+ * PO_ERR_BUFFER_TOO_SMALL. Settings chain lengths above PO33_CHAIN_CAPACITY
+ * return PO_ERR_RANGE. Failures leave outputs unchanged; successful encoders
+ * leave capacity beyond the record size untouched. Input/output must not overlap. */
 po_status_t po33_settings_decode(const uint8_t *data, size_t len, po33_settings_t *out);
 po_status_t po33_settings_encode(const po33_settings_t *value, uint8_t *out, size_t capacity);
 po_status_t po33_pattern_decode(const uint8_t *data, size_t len, po33_pattern_t *out);
