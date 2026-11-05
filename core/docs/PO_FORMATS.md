@@ -157,6 +157,21 @@ not a declaration that four six-bit parameters are the final encoding.
 | q2 | `(W >> 12) & 63` | Observed filter control: frequency-dependent playback changes; cutoff is the leading interpretation | Exact filter mapping and numeric units |
 | q3 | `(W >> 18) & 63` | Independently varying stored data; resonance is a candidate | No resolved playback effect in the two tested contexts; identity and activation remain open |
 
+Reanalysis of existing no-FX playback covers q0 values 7..22 at control `fc`
+and supports approximate semitone ordering across that interval. It does not
+establish an exact static conversion. With q0=13, the other chunks fixed at
+32/63/32 and identical sample bytes, repeated events in a chained capture form
+frequency groups near 219.13 and 219.99 Hz after lower and higher preceding
+q0 values respectively. The separation survives shifted windows and spectral
+and cycle-period estimates. Pattern identity and FX position also co-vary, so
+this is a playback-context association, not a proven smoothing or quantization
+algorithm.
+
+A stored control change `fc -> f0`, with sample and parameter words unchanged,
+accompanies a shorter event with roughly threefold late-event frequency in
+one comparison. A strong onset transient and a recording sync-mode difference
+prevent treating that ratio as an exact semitone or key-number conversion.
+
 The physical knobs change function with the edit mode selected by FX. The
 [PO-33 guide](https://teenage.engineering/guides/po-33/en) documents these
 controls and identifies TONE/FILTER as lockable parameters:
@@ -372,9 +387,24 @@ asymmetric probe show FX-position associations, with values 1 and 2 associated
 with the first and second FX slots. The chained playback test above leaves
 every coordinate unchanged while stored FX executes, so a retained FX-position
 model must have additional update conditions. These observations do not establish
-a general update rule,
-wrap behavior, or whether the value denotes a current or next position under
+a general update rule, wrap behavior, or whether the value denotes a current or
+next position under
 the device's indexing convention. Preserve it when editing unrelated fields.
+
+A later stopped-selection/export comparison used that unchanged chained bank.
+With WRITE reported off and no standalone PLAY requested, selecting one-based
+Pattern 2 and sending a backup changed only the active chain (sixteen entries
+to Pattern 2 alone) and settings byte 387 from 0 to 2. Every pattern, footer
+and sample record matched. Selecting Pattern 16 and sending again then changed
+only the chain selection; the final state coordinate at byte 401 remained 7.
+Both complete readbacks validated 423 packets. These observations associate an
+update with the manual selection/chain replacement/export path without requiring
+new requested playback. The proposed endpoint values 0 or 16 were not written
+to the final coordinate in the second comparison. Chain-length change, initial
+state, boundary position and prior runtime history differ between the two cases;
+selection and SEND are also not isolated. No general update gate follows yet.
+The stopped/WRITE-off condition is user-reported rather than independently
+observed from the audio.
 
 A separate hardware interaction changed only settings byte 386 from 0 to 6;
 every other logical byte matched the baseline. This state coordinate therefore
