@@ -1,4 +1,5 @@
 #include "po32.h"
+#include "po_wav_internal.h"
 
 #include <errno.h>
 #include <stdint.h>
@@ -141,7 +142,11 @@ static int decode_wav(const char *path, wav_data_t *out_wav) {
     }
 
     if (memcmp(chunk, "fmt ", 4u) == 0 && chunk_size >= 16u) {
-      audio_format = read_le16(chunk + 8u);
+      audio_format = po_wav_encoding(chunk + 8u, chunk_size);
+      if (audio_format == 0u) {
+        free(file_data);
+        return 0;
+      }
       channels = read_le16(chunk + 10u);
       sample_rate = read_le32(chunk + 12u);
       bits_per_sample = read_le16(chunk + 22u);

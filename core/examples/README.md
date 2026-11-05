@@ -27,7 +27,14 @@ cmake --build build
 ./build/core/po32_decode_capture input.wav decoded-po32
 ```
 
-## Stereo Capture Input
+## Capture Input
+
+The PO-32 decoder accepts PCM16/24/32 and IEEE float32 WAV, including extensible
+WAV, and averages its input channels to mono. Select the relevant input channel
+before decoding a multichannel recording if averaging would cancel or obscure
+the modem signal.
+
+### Stereo Capture Input
 
 The PO-33 and PO-35 decoders accept stereo WAV files containing PCM16, PCM24,
 PCM32 or IEEE float32 audio at 32–192 kHz. They load the complete capture into

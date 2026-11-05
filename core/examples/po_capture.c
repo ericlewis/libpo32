@@ -1,4 +1,5 @@
 #include "po_capture.h"
+#include "po_wav_internal.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -45,31 +46,13 @@ int po_audio_read(const char *path, po_audio_t *out) {
     if (chunk_size > size - pos - 8)
       goto cleanup;
     if (!memcmp(chunk, "fmt ", 4) && chunk_size >= 16) {
-      format = le16(chunk + 8);
+      format = po_wav_encoding(chunk + 8, chunk_size);
       channels = le16(chunk + 10);
       rate = le32(chunk + 12);
       block_align = le16(chunk + 20);
       bits = le16(chunk + 22);
-      if (format == 0xfffe) {
-        static const uint8_t pcm_guid[16] = {1,    0, 0, 0,    0, 0,    0x10, 0,
-                                             0x80, 0, 0, 0xaa, 0, 0x38, 0x9b, 0x71};
-        static const uint8_t float_guid[16] = {3,    0, 0, 0,    0, 0,    0x10, 0,
-                                               0x80, 0, 0, 0xaa, 0, 0x38, 0x9b, 0x71};
-        uint16_t extension_size, valid_bits;
-        if (chunk_size < 40)
-          goto cleanup;
-        extension_size = le16(chunk + 24);
-        valid_bits = le16(chunk + 26);
-        if (extension_size < 22 || extension_size > chunk_size - 18 || valid_bits == 0 ||
-            valid_bits > bits)
-          goto cleanup;
-        if (!memcmp(chunk + 32, pcm_guid, sizeof(pcm_guid)))
-          format = 1;
-        else if (!memcmp(chunk + 32, float_guid, sizeof(float_guid)) && valid_bits == 32)
-          format = 3;
-        else
-          goto cleanup;
-      }
+      if (format == 0)
+        goto cleanup;
     } else if (!memcmp(chunk, "data", 4)) {
       pcm = chunk + 8;
       pcm_size = chunk_size;
