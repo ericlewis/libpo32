@@ -46,6 +46,11 @@ type Settings struct {
 }
 
 // PatternEvent preserves event bytes and the context-dependent control byte.
+// Nonzero event words can occur with zero control and must be retained as stored
+// parameter data. In the descriptive q0-q3 partition, pitch and level roles
+// are observed for q0/q1, cutoff is a strong inference for q2's filter role, and
+// resonance remains an unconfirmed q3 candidate. Exact scales, field widths and
+// zero/sentinel behavior are unresolved; see core/docs/PO_FORMATS.md.
 type PatternEvent struct {
 	EventRaw   [3]byte
 	ControlRaw uint8
@@ -58,6 +63,9 @@ type Pattern struct {
 }
 
 // SoundHeader preserves raw range metadata without inferring a trim convention.
+// SourceSelector addresses the whole stored pool, not its owner's trimmed range.
+// Preserve overlaps and out-of-allocation endpoints; endpoint inclusion and the
+// cause of anomalous ranges remain unresolved.
 type SoundHeader struct {
 	RangeStartRaw, RangeEndRaw uint32
 	SourceSelector             uint8
