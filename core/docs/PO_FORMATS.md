@@ -354,6 +354,32 @@ contain multiple owned pools. Direct low-nibble slice indexing fits inspected
 official patterns better than XOR 12 under an audible-slice assumption, but
 other mappings survive; no exact key-to-slice map is exposed here.
 
+Two clean comparisons in an archived copy series support shared sample storage.
+One fills a previously empty melodic selector with only a nine-byte header
+`(start=0, end=246720, source=0)`. The next fills drum selectors 8..23 with
+sixteen header-only references to the same source. All settings, all sixteen
+patterns, existing sound records and the complete 249,856-byte pool remain
+identical across each comparison. Fresh decoding reproduces the three complete
+frames with 1,274, 1,275 and 1,291 valid packets respectively. The selector
+packets already existed; these operations add associated sound data, not new
+selector identities.
+
+For that drum copy, zero-based slice `i` has end `15420*(i+1)` and start zero
+for the first slice, otherwise `15420*i+1`. The last end matches the source
+header's end rather than the pool allocation. This supports regular subdivision
+in this zero-start, divisible-span example; alone it does not establish
+nonzero-start arithmetic, remainder rounding or endpoint inclusion. A separate
+drum capture has unequal ranges with `next_start == previous_end`, so the copied
+series' one-code boundary difference is not a universal range constraint. The
+preceding source-to-first-copy comparison also changes audio and allocation and cannot
+isolate copy behavior. All copy-series patterns are empty, leaving the extended
+guide's claim that destination tone/filter settings survive copying untested.
+
+An editor must distinguish replacing a shared pool from replacing one slot or
+slice: every reference to an edited pool can be affected. These captures do not
+establish pool reclamation after deletion, detaching a single alias, or how an
+empty selector affects an already populated receiver slot.
+
 Escalate's out-of-allocation references belong to a sound unused by all its
 patterns. Retained earlier ranges are plausible, not established. This does
 not justify clamping, wrapping or halving coordinates. Nonzero samples can
