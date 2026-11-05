@@ -337,6 +337,58 @@ the application collects those payloads before calling the record codec.
 Unknown fields, unused chain entries and raw sample ranges are preserved.
 Input and output storage must not overlap.
 
+The in-memory record and field views are:
+
+| Type | Fields represented |
+| --- | --- |
+| `po33_settings_t` | Pattern chain, tempo, swing and retained raw state |
+| `po33_pattern_t` | Sixteen steps by sixteen sounds, plus packed FX data |
+| `po33_pattern_event_t` | Raw three-byte parameter word and control byte |
+| `po33_pattern_control_t` | Separate `note_raw` and `timing_raw` nibbles |
+| `po33_pattern_fx_t` | Sixteen unpacked per-step `code_raw` values |
+| `po33_sound_header_t` | Raw range endpoints and source selector |
+
+These structs are not wire overlays. Use the codecs rather than casting or
+copying struct memory: pattern fields occupy separate serialized planes, and
+native struct padding need not match record sizes.
+
+`po33_pattern_control_decode` splits a control byte into its low note/key nibble
+and high timing nibble. `po33_pattern_control_encode` recombines them. Each raw
+value is in 0..15; musical key numbering and timing units are not implied.
+Held-step melodic length edits and drum retrigger edits share this high-nibble
+location in different sound contexts. The zero control byte does not make a
+nonzero parameter word disposable.
+
+`po33_pattern_fx_decode` expands `PO33_PATTERN_FX_BYTES` packed bytes into one
+code per step, high nibble first. `po33_pattern_fx_encode` packs them again.
+`PO33_FX_OCTAVE_UP` names verified code 6; `PO33_FX_BASELINE` names the observed
+normal baseline code 15 without claiming an explicit FX-clear operation.
+Every code in 0..15 is preserved, including codes without a verified musical
+name. Encoders reject out-of-range values before changing any output.
+
+For example, edit the first step of an already decoded pattern while preserving
+the other FX codes and all note/parameter fields:
+
+```c
+po_status_t set_first_step_octave_up(po33_pattern_t *pattern) {
+  po33_pattern_fx_t fx;
+  po_status_t status;
+  if (pattern == NULL)
+    return PO_ERR_INVALID_ARG;
+  status = po33_pattern_fx_decode(pattern->footer_raw,
+                                  sizeof(pattern->footer_raw), &fx);
+  if (status != PO_OK)
+    return status;
+  fx.code_raw[0] = PO33_FX_OCTAVE_UP;
+  return po33_pattern_fx_encode(&fx, pattern->footer_raw,
+                                sizeof(pattern->footer_raw));
+}
+```
+
+Then use `po33_pattern_encode` to serialize the edited logical record. The
+existing packed fields remain available; the new views do not alter struct
+layout or require allocation.
+
 Pattern event words remain raw. In the descriptive q0–q3 partition, q0 has an
 observed pitch role and q1 an observed level role; q2 controls a filter-like
 response, with cutoff a strong inference. q3's resonance interpretation remains

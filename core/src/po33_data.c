@@ -10,6 +10,44 @@ static void write32(uint8_t *p, uint32_t value) {
   for (unsigned i = 0; i < 4; ++i)
     p[i] = (uint8_t)(value >> (8u * i));
 }
+po_status_t po33_pattern_control_decode(uint8_t raw, po33_pattern_control_t *out) {
+  if (out == NULL)
+    return PO_ERR_INVALID_ARG;
+  out->note_raw = raw & 15u;
+  out->timing_raw = raw >> 4;
+  return PO_OK;
+}
+po_status_t po33_pattern_control_encode(const po33_pattern_control_t *value, uint8_t *out_raw) {
+  if (value == NULL || out_raw == NULL)
+    return PO_ERR_INVALID_ARG;
+  if (value->note_raw > 15 || value->timing_raw > 15)
+    return PO_ERR_RANGE;
+  *out_raw = (uint8_t)((value->timing_raw << 4) | value->note_raw);
+  return PO_OK;
+}
+po_status_t po33_pattern_fx_decode(const uint8_t *data, size_t len, po33_pattern_fx_t *out) {
+  if (data == NULL || out == NULL)
+    return PO_ERR_INVALID_ARG;
+  if (len != PO33_PATTERN_FX_BYTES)
+    return PO_ERR_FRAME;
+  for (size_t i = 0; i < PO33_PATTERN_FX_BYTES; ++i) {
+    out->code_raw[2 * i] = data[i] >> 4;
+    out->code_raw[2 * i + 1] = data[i] & 15u;
+  }
+  return PO_OK;
+}
+po_status_t po33_pattern_fx_encode(const po33_pattern_fx_t *value, uint8_t *out, size_t capacity) {
+  if (value == NULL || out == NULL)
+    return PO_ERR_INVALID_ARG;
+  if (capacity < PO33_PATTERN_FX_BYTES)
+    return PO_ERR_BUFFER_TOO_SMALL;
+  for (size_t step = 0; step < PO33_STEP_COUNT; ++step)
+    if (value->code_raw[step] > 15)
+      return PO_ERR_RANGE;
+  for (size_t i = 0; i < PO33_PATTERN_FX_BYTES; ++i)
+    out[i] = (uint8_t)((value->code_raw[2 * i] << 4) | value->code_raw[2 * i + 1]);
+  return PO_OK;
+}
 po_status_t po33_settings_decode(const uint8_t *data, size_t len, po33_settings_t *out) {
   if (data == NULL || out == NULL)
     return PO_ERR_INVALID_ARG;

@@ -19,10 +19,13 @@ extern "C" {
 #define PO33_SAMPLE_RATE_HZ     23437.5f
 #define PO33_SETTINGS_BYTES     510u
 #define PO33_PATTERN_BYTES      1032u
+#define PO33_PATTERN_FX_BYTES   8u
 #define PO33_SOUND_HEADER_BYTES 9u
 #define PO33_STEP_COUNT         16u
 #define PO33_SOUND_COUNT        16u
 #define PO33_CHAIN_CAPACITY     128u
+#define PO33_FX_OCTAVE_UP       6u
+#define PO33_FX_BASELINE        15u /* Observed normal baseline; clearing behavior is unresolved. */
 
 /* Logical records may span multiple wire packets. Preserve unused chain
  * entries and uninterpreted bytes; no trim convention is inferred. */
@@ -34,19 +37,32 @@ typedef struct po33_settings {
   uint8_t suffix_raw[108];
 } po33_settings_t;
 
+/* Raw nibble views; numeric note, duration and retrigger mappings are unresolved. */
+typedef struct po33_pattern_control {
+  uint8_t note_raw;
+  uint8_t timing_raw;
+} po33_pattern_control_t;
+
+/* Per-step FX codes in step order. Preserve all codes, including unnamed ones. */
+typedef struct po33_pattern_fx {
+  uint8_t code_raw[PO33_STEP_COUNT];
+} po33_pattern_fx_t;
+
 typedef struct po33_pattern_event {
   /* LE24 parameter word: observed pitch, level and filter roles; resonance is
    * a candidate for the remaining chunk. Widths/scales remain raw. Preserve
    * parameter-only rows even when control_raw is zero. */
   uint8_t event_raw[3];
-  /* Note/key-related low nibble; retrigger-associated high nibble.
-   * Duration interpretation and exact numeric mappings remain unresolved. */
+  /* Note/key-related low nibble; timing-related high nibble (melodic length
+   * or drum retrigger context). Exact numeric mappings remain unresolved. */
   uint8_t control_raw;
 } po33_pattern_event_t;
 
 typedef struct po33_pattern {
   po33_pattern_event_t events[PO33_STEP_COUNT][PO33_SOUND_COUNT];
-  uint8_t footer_raw[8]; /* Raw FX nibbles: 6 = octave-up; full step order/other IDs unresolved. */
+  /* Two FX codes per byte, high nibble first. Code 6 is octave-up;
+   * other effect IDs remain raw. */
+  uint8_t footer_raw[8];
 } po33_pattern_t;
 
 typedef struct po33_sound_header {
@@ -56,12 +72,22 @@ typedef struct po33_sound_header {
   uint8_t source_selector;
 } po33_sound_header_t;
 
+/* Split/combine control_raw: low note/key nibble, high timing nibble.
+ * Encode requires both fields in 0..15; invalid input leaves output untouched.
+ * Input/output must not overlap. */
+po_status_t po33_pattern_control_decode(uint8_t raw, po33_pattern_control_t *out);
+po_status_t po33_pattern_control_encode(const po33_pattern_control_t *value, uint8_t *out_raw);
+
 /* Decode requires an exact fixed-record length. Encode permits a larger
  * destination. All validation precedes writes. Input/output must not overlap. */
 po_status_t po33_settings_decode(const uint8_t *data, size_t len, po33_settings_t *out);
 po_status_t po33_settings_encode(const po33_settings_t *value, uint8_t *out, size_t capacity);
 po_status_t po33_pattern_decode(const uint8_t *data, size_t len, po33_pattern_t *out);
 po_status_t po33_pattern_encode(const po33_pattern_t *value, uint8_t *out, size_t capacity);
+/* FX records contain two codes per byte, high nibble first. Decode preserves
+ * every code; encode requires each code in 0..15. No FX update rules are inferred. */
+po_status_t po33_pattern_fx_decode(const uint8_t *data, size_t len, po33_pattern_fx_t *out);
+po_status_t po33_pattern_fx_encode(const po33_pattern_fx_t *value, uint8_t *out, size_t capacity);
 po_status_t po33_sound_header_decode(const uint8_t *data, size_t len, po33_sound_header_t *out);
 po_status_t po33_sound_header_encode(const po33_sound_header_t *value, uint8_t *out,
                                      size_t capacity);
