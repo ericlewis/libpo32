@@ -174,6 +174,14 @@ typedef struct po32_pattern_step {
   int accent;         /* from trigger byte 0x80 */
 } po32_pattern_step_t;
 
+/* Lossless field view of one raw trigger byte; not a device-validity check. */
+typedef struct po32_pattern_control {
+  uint8_t fill_rate_raw;        /* Bits 0..3, 0..15; zero is inactive. */
+  uint8_t instrument_group_raw; /* Bits 4..5, 0..3; instrument = lane + 1 + 4*group. */
+  uint8_t unknown_bit_raw;      /* Bit 6, 0..1; meaning remains unassigned. */
+  uint8_t accent;               /* Bit 7, 0..1; retained even when inactive. */
+} po32_pattern_control_t;
+
 typedef struct po32_pattern_packet {
   uint8_t pattern_number;
   /* Decoded triggers. Encoding an inactive instrument writes zero, so this
@@ -185,6 +193,15 @@ typedef struct po32_pattern_packet {
   uint8_t reserved[PO32_PATTERN_RESERVED_COUNT];
   uint16_t accent_bits;
 } po32_pattern_packet_t;
+
+/* Split/combine every bit of a raw trigger byte, including inactive selector
+ * and accent bits and unassigned bit 6. Decode accepts all 256 byte values;
+ * this preserves stored data without asserting its device meaning. Encode
+ * requires each field in its documented range. Invalid input leaves output
+ * untouched; input/output must not overlap. The semantic pattern packet codec
+ * above still normalizes inactive triggers and triggers with bit 6 set. */
+po32_status_t po32_pattern_control_decode(uint8_t raw, po32_pattern_control_t *out);
+po32_status_t po32_pattern_control_encode(const po32_pattern_control_t *value, uint8_t *out_raw);
 
 /*
  * Pattern builder and trigger helpers.

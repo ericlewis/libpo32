@@ -1149,6 +1149,178 @@ static void test_extended_payload_encoders(void) {
   (void)dpkt;
 }
 
+static void test_pattern_control_golden_mapping(void) {
+  static const struct {
+    uint8_t raw;
+    po32_pattern_control_t value;
+  } cases[] = {
+      {0x00u, {0u, 0u, 0u, 0u}},  {0x0Fu, {15u, 0u, 0u, 0u}}, {0x10u, {0u, 1u, 0u, 0u}},
+      {0x20u, {0u, 2u, 0u, 0u}},  {0x30u, {0u, 3u, 0u, 0u}},  {0x40u, {0u, 0u, 1u, 0u}},
+      {0x80u, {0u, 0u, 0u, 1u}},  {0xB0u, {0u, 3u, 0u, 1u}},  {0xA5u, {5u, 2u, 0u, 1u}},
+      {0x5Cu, {12u, 1u, 1u, 0u}}, {0xFFu, {15u, 3u, 1u, 1u}},
+  };
+
+  for (size_t i = 0u; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+    po32_pattern_control_t decoded = {99u, 99u, 99u, 99u};
+    uint8_t encoded = 0x69u;
+    assert(po32_pattern_control_decode(cases[i].raw, &decoded) == PO32_OK);
+    assert(decoded.fill_rate_raw == cases[i].value.fill_rate_raw);
+    assert(decoded.instrument_group_raw == cases[i].value.instrument_group_raw);
+    assert(decoded.unknown_bit_raw == cases[i].value.unknown_bit_raw);
+    assert(decoded.accent == cases[i].value.accent);
+    assert(po32_pattern_control_encode(&cases[i].value, &encoded) == PO32_OK);
+    assert(encoded == cases[i].raw);
+  }
+}
+
+static void test_pattern_control_roundtrip(void) {
+  for (unsigned int raw = 0u; raw <= UINT8_MAX; ++raw) {
+    po32_pattern_control_t control;
+    uint8_t encoded = (uint8_t)~raw;
+    assert(po32_pattern_control_decode((uint8_t)raw, &control) == PO32_OK);
+    assert(po32_pattern_control_encode(&control, &encoded) == PO32_OK);
+    assert(encoded == raw);
+  }
+}
+
+static void test_pattern_control_errors(void) {
+  static const unsigned int limits[] = {15u, 3u, 1u, 1u};
+  const uint8_t unchanged[] = {0x12u, 0xA5u, 0x34u};
+  uint8_t output[sizeof(unchanged)];
+  po32_pattern_control_t control = {3u, 2u, 1u, 1u};
+
+  memcpy(output, unchanged, sizeof(output));
+  assert(po32_pattern_control_decode(0xA5u, NULL) == PO32_ERR_INVALID_ARG);
+  assert(po32_pattern_control_encode(NULL, &output[1]) == PO32_ERR_INVALID_ARG);
+  assert(memcmp(output, unchanged, sizeof(output)) == 0);
+  assert(po32_pattern_control_encode(&control, NULL) == PO32_ERR_INVALID_ARG);
+  assert(po32_pattern_control_encode(NULL, NULL) == PO32_ERR_INVALID_ARG);
+
+  for (size_t field = 0u; field < sizeof(limits) / sizeof(limits[0]); ++field) {
+    for (unsigned int invalid = limits[field] + 1u; invalid <= UINT8_MAX; ++invalid) {
+      po32_pattern_control_t value = control;
+      switch (field) {
+      case 0u:
+        value.fill_rate_raw = (uint8_t)invalid;
+        break;
+      case 1u:
+        value.instrument_group_raw = (uint8_t)invalid;
+        break;
+      case 2u:
+        value.unknown_bit_raw = (uint8_t)invalid;
+        break;
+      default:
+        value.accent = (uint8_t)invalid;
+        break;
+      }
+      assert(po32_pattern_control_encode(&value, &output[1]) == PO32_ERR_RANGE);
+      assert(memcmp(output, unchanged, sizeof(output)) == 0);
+      assert(po32_pattern_control_encode(&value, NULL) == PO32_ERR_INVALID_ARG);
+    }
+  }
+}
+
+static void toggle_pattern_control_field(po32_pattern_control_t *control, size_t field) {
+  switch (field) {
+  case 0u:
+    control->fill_rate_raw ^= 15u;
+    break;
+  case 1u:
+    control->instrument_group_raw ^= 3u;
+    break;
+  case 2u:
+    control->unknown_bit_raw ^= 1u;
+    break;
+  default:
+    control->accent ^= 1u;
+    break;
+  }
+}
+
+static void test_pattern_control_edit_locality(void) {
+  static const uint8_t masks[] = {0x0Fu, 0x30u, 0x40u, 0x80u};
+  for (unsigned int raw = 0u; raw <= UINT8_MAX; ++raw) {
+    for (size_t field = 0u; field < sizeof(masks); ++field) {
+      po32_pattern_control_t control;
+      uint8_t edited;
+      assert(po32_pattern_control_decode((uint8_t)raw, &control) == PO32_OK);
+      toggle_pattern_control_field(&control, field);
+      assert(po32_pattern_control_encode(&control, &edited) == PO32_OK);
+      assert(edited == (uint8_t)(raw ^ masks[field]));
+    }
+  }
+}
+
+static void test_pattern_control_raw_packet_edit_locality(void) {
+  static const uint8_t masks[] = {0x0Fu, 0x30u, 0x40u, 0x80u};
+  static const uint8_t triggers[] = {0x00u, 0x30u, 0x80u, 0xB0u, 0x40u, 0x5Fu, 0xFFu, 0xA5u};
+  po32_packet_t original;
+  memset(&original, 0xA5, sizeof(original));
+  original.tag_code = PO32_TAG_PATTERN;
+  original.payload_len = PO32_PATTERN_PAYLOAD_BYTES;
+  for (size_t i = 0u; i < original.payload_len; ++i)
+    original.payload[i] = (uint8_t)(73u * i + 19u);
+  for (size_t lane = 0u; lane < PO32_PATTERN_LANE_COUNT; ++lane)
+    for (size_t step = 0u; step < PO32_PATTERN_STEP_COUNT; ++step)
+      original.payload[1u + 48u * lane + step] = triggers[step % sizeof(triggers)];
+
+  for (size_t lane = 0u; lane < PO32_PATTERN_LANE_COUNT; ++lane) {
+    for (size_t step = 0u; step < PO32_PATTERN_STEP_COUNT; ++step) {
+      size_t offset = 1u + 48u * lane + step;
+      for (size_t field = 0u; field < sizeof(masks); ++field) {
+        po32_packet_t edited, expected;
+        po32_pattern_control_t control;
+        memcpy(&edited, &original, sizeof(edited));
+        memcpy(&expected, &original, sizeof(expected));
+        expected.payload[offset] ^= masks[field];
+        assert(po32_pattern_control_decode(edited.payload[offset], &control) == PO32_OK);
+        toggle_pattern_control_field(&control, field);
+        assert(po32_pattern_control_encode(&control, &edited.payload[offset]) == PO32_OK);
+        /* Includes every other trigger, morph pair, raw footer byte, accent
+         * bit and packet metadata byte, including bytes after payload_len. */
+        assert(memcmp(&edited, &expected, sizeof(edited)) == 0);
+      }
+    }
+  }
+}
+
+static void test_pattern_control_legacy_normalization(void) {
+  uint8_t instrument = 99u, fill_rate = 99u;
+  int accent = 99;
+  uint8_t payload[PO32_PATTERN_PAYLOAD_BYTES] = {0};
+  po32_pattern_packet_t pattern;
+  po32_packet_t encoded;
+
+  assert(po32_pattern_trigger_decode(0u, 0xB0u, &instrument, &fill_rate, &accent) == PO32_OK);
+  assert(instrument == 0u && fill_rate == 0u && accent == 0);
+  instrument = fill_rate = 99u;
+  accent = 99;
+  assert(po32_pattern_trigger_decode(0u, 0x41u, &instrument, &fill_rate, &accent) ==
+         PO32_ERR_RANGE);
+  assert(instrument == 99u && fill_rate == 99u && accent == 99);
+
+  payload[0] = 7u;
+  payload[1] = 0x80u;
+  payload[2] = 0xB0u;
+  payload[3] = 0x41u;
+  payload[4] = 0xFFu;
+  payload[17] = 0x80u;
+  payload[18] = 0x01u;
+  payload[193] = 0x69u;
+  payload[209] = 0xA5u;
+  payload[210] = 0x5Au;
+  assert(po32_packet_decode(PO32_TAG_PATTERN, payload, sizeof(payload), &pattern) == PO32_OK);
+  for (size_t step = 0u; step < 4u; ++step) {
+    assert(pattern.steps[step].instrument == 0u);
+    assert(pattern.steps[step].fill_rate == 0u);
+    assert(pattern.steps[step].accent == 0);
+  }
+  assert(po32_packet_encode(PO32_TAG_PATTERN, &pattern, &encoded) == PO32_OK);
+  payload[1] = payload[2] = payload[3] = payload[4] = 0u;
+  assert(encoded.payload_len == sizeof(payload));
+  assert(memcmp(encoded.payload, payload, sizeof(payload)) == 0);
+}
+
 static void test_pattern_trigger_helpers(void) {
   for (uint8_t instrument = 1u; instrument <= 16u; ++instrument) {
     uint8_t lane = 0u;
@@ -2130,6 +2302,12 @@ int main(void) {
   test_streaming_modulator_matches_block_render();
   test_long_frame_carrier_does_not_decay();
   test_extended_payload_encoders();
+  test_pattern_control_golden_mapping();
+  test_pattern_control_roundtrip();
+  test_pattern_control_errors();
+  test_pattern_control_edit_locality();
+  test_pattern_control_raw_packet_edit_locality();
+  test_pattern_control_legacy_normalization();
   test_pattern_trigger_helpers();
   test_pattern_builder_helpers();
   test_builder_exact_capacity_boundary();

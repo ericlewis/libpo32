@@ -434,6 +434,27 @@ po32_status_t po32_pattern_set_accent(po32_pattern_packet_t *pattern, uint8_t st
   return PO32_OK;
 }
 
+po32_status_t po32_pattern_control_decode(uint8_t raw, po32_pattern_control_t *out) {
+  if (out == NULL)
+    return PO32_ERR_INVALID_ARG;
+  out->fill_rate_raw = raw & 0x0Fu;
+  out->instrument_group_raw = (raw >> 4) & 3u;
+  out->unknown_bit_raw = (raw >> 6) & 1u;
+  out->accent = raw >> 7;
+  return PO32_OK;
+}
+
+po32_status_t po32_pattern_control_encode(const po32_pattern_control_t *value, uint8_t *out_raw) {
+  if (value == NULL || out_raw == NULL)
+    return PO32_ERR_INVALID_ARG;
+  if (value->fill_rate_raw > 15u || value->instrument_group_raw > 3u ||
+      value->unknown_bit_raw > 1u || value->accent > 1u)
+    return PO32_ERR_RANGE;
+  *out_raw = (uint8_t)(value->fill_rate_raw | (value->instrument_group_raw << 4) |
+                       (value->unknown_bit_raw << 6) | (value->accent << 7));
+  return PO32_OK;
+}
+
 po32_status_t po32_pattern_trigger_lane(uint8_t instrument, uint8_t *out_lane) {
   if (out_lane == NULL)
     return PO32_ERR_INVALID_ARG;
