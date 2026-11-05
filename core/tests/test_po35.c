@@ -148,6 +148,181 @@ static void test_speech_codecs(void) {
   assert(po35_speech_record_encode(&record, output, 43) == PO_ERR_BUFFER_TOO_SMALL);
 }
 
+static const uint8_t table_7be7_bytes[][9] = {
+    {0x03, 0x00, 0x7f, 0x80, 0xff, 0x12, 0x34, 0x56, 0x78},
+    {0xfe, 0xe1, 0xc2, 0xa3, 0x84, 0x65, 0x46, 0x27, 0x08},
+};
+static const uint8_t table_1c7f_bytes[][13] = {
+    {0x07, 0x10, 0x32, 0x54, 0x76, 0x98, 0xba, 0xdc, 0xfe, 0x00, 0x7f, 0x80, 0xff},
+    {0xff, 0xe3, 0xc7, 0xab, 0x8f, 0x73, 0x57, 0x3b, 0x1f, 0x02, 0x24, 0x46, 0x68},
+};
+
+static void test_indexed_table_golden_records(void) {
+  const po35_table_7be7_t values7[] = {
+      {0x03, {0x00, 0x7f, 0x80, 0xff, 0x12, 0x34, 0x56, 0x78}},
+      {0xfe, {0xe1, 0xc2, 0xa3, 0x84, 0x65, 0x46, 0x27, 0x08}},
+  };
+  const po35_table_1c7f_t values1[] = {
+      {0x07, {0x10, 0x32, 0x54, 0x76, 0x98, 0xba, 0xdc, 0xfe, 0x00, 0x7f, 0x80, 0xff}},
+      {0xff, {0xe3, 0xc7, 0xab, 0x8f, 0x73, 0x57, 0x3b, 0x1f, 0x02, 0x24, 0x46, 0x68}},
+  };
+  const uint8_t tail[] = {0xa5, 0xa5, 0xa5};
+  po35_table_7be7_t value7;
+  po35_table_1c7f_t value1;
+  uint8_t output7[PO35_TABLE_7BE7_BYTES + sizeof(tail)];
+  uint8_t output1[PO35_TABLE_1C7F_BYTES + sizeof(tail)];
+  for (size_t i = 0; i < 2; ++i) {
+    assert(po35_table_7be7_decode(table_7be7_bytes[i], sizeof(table_7be7_bytes[i]), &value7) ==
+           PO_OK);
+    assert(value7.index == values7[i].index);
+    assert(memcmp(value7.data_raw, values7[i].data_raw, sizeof(value7.data_raw)) == 0);
+    memset(output7, 0xa5, sizeof(output7));
+    assert(po35_table_7be7_encode(&values7[i], output7, sizeof(output7)) == PO_OK);
+    assert(memcmp(output7, table_7be7_bytes[i], sizeof(table_7be7_bytes[i])) == 0);
+    assert(memcmp(output7 + PO35_TABLE_7BE7_BYTES, tail, sizeof(tail)) == 0);
+
+    assert(po35_table_1c7f_decode(table_1c7f_bytes[i], sizeof(table_1c7f_bytes[i]), &value1) ==
+           PO_OK);
+    assert(value1.index == values1[i].index);
+    assert(memcmp(value1.data_raw, values1[i].data_raw, sizeof(value1.data_raw)) == 0);
+    memset(output1, 0xa5, sizeof(output1));
+    assert(po35_table_1c7f_encode(&values1[i], output1, sizeof(output1)) == PO_OK);
+    assert(memcmp(output1, table_1c7f_bytes[i], sizeof(table_1c7f_bytes[i])) == 0);
+    assert(memcmp(output1 + PO35_TABLE_1C7F_BYTES, tail, sizeof(tail)) == 0);
+  }
+}
+
+static void test_indexed_table_byte_values(void) {
+  po35_table_7be7_t value7;
+  po35_table_1c7f_t value1;
+  uint8_t input7[PO35_TABLE_7BE7_BYTES], output7[PO35_TABLE_7BE7_BYTES];
+  uint8_t input1[PO35_TABLE_1C7F_BYTES], output1[PO35_TABLE_1C7F_BYTES];
+  for (size_t pos = 0; pos < sizeof(input7); ++pos) {
+    for (unsigned byte = 0; byte <= 255; ++byte) {
+      memcpy(input7, table_7be7_bytes[0], sizeof(input7));
+      input7[pos] = (uint8_t)byte;
+      assert(po35_table_7be7_decode(input7, sizeof(input7), &value7) == PO_OK);
+      assert(value7.index == input7[0]);
+      assert(memcmp(value7.data_raw, input7 + 1, sizeof(value7.data_raw)) == 0);
+      assert(po35_table_7be7_encode(&value7, output7, sizeof(output7)) == PO_OK);
+      assert(memcmp(output7, input7, sizeof(input7)) == 0);
+    }
+  }
+  for (size_t pos = 0; pos < sizeof(input1); ++pos) {
+    for (unsigned byte = 0; byte <= 255; ++byte) {
+      memcpy(input1, table_1c7f_bytes[0], sizeof(input1));
+      input1[pos] = (uint8_t)byte;
+      assert(po35_table_1c7f_decode(input1, sizeof(input1), &value1) == PO_OK);
+      assert(value1.index == input1[0]);
+      assert(memcmp(value1.data_raw, input1 + 1, sizeof(value1.data_raw)) == 0);
+      assert(po35_table_1c7f_encode(&value1, output1, sizeof(output1)) == PO_OK);
+      assert(memcmp(output1, input1, sizeof(input1)) == 0);
+    }
+  }
+}
+
+static void test_indexed_table_edit_locality(void) {
+  po35_table_7be7_t value7, before7;
+  po35_table_1c7f_t value1, before1;
+  uint8_t expected7[PO35_TABLE_7BE7_BYTES], output7[PO35_TABLE_7BE7_BYTES];
+  uint8_t expected1[PO35_TABLE_1C7F_BYTES], output1[PO35_TABLE_1C7F_BYTES];
+  for (size_t pos = 0; pos < sizeof(expected7); ++pos) {
+    assert(po35_table_7be7_decode(table_7be7_bytes[0], sizeof(table_7be7_bytes[0]), &value7) ==
+           PO_OK);
+    memcpy(expected7, table_7be7_bytes[0], sizeof(expected7));
+    expected7[pos] ^= 0xff;
+    if (pos == 0)
+      value7.index ^= 0xff;
+    else
+      value7.data_raw[pos - 1] ^= 0xff;
+    memcpy(&before7, &value7, sizeof(before7));
+    assert(po35_table_7be7_encode(&value7, output7, sizeof(output7)) == PO_OK);
+    assert(memcmp(output7, expected7, sizeof(expected7)) == 0);
+    assert(memcmp(&value7, &before7, sizeof(value7)) == 0);
+  }
+  for (size_t pos = 0; pos < sizeof(expected1); ++pos) {
+    assert(po35_table_1c7f_decode(table_1c7f_bytes[0], sizeof(table_1c7f_bytes[0]), &value1) ==
+           PO_OK);
+    memcpy(expected1, table_1c7f_bytes[0], sizeof(expected1));
+    expected1[pos] ^= 0xff;
+    if (pos == 0)
+      value1.index ^= 0xff;
+    else
+      value1.data_raw[pos - 1] ^= 0xff;
+    memcpy(&before1, &value1, sizeof(before1));
+    assert(po35_table_1c7f_encode(&value1, output1, sizeof(output1)) == PO_OK);
+    assert(memcmp(output1, expected1, sizeof(expected1)) == 0);
+    assert(memcmp(&value1, &before1, sizeof(value1)) == 0);
+  }
+}
+
+static void test_indexed_table_validation(void) {
+  const uint8_t input[PO_MAX_PAYLOAD] = {0};
+  po35_table_7be7_t value7, before7;
+  po35_table_1c7f_t value1, before1;
+  uint8_t output[PO35_TABLE_1C7F_BYTES + 3], before[sizeof(output)];
+  memset(&value7, 0xa5, sizeof(value7));
+  memset(&value1, 0xa5, sizeof(value1));
+  memcpy(&before7, &value7, sizeof(before7));
+  memcpy(&before1, &value1, sizeof(before1));
+  memset(output, 0x5a, sizeof(output));
+  memcpy(before, output, sizeof(before));
+  for (size_t len = 0; len <= sizeof(input); ++len) {
+    if (len != PO35_TABLE_7BE7_BYTES) {
+      assert(po35_table_7be7_decode(input, len, &value7) == PO_ERR_PARSE);
+      assert(memcmp(&value7, &before7, sizeof(value7)) == 0);
+    }
+    if (len != PO35_TABLE_1C7F_BYTES) {
+      assert(po35_table_1c7f_decode(input, len, &value1) == PO_ERR_PARSE);
+      assert(memcmp(&value1, &before1, sizeof(value1)) == 0);
+    }
+  }
+  assert(po35_table_7be7_decode(input, SIZE_MAX, &value7) == PO_ERR_PARSE);
+  assert(memcmp(&value7, &before7, sizeof(value7)) == 0);
+  assert(po35_table_1c7f_decode(input, SIZE_MAX, &value1) == PO_ERR_PARSE);
+  assert(memcmp(&value1, &before1, sizeof(value1)) == 0);
+  for (size_t capacity = 0; capacity < PO35_TABLE_7BE7_BYTES; ++capacity) {
+    assert(po35_table_7be7_encode(&value7, output, capacity) == PO_ERR_BUFFER_TOO_SMALL);
+    assert(memcmp(output, before, sizeof(output)) == 0);
+    assert(memcmp(&value7, &before7, sizeof(value7)) == 0);
+  }
+  for (size_t capacity = 0; capacity < PO35_TABLE_1C7F_BYTES; ++capacity) {
+    assert(po35_table_1c7f_encode(&value1, output, capacity) == PO_ERR_BUFFER_TOO_SMALL);
+    assert(memcmp(output, before, sizeof(output)) == 0);
+    assert(memcmp(&value1, &before1, sizeof(value1)) == 0);
+  }
+  assert(po35_table_7be7_decode(NULL, PO35_TABLE_7BE7_BYTES, &value7) == PO_ERR_INVALID_ARG);
+  assert(memcmp(&value7, &before7, sizeof(value7)) == 0);
+  assert(po35_table_7be7_decode(NULL, 0, &value7) == PO_ERR_INVALID_ARG);
+  assert(memcmp(&value7, &before7, sizeof(value7)) == 0);
+  assert(po35_table_7be7_decode(input, PO35_TABLE_7BE7_BYTES, NULL) == PO_ERR_INVALID_ARG);
+  assert(po35_table_7be7_decode(input, 0, NULL) == PO_ERR_INVALID_ARG);
+  assert(po35_table_7be7_decode(NULL, 0, NULL) == PO_ERR_INVALID_ARG);
+  assert(po35_table_1c7f_decode(NULL, PO35_TABLE_1C7F_BYTES, &value1) == PO_ERR_INVALID_ARG);
+  assert(memcmp(&value1, &before1, sizeof(value1)) == 0);
+  assert(po35_table_1c7f_decode(NULL, 0, &value1) == PO_ERR_INVALID_ARG);
+  assert(memcmp(&value1, &before1, sizeof(value1)) == 0);
+  assert(po35_table_1c7f_decode(input, PO35_TABLE_1C7F_BYTES, NULL) == PO_ERR_INVALID_ARG);
+  assert(po35_table_1c7f_decode(input, 0, NULL) == PO_ERR_INVALID_ARG);
+  assert(po35_table_1c7f_decode(NULL, 0, NULL) == PO_ERR_INVALID_ARG);
+  assert(po35_table_7be7_encode(NULL, output, sizeof(output)) == PO_ERR_INVALID_ARG);
+  assert(memcmp(output, before, sizeof(output)) == 0);
+  assert(po35_table_7be7_encode(NULL, output, 0) == PO_ERR_INVALID_ARG);
+  assert(memcmp(output, before, sizeof(output)) == 0);
+  assert(po35_table_7be7_encode(&value7, NULL, PO35_TABLE_7BE7_BYTES) == PO_ERR_INVALID_ARG);
+  assert(po35_table_7be7_encode(&value7, NULL, 0) == PO_ERR_INVALID_ARG);
+  assert(po35_table_7be7_encode(NULL, NULL, 0) == PO_ERR_INVALID_ARG);
+  assert(memcmp(&value7, &before7, sizeof(value7)) == 0);
+  assert(po35_table_1c7f_encode(NULL, output, sizeof(output)) == PO_ERR_INVALID_ARG);
+  assert(memcmp(output, before, sizeof(output)) == 0);
+  assert(po35_table_1c7f_encode(NULL, output, 0) == PO_ERR_INVALID_ARG);
+  assert(memcmp(output, before, sizeof(output)) == 0);
+  assert(po35_table_1c7f_encode(&value1, NULL, PO35_TABLE_1C7F_BYTES) == PO_ERR_INVALID_ARG);
+  assert(po35_table_1c7f_encode(&value1, NULL, 0) == PO_ERR_INVALID_ARG);
+  assert(po35_table_1c7f_encode(NULL, NULL, 0) == PO_ERR_INVALID_ARG);
+  assert(memcmp(&value1, &before1, sizeof(value1)) == 0);
+}
+
 static void test_structure_codecs(void) {
   uint8_t input[255], output[255];
   po35_settings_t settings;
@@ -183,6 +358,10 @@ int main(void) {
   test_frames();
   test_builder();
   test_speech_codecs();
+  test_indexed_table_golden_records();
+  test_indexed_table_byte_values();
+  test_indexed_table_edit_locality();
+  test_indexed_table_validation();
   test_structure_codecs();
   puts("PO-35 framing and typed-codec tests passed");
   return 0;

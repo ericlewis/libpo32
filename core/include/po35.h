@@ -19,6 +19,8 @@ extern "C" {
 #define PO35_TAG_SPEECH_DATA     0x73b0u
 #define PO35_TAG_SPEECH_END      0x29a1u
 #define PO35_TAG_SETTINGS        0x84d8u
+#define PO35_TABLE_7BE7_BYTES    9u
+#define PO35_TABLE_1C7F_BYTES    13u
 #define PO35_SPEECH_HEADER_BYTES 9u
 #define PO35_SPEECH_RECORD_BYTES 44u
 #define PO35_SPEECH_SLOT_COUNT   15u
@@ -68,6 +70,20 @@ po_status_t po35_builder_append_packet(po35_builder_t *builder, uint16_t tag_cod
  * frame_len is optional and is written only on success. */
 po_status_t po35_builder_finish(po35_builder_t *builder, size_t *frame_len);
 
+/* Indexed table payloads. The bodies remain opaque bytes; all index and data
+ * byte values are preserved, including indices outside the observed 0..7.
+ * Table codec failures leave outputs unchanged; successful encoders leave
+ * any capacity beyond the fixed payload size untouched. */
+typedef struct po35_table_7be7 {
+  uint8_t index;
+  uint8_t data_raw[8];
+} po35_table_7be7_t;
+
+typedef struct po35_table_1c7f {
+  uint8_t index;
+  uint8_t data_raw[12];
+} po35_table_1c7f_t;
+
 typedef struct po35_speech_header {
   uint8_t slot;
   uint16_t record_count;
@@ -76,9 +92,10 @@ typedef struct po35_speech_header {
 } po35_speech_header_t;
 
 typedef struct po35_speech_record {
-  int16_t pitch; /* Signed Q11 octaves relative to C4 in the recovery model. */
-  uint8_t gain;
-  uint8_t unvoiced;
+  int16_t pitch;    /* Signed Q11 octaves relative to C4 in the recovery model. */
+  uint8_t gain;     /* Raw code; gain transfer function is unverified. */
+  uint8_t unvoiced; /* Raw code; noise/unvoiced transfer function is unverified. */
+  /* Signed raw coefficients; LAR interpretation belongs to the recovery model. */
   int8_t low_lar_raw[10];
   int8_t high_lar_raw[30];
 } po35_speech_record_t;
@@ -123,6 +140,10 @@ typedef struct po35_pattern {
  * unknown fields and future byte values survive roundtrips. Input/output
  * must not overlap. Drum patch 0x37b2 uses the existing po32_packet_encode /
  * po32_packet_decode with po32_patch_packet_t; it is not duplicated here. */
+po_status_t po35_table_7be7_decode(const uint8_t *data, size_t len, po35_table_7be7_t *out);
+po_status_t po35_table_7be7_encode(const po35_table_7be7_t *value, uint8_t *out, size_t capacity);
+po_status_t po35_table_1c7f_decode(const uint8_t *data, size_t len, po35_table_1c7f_t *out);
+po_status_t po35_table_1c7f_encode(const po35_table_1c7f_t *value, uint8_t *out, size_t capacity);
 po_status_t po35_speech_header_decode(const uint8_t *data, size_t len, po35_speech_header_t *out);
 po_status_t po35_speech_header_encode(const po35_speech_header_t *header, uint8_t *out,
                                       size_t capacity);
