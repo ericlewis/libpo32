@@ -560,6 +560,58 @@ static void test_patch_parse_mtdrum_text_trim_and_clamp(void) {
   assert(fabsf(params.ModVel - 1.0f) < 0.0001f);
 }
 
+static void test_captured_pattern_slot_record(void) {
+  /* Recorded patterns-only backup: 0x496f payload 03, then state and final tail. */
+  static const uint8_t body[] = {0x7e, 0x1e, 0x3a, 0x26, 0x84, 0xe8, 0x72, 0x2f, 0x58, 0xc7, 0x7e,
+                                 0xa5, 0x77, 0x37, 0x05, 0x68, 0x19, 0x6c, 0x51, 0x49, 0x59, 0x27,
+                                 0xeb, 0xd2, 0xcd, 0x73, 0x69, 0xf8, 0x42, 0x83, 0xb3, 0x5f, 0xea,
+                                 0x92, 0xa8, 0x4d, 0x56, 0x4a, 0x23, 0x49, 0x8e, 0x14, 0x95, 0x07,
+                                 0xa5, 0xf4, 0x7d, 0xe2, 0xe2, 0x13, 0x56, 0x53};
+  uint8_t frame[PO32_PREAMBLE_BYTES + sizeof(body)], decoded[sizeof(frame)];
+  parse_state_t packets = {0};
+  po32_decode_result_t result;
+  po32_final_tail_t tail;
+  size_t decoded_len = 0, samples_count;
+  float *samples;
+  po32_status_t status;
+
+  memcpy(frame, po32_preamble_bytes(), PO32_PREAMBLE_BYTES);
+  memcpy(frame + PO32_PREAMBLE_BYTES, body, sizeof(body));
+  status = po32_frame_parse(frame, sizeof(frame), collect_packets, &packets, &tail);
+  assert(status == PO32_OK);
+  assert(packets.packet_count == 2);
+  assert(packets.tags[0] == 0x496fu && packets.lens[0] == 1u);
+  assert(packets.first_payload_byte[0] == 3u);
+  assert(packets.tags[1] == PO32_TAG_STATE && packets.lens[1] == 36u);
+
+  /* Accepting this tag must not weaken its checksum or one-byte length checks. */
+  for (size_t bit = 0; bit < 48; ++bit) {
+    frame[PO32_PREAMBLE_BYTES + bit / 8] ^= (uint8_t)(1u << (bit % 8));
+    status = po32_frame_parse(frame, sizeof(frame), NULL, NULL, &tail);
+    assert(status != PO32_OK);
+    frame[PO32_PREAMBLE_BYTES + bit / 8] ^= (uint8_t)(1u << (bit % 8));
+  }
+  for (size_t len = 0; len <= 2; len += 2) {
+    po32_builder_t builder;
+    uint8_t invalid[256], payload[2] = {3, 0};
+    size_t length = 0;
+    po32_builder_init(&builder, invalid, sizeof(invalid));
+    assert(po32_builder_append_packet(&builder, 0x496fu, payload, len, NULL) == PO32_OK);
+    assert(po32_builder_finish(&builder, &length) == PO32_OK);
+    assert(po32_frame_parse(invalid, length, NULL, NULL, &tail) != PO32_OK);
+  }
+
+  samples_count = po32_render_sample_count(sizeof(frame), 48000);
+  samples = (float *)malloc(samples_count * sizeof(*samples));
+  assert(samples);
+  assert(po32_render_dpsk_f32(frame, sizeof(frame), 48000, samples, samples_count) == PO32_OK);
+  status = po32_decode_f32(samples, samples_count, 48000, &result, decoded, sizeof(decoded),
+                           &decoded_len);
+  assert(status == PO32_OK && result.done);
+  assert(decoded_len == sizeof(frame) && !memcmp(decoded, frame, sizeof(frame)));
+  free(samples);
+}
+
 static void test_tag_names_all_variants(void) {
   assert(strcmp(po32_tag_name(PO32_TAG_PATCH), "patch") == 0);
   assert(strcmp(po32_tag_name(PO32_TAG_RESET), "reset") == 0);
@@ -567,6 +619,7 @@ static void test_tag_names_all_variants(void) {
   assert(strcmp(po32_tag_name(PO32_TAG_ERASE), "erase") == 0);
   assert(strcmp(po32_tag_name(PO32_TAG_STATE), "state") == 0);
   assert(strcmp(po32_tag_name(PO32_TAG_KNOB), "knob") == 0);
+  assert(strcmp(po32_tag_name(PO32_TAG_PATTERN_SLOT), "pattern_slot") == 0);
   assert(strcmp(po32_tag_name(0xFFFFu), "unknown") == 0);
 }
 
@@ -2065,6 +2118,7 @@ int main(void) {
   test_patch_parse_mtdrum_text_edge_cases();
   test_patch_parse_mtdrum_text_trim_and_clamp();
   test_tag_names_all_variants();
+  test_captured_pattern_slot_record();
   test_encode_decode_patch_guards();
   test_import_field_parse_errors();
   test_patch_decode_invalid_side();

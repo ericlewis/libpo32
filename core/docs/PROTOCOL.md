@@ -76,9 +76,15 @@ is the state after both trailer bytes, not the snapshot stored in the trailer.
 | Patch | `0x37B2` | `43` bytes |
 | Reset | `0x4AB4` | `1` byte |
 | Pattern | `0xD022` | `211` bytes |
+| Pattern slot | `0x496F` | `1` byte, retained raw |
 | Erase | `0xB892` | `1` byte |
 | State | `0x505A` | `35 + pattern_count` bytes |
 | Knob | `0xA354` | `2` bytes |
+
+The one-byte pattern-slot record occurs in official and captured transfers in
+place of a full pattern record. Observed payloads identify slots `0..15`, but
+the exact restore action is not modeled. Raw parsing and building preserve it;
+there is no typed packet decoder for this tag.
 
 Use [`po32_tag_name(...)`](../include/po32.h) for a
 human-readable tag name.
