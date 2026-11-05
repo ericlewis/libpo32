@@ -21,10 +21,16 @@ applications handle playback and device I/O. See the
 [freestanding contract](core/docs/ARCHITECTURE.md#freestanding-contract) for
 compiler and target requirements.
 
-PO-35/137 speech analysis and synthesis are approximate models. Some pattern
-and metadata fields remain uninterpreted and are preserved as raw bytes.
-Software loopbacks verify transfer-byte preservation; generated stereo-family
-backups and speech output have not been validated on physical devices.
+PO-33 pattern data has observed pitch, level and filter roles, with remaining
+field boundaries and scales retained raw. PO-35/137 speech analysis and
+synthesis are approximate models. See the [format and field map](core/docs/PO_FORMATS.md)
+for established structure, observed roles, candidate meanings and API limits.
+
+Selected rebuilt PO-33 backups and a PCM sample replacement have been accepted
+on hardware; selected test banks also have byte-identical device readbacks.
+This does not establish every edit, larger allocation, PO-133 hardware, or
+generated PO-35/137 speech. Software loopbacks provide separate byte-preservation
+checks.
 
 ## Build and try
 

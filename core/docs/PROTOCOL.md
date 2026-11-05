@@ -109,7 +109,12 @@ And typed encode/decode helpers:
 | [`po32_packet_decode(...)`](../include/po32.h) | Payload bytes to typed packet struct |
 
 For `po32_pattern_packet_t`, `steps[]` stores decoded per-lane step entries,
-not raw lane bytes.
+not raw lane bytes. Inactive trigger bytes are re-encoded as zero even when
+their original selector/accent bits were nonzero. This limits byte preservation;
+it does not establish a playback change. The typed state also holds only 16
+chain entries, fewer than the valid 22-entry chain in official Basic Beats 1.
+Keep raw packet payloads for exact backup preservation. See
+[Backup formats](PO_FORMATS.md) for measured coverage and the canonical field map.
 
 For normal pattern construction, prefer the `po32_pattern_*` helpers in
 [`../include/po32.h`](../include/po32.h) rather than writing `steps[]`,
@@ -123,11 +128,15 @@ On the wire, each pattern payload is lane-chunked:
 4. `2` bytes accent bitmask, little-endian
 
 This totals `211` bytes. Construction helpers initialize the reserved bytes to
-zero; the typed codec preserves their supplied values.
+zero; the typed codec preserves their supplied values. Despite the field name,
+these bytes contain independently varying per-step data in official packs.
+A control/effect role is plausible, but exact meanings are unresolved.
 
 Each trigger byte is packed. The lane index, selector bits, accent bit, and
 low nibble together determine the triggered sound and step behavior. A zero low
-nibble means the step is empty.
+nibble means the trigger is inactive; it does not require the remaining trigger
+bits or parameter pair to be zero. The final accent mask can contain bits beyond
+those set by active triggers and must not be reconstructed from them alone.
 
 The lane grouping is:
 
