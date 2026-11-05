@@ -188,6 +188,14 @@ describes knob A as note/slice selection, knob B as melodic note length, and
 held-step plus BPM as drum retrigger selection. These UI operations must not
 be confused with TONE/FILTER knob automation or TRIM coordinates.
 
+That guide also reports that holding a step copies its note/slice and parameters
+into the defaults used for new steps. It reports delayed trim saves and an edit
+page returning to TONE without refreshed icons after sound selection or playback.
+These are author observations, not decoded field assignments. They are potential
+confounders for control experiments: distinguish a held-step edit from a knob
+lock, explicitly select the intended page, and verify settled backup differences
+before assigning a parameter or slot-default field.
+
 These are control functions and observed storage roles, not a calibrated
 conversion from displayed knob values. For example, q1 `32 -> 41` gave about
 `+2.77 dB` in one repeatable noise test with an exact bank readback; another
