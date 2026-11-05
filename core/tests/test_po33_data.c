@@ -145,6 +145,30 @@ static void test_pattern_fx_edit_locality(void) {
       assert(encoded[i] == (uint8_t)(wire[i] ^ (i == offset ? changed_bits : 0)));
   }
 }
+static void test_record_decode_overlong_lengths(void) {
+  const uint8_t wire[PO33_PATTERN_BYTES + 1] = {0};
+  const size_t settings_lengths[] = {PO33_SETTINGS_BYTES + 1, SIZE_MAX};
+  const size_t pattern_lengths[] = {PO33_PATTERN_BYTES + 1, SIZE_MAX};
+  const size_t sound_lengths[] = {PO33_SOUND_HEADER_BYTES + 1, SIZE_MAX};
+  po33_settings_t settings;
+  po33_pattern_t pattern;
+  po33_sound_header_t sound;
+  memset(&settings, 0xa5, sizeof(settings));
+  memset(&pattern, 0xa5, sizeof(pattern));
+  memset(&sound, 0xa5, sizeof(sound));
+  for (size_t i = 0; i < sizeof(settings_lengths) / sizeof(settings_lengths[0]); ++i) {
+    assert(po33_settings_decode(wire, settings_lengths[i], &settings) == PO_ERR_FRAME);
+    assert_filled((const uint8_t *)&settings, sizeof(settings), 0xa5);
+  }
+  for (size_t i = 0; i < sizeof(pattern_lengths) / sizeof(pattern_lengths[0]); ++i) {
+    assert(po33_pattern_decode(wire, pattern_lengths[i], &pattern) == PO_ERR_FRAME);
+    assert_filled((const uint8_t *)&pattern, sizeof(pattern), 0xa5);
+  }
+  for (size_t i = 0; i < sizeof(sound_lengths) / sizeof(sound_lengths[0]); ++i) {
+    assert(po33_sound_header_decode(wire, sound_lengths[i], &sound) == PO_ERR_FRAME);
+    assert_filled((const uint8_t *)&sound, sizeof(sound), 0xa5);
+  }
+}
 static void test_pattern(void) {
   uint8_t wire[PO33_PATTERN_BYTES], copy[PO33_PATTERN_BYTES + 1];
   po33_pattern_t p;
@@ -168,7 +192,7 @@ static void test_pattern(void) {
     assert(copy[i] == 0xa5);
 }
 static void test_settings(void) {
-  uint8_t wire[PO33_SETTINGS_BYTES], copy[PO33_SETTINGS_BYTES];
+  uint8_t wire[PO33_SETTINGS_BYTES], copy[PO33_SETTINGS_BYTES + 3];
   po33_settings_t s, before;
   for (size_t i = 0; i < sizeof(wire); ++i)
     wire[i] = (uint8_t)i;
@@ -178,26 +202,46 @@ static void test_settings(void) {
   assert(po33_settings_decode(wire, sizeof(wire), &s) == PO32_OK);
   assert(s.chain_length == 2 && s.tempo == 140 && s.swing_raw == 18 && s.chain[127] == wire[382]);
   assert(s.state_raw[0] == wire[386] && s.suffix_raw[0] == wire[402]);
-  assert(po33_settings_encode(&s, copy, sizeof(copy)) == PO32_OK &&
-         memcmp(wire, copy, sizeof(wire)) == 0);
-  before = s;
-  wire[383] = 129;
-  assert(po33_settings_decode(wire, sizeof(wire), &s) == PO32_ERR_RANGE &&
-         memcmp(&s, &before, sizeof(s)) == 0);
-  s.chain_length = 129;
   memset(copy, 0xa5, sizeof(copy));
-  assert(po33_settings_encode(&s, copy, sizeof(copy)) == PO32_ERR_RANGE);
-  for (size_t i = 0; i < sizeof(copy); ++i)
-    assert(copy[i] == 0xa5);
+  assert(po33_settings_encode(&s, copy, sizeof(wire)) == PO32_OK &&
+         memcmp(wire, copy, sizeof(wire)) == 0);
+  assert_filled(copy + sizeof(wire), sizeof(copy) - sizeof(wire), 0xa5);
+  const uint8_t valid_lengths[] = {0, PO33_CHAIN_CAPACITY};
+  for (size_t i = 0; i < sizeof(valid_lengths); ++i) {
+    wire[383] = valid_lengths[i];
+    assert(po33_settings_decode(wire, sizeof(wire), &s) == PO_OK);
+    assert(s.chain_length == valid_lengths[i]);
+    memset(copy, 0xa5, sizeof(copy));
+    assert(po33_settings_encode(&s, copy, sizeof(copy)) == PO_OK);
+    assert(memcmp(wire, copy, sizeof(wire)) == 0);
+    assert_filled(copy + sizeof(wire), sizeof(copy) - sizeof(wire), 0xa5);
+  }
+  before = s;
+  const uint8_t invalid_lengths[] = {129, 255};
+  for (size_t i = 0; i < sizeof(invalid_lengths); ++i) {
+    s = before;
+    wire[383] = invalid_lengths[i];
+    assert(po33_settings_decode(wire, sizeof(wire), &s) == PO32_ERR_RANGE &&
+           memcmp(&s, &before, sizeof(s)) == 0);
+    s.chain_length = invalid_lengths[i];
+    memset(copy, 0xa5, sizeof(copy));
+    assert(po33_settings_encode(&s, copy, sizeof(copy)) == PO32_ERR_RANGE);
+    assert_filled(copy, sizeof(copy), 0xa5);
+  }
 }
 static void test_sound(void) {
   const uint8_t wire[] = {0x78, 0x56, 0x34, 0x12, 0xff, 0xff, 0xff, 0xff, 120};
-  uint8_t copy[9];
+  uint8_t copy[PO33_SOUND_HEADER_BYTES + 3];
   po33_sound_header_t h;
   assert(po33_sound_header_decode(wire, sizeof(wire), &h) == PO32_OK);
   assert(h.range_start_raw == 0x12345678u && h.range_end_raw == 0xffffffffu &&
          h.source_selector == 120);
+  memset(copy, 0xa5, sizeof(copy));
+  assert(po33_sound_header_encode(&h, copy, sizeof(wire)) == PO32_OK && memcmp(wire, copy, 9) == 0);
+  assert_filled(copy + sizeof(wire), sizeof(copy) - sizeof(wire), 0xa5);
+  memset(copy, 0xa5, sizeof(copy));
   assert(po33_sound_header_encode(&h, copy, sizeof(copy)) == PO32_OK && memcmp(wire, copy, 9) == 0);
+  assert_filled(copy + sizeof(wire), sizeof(copy) - sizeof(wire), 0xa5);
 }
 int main(void) {
   test_pattern_control_roundtrip();
@@ -206,6 +250,7 @@ int main(void) {
   test_pattern_fx_errors();
   test_pattern_control_edit_locality();
   test_pattern_fx_edit_locality();
+  test_record_decode_overlong_lengths();
   test_pattern();
   test_settings();
   test_sound();
