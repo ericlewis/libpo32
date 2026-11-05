@@ -461,6 +461,13 @@ resemble three little-endian integers, but that does not establish integer
 fields instead of bytes with padding. Desktop Bitspeek enums and candidate
 gain/detune interpretations are not imposed on either table.
 
+There is no voice-independent scalar conversion for byte 2 between the two
+retained `7BE7` table variants: source value 18 becomes 21 at index 2 but 14 at
+index 6, with every other byte within each paired record unchanged. This rules
+out a conversion using that byte alone, not a gain role or an index-dependent
+interpretation. Preserve the records rather than normalize one variant into
+the other.
+
 The 43-byte drum payload is identical to PO-32: selector followed by 21 LE16
 parameters normalized by 65535. Left/right selectors are `0x10 | (slot-1)` and
 `0x20 | (slot-1)`. There are sixteen pairs of patches, not sixteen simultaneous
@@ -495,6 +502,24 @@ Pattern payload: 183 bytes.
 | 177 | 4 | Raw footer |
 | 181 | 2 | Stored derived mask, little-endian; preserved, not recalculated |
 
+The old mask relation was rechecked through the current native parser: all
+85 pattern records (62 distinct payloads) match the union of `1 << (event >> 4)`
+for speech event bytes with a nonzero low nibble, plus bit 15 only when an
+active drum event has high nibble zero. Setting bit 15 for every active drum
+matches only 59 of those 85 records. One drum-only pattern has events `0x61`
+at zero-based steps 0, 4 and 8 but mask zero; zero mask therefore does not
+identify an empty pattern. This is an observed relation, not a recomputation rule imposed on new
+data. A truncated wider drum bitset would explain its arithmetic but is not
+evidence of device implementation or a confirmed bug.
+
+For all 150 positions whose index-pair high nibble differs from 7 across the
+distinct patterns, the corresponding step-state byte indexes a position with
+the same high nibble. In 38 cases it is not the current linear run's start.
+Identical high-nibble sequences also occur with different step-state arrays.
+This supports an effect-associated reference/history candidate, not a value
+derivable solely from present runs or a verified playback pointer. Preserve
+the bytes, including those retained at other positions.
+
 Across observed continuation-like speech events, candidate note and
 voice/effect fields and parameter values can change; one captured transition
 also changes slot. These events must not be
@@ -518,6 +543,13 @@ device gain/noise laws, header metadata units or equivalent voice selectors.
 Zero excitation gain also does not guarantee immediate zero PCM when a
 renderer retains filter history; no silence predicate or forced terminator is
 inferred from the record values.
+
+In decoded logical payloads, a matched retained pair differs only at settings
+byte 152: global tempo changes from 140 to 120. All 15 speech headers and 484
+speech-data payloads remain identical.
+Speech-header byte 4 retains values 120 or 123 by slot, so it is neither a copy
+of current global tempo nor a function of that tempo alone. Recording-time or
+sample-associated tempo remains a candidate; no header units are established.
 
 All 56 distinct speech bodies in the inspected corpus end with zero gain and
 the previous record's other 43 bytes. Interior silent records have exceptions.
