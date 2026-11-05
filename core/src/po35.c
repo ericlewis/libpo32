@@ -109,6 +109,46 @@ po_status_t po35_builder_finish(po35_builder_t *builder, size_t *frame_len) {
   return PO_OK;
 }
 
+po_status_t po35_table_7be7_decode(const uint8_t *data, size_t len, po35_table_7be7_t *out) {
+  if (data == NULL || out == NULL)
+    return PO_ERR_INVALID_ARG;
+  if (len != PO35_TABLE_7BE7_BYTES)
+    return PO_ERR_PARSE;
+  out->index = data[0];
+  copy_bytes(out->data_raw, data + 1, sizeof(out->data_raw));
+  return PO_OK;
+}
+
+po_status_t po35_table_7be7_encode(const po35_table_7be7_t *value, uint8_t *out, size_t capacity) {
+  if (value == NULL || out == NULL)
+    return PO_ERR_INVALID_ARG;
+  if (capacity < PO35_TABLE_7BE7_BYTES)
+    return PO_ERR_BUFFER_TOO_SMALL;
+  out[0] = value->index;
+  copy_bytes(out + 1, value->data_raw, sizeof(value->data_raw));
+  return PO_OK;
+}
+
+po_status_t po35_table_1c7f_decode(const uint8_t *data, size_t len, po35_table_1c7f_t *out) {
+  if (data == NULL || out == NULL)
+    return PO_ERR_INVALID_ARG;
+  if (len != PO35_TABLE_1C7F_BYTES)
+    return PO_ERR_PARSE;
+  out->index = data[0];
+  copy_bytes(out->data_raw, data + 1, sizeof(out->data_raw));
+  return PO_OK;
+}
+
+po_status_t po35_table_1c7f_encode(const po35_table_1c7f_t *value, uint8_t *out, size_t capacity) {
+  if (value == NULL || out == NULL)
+    return PO_ERR_INVALID_ARG;
+  if (capacity < PO35_TABLE_1C7F_BYTES)
+    return PO_ERR_BUFFER_TOO_SMALL;
+  out[0] = value->index;
+  copy_bytes(out + 1, value->data_raw, sizeof(value->data_raw));
+  return PO_OK;
+}
+
 po_status_t po35_speech_header_decode(const uint8_t *data, size_t len, po35_speech_header_t *out) {
   if (data == NULL || out == NULL)
     return PO_ERR_INVALID_ARG;
