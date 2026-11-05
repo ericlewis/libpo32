@@ -7,9 +7,9 @@ This repo keeps the contribution path intentionally small:
 - use Conventional Commits so release notes and SemVer changes stay easy to read
 
 Keep maintained implementations and validation tools in C, POSIX shell or
-CMake, alongside the existing Go binding. Keep exploratory scripts and research
-artifacts outside the versioned tree. Document supported APIs and reproducible
-checks rather than local experiment logs.
+CMake. Keep exploratory scripts and research artifacts outside the versioned
+tree. Document supported APIs and reproducible checks rather than local
+experiment logs.
 
 ## Local Setup
 
@@ -92,12 +92,6 @@ AddressSanitizer and UndefinedBehaviorSanitizer.
 `ci-fuzz.sh` requires Clang with the libFuzzer runtime and smoke-fuzzes
 every harness in [`core/fuzz`](core/fuzz/README.md); set
 `PO32_FUZZ_SECONDS` for a longer run.
-
-After changing canonical C sources or headers, run `./scripts/sync-go-core.sh`
-to refresh the generated sources in the standalone Go module. Verify them with
-`./scripts/sync-go-core.sh --check`, run `(cd bindings/go && go test -race ./...)`,
-and use `./scripts/check-go-module.sh` to test an isolated module and consumer.
-Do not edit the generated C copies directly.
 
 For locally supplied PO-33/35 family captures, see the
 [offline capture checks](core/examples/README.md#offline-capture-checks).

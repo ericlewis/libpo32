@@ -5,7 +5,7 @@
 
 Decode, edit and encode Teenage Engineering Pocket Operator backups, convert
 samples, and synthesize drum and speech audio. libpo provides a freestanding C99
-core, command-line WAV tools, and one Go module covering all supported families.
+core and command-line WAV tools for all supported families.
 
 ## Supported families
 
@@ -34,7 +34,7 @@ checks.
 
 ## Build and try
 
-Requires CMake 3.16 or newer and a C99 compiler. Go is optional.
+Requires CMake 3.16 or newer and a C99 compiler.
 
 ```sh
 git clone https://github.com/ericlewis/libpo.git
@@ -170,31 +170,6 @@ The build target and archive retain the names `po32` and `libpo32.a` for
 compatibility. `LibPO32::po32`, `pkg-config po32` and existing public PO-32 C
 names remain available. New consumers can use `LibPO::po` and `pkg-config po`.
 
-## Use from Go
-
-One module provides all families. It requires Go 1.26.1 or newer, cgo and a C99
-compiler, and bundles the C sources so consumers do not need a separate CMake
-installation. The module retains its historical `libpo32` import path despite
-the repository rename.
-
-To use the current development branch from your Go project:
-
-```sh
-go get github.com/ericlewis/libpo32/bindings/go@main
-```
-
-| Package | APIs |
-| --- | --- |
-| `github.com/ericlewis/libpo32/bindings/go` | Shared packets and status errors; package name `libpo` |
-| `github.com/ericlewis/libpo32/bindings/go/po32` | Drum patches, patterns, synthesis and mono modem |
-| `github.com/ericlewis/libpo32/bindings/go/po33` | PO-33/133 samples, patterns and framing |
-| `github.com/ericlewis/libpo32/bindings/go/po35` | PO-35/137 speech, patterns and framing |
-| `github.com/ericlewis/libpo32/bindings/go/stereo` | Shared stereo modem |
-
-The former root PO-32 API moved to `/po32`. Call `Close` on objects that own
-native resources. See the [Go binding guide](core/docs/BINDINGS.md) for examples,
-ownership, migration and nested-module release tags.
-
 ## Documentation
 
 | Guide | Contents |
@@ -206,12 +181,10 @@ ownership, migration and nested-module release tags.
 | [Drum synthesis](core/docs/SYNTH.md) | PO-32 synthesis behavior |
 | [Patch parameters](core/docs/PATCH_PARAMETERS.md) | The 21 drum-patch parameters |
 | [Examples](core/examples/README.md) | CLI options, replacement audio and offline capture checks |
-| [Go binding](core/docs/BINDINGS.md) | Model packages and integration |
 | [Fuzzing](core/fuzz/README.md) | Fuzz harnesses and differential checks |
 
 Canonical C sources and headers live in `core/src` and `core/include`. Hosted
-tools are in `core/examples`, native tests in `core/tests`, and the Go module
-in `bindings/go`. The Go C bundle is generated from the canonical core.
+tools are in `core/examples` and native tests in `core/tests`.
 
 ## Projects using libpo
 
@@ -222,8 +195,7 @@ in `bindings/go`. The Go C bundle is generated from the canonical core.
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for verification commands, clang-format 18,
-optional Git hooks and the Conventional Commits policy. Changes to canonical C
-sources must also update the [generated Go bundle](core/docs/BINDINGS.md#maintaining-the-bundled-core).
+optional Git hooks and the Conventional Commits policy.
 
 ## License
 

@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to `libpo32` will be documented in this file.
+All notable changes to `libpo` will be documented in this file.
 
 The format is based on Keep a Changelog, and the project follows Semantic Versioning.
 
@@ -15,12 +15,11 @@ The format is based on Keep a Changelog, and the project follows Semantic Versio
   transfers and speech previews have not been validated on physical hardware.
 - Canonical `LibPO::po` CMake and `pkg-config po` package interfaces, retaining
   the legacy `LibPO32::po32` and `pkg-config po32` interfaces.
-- One standalone Go module with model-specific `po32`, `po33`, `po35` and
-  shared `stereo` packages, including streaming decoding and synthesis.
 
-### Changed
-- The Go root package is now `libpo`; former root PO-32 APIs moved to `/po32`.
-  Shared status error messages use the `libpo:` prefix.
+### Removed
+- **Breaking:** the in-tree Go module, generated C bundle and Go-specific
+  tooling and CI. This checkout now provides the C library and native tools;
+  Go consumers must pin an earlier revision to keep using the old module.
 
 ### Fixed
 - PO-32 attack, modulation and EQ mappings from Joseph Holland's
