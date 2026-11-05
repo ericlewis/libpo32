@@ -104,6 +104,15 @@ an implementation bound, not a measured maximum chain length for the device.
 
 ## PO-33 / PO-133
 
+The PO-133 uses the same codec family here. Teenage Engineering describes it
+as [based on the PO-33](https://teenage.engineering/products/po/capcom), and its
+[guide](https://teenage.engineering/guides/po-133/en) documents the same sampler
+controls and effect list. The supplied PO-133 bank validates with the shared
+decoder: 3,357 packets, sixteen full patterns, 510-byte settings, and 52 sound
+headers referencing eight owned pools. This is captured-format compatibility,
+not proof of identical firmware or every playback behavior. The physical FX
+and control experiments below used a PO-33, not a PO-133.
+
 Tags: settings `7D5C`; pattern selector `A041`, data `C498`; sound selector
 `68B5`, data `EF78`. Logical records can span several packets. Preserve the
 original packet boundaries when reproducing a captured frame.
@@ -125,8 +134,12 @@ Pattern record: 1032 bytes. Steps and sound indices below are zero-based.
 | Offset | Bytes | Meaning |
 | ---: | ---: | --- |
 | `48*step + 3*sound` | 3 per cell | Parameter word, 16 x 16 cells; observed roles below |
-| `768 + 16*step + sound` | 1 per cell | Note/key-related low nibble; retrigger-associated high nibble, exact count/duration meaning unresolved |
-| 1024 | 8 | Raw FX nibbles; `6` is octave-up; first byte associates high/low with steps 0/1, full ordering and other IDs unresolved |
+| `768 + 16*step + sound` | 1 per cell | Note/key-related low nibble; timing-related high nibble, with melodic length and drum retrigger contexts; exact units unresolved |
+| 1024 | 8 | Two FX codes per byte, high nibble first in step order; `6` is octave-up, other effect IDs unresolved |
+
+For zero-based step `s`, its FX code is
+`(footer_raw[s / 2] >> ((s & 1) ? 0 : 4)) & 15`. This defines storage order,
+not the duration or cross-step behavior of each effect.
 
 For a little-endian word `W`, these chunks are useful descriptive coordinates,
 not a declaration that four six-bit parameters are the final encoding.
@@ -138,9 +151,37 @@ not a declaration that four six-bit parameters are the final encoding.
 | q2 | `(W >> 12) & 63` | Observed filter control: frequency-dependent playback changes; cutoff is the leading interpretation | Exact filter mapping and numeric units |
 | q3 | `(W >> 18) & 63` | Independently varying stored data; resonance is a candidate | No resolved playback effect in the two tested contexts; identity and activation remain open |
 
+The physical knobs change function with the edit mode selected by FX. The
+[PO-33 guide](https://teenage.engineering/guides/po-33/en) documents these
+controls and identifies TONE/FILTER as lockable parameters:
+
+| Mode | Knob A | Knob B | Corresponding storage evidence |
+| --- | --- | --- | --- |
+| TONE | Pitch | Sound volume | q0 has pitch behavior; q1 has gain-like behavior |
+| FILTER | High-/low-pass filter | Resonance | q2 has filter-like behavior; q3 as resonance is unconfirmed |
+| TRIM | Sound start | Sound length | Sound-header range coordinates, not another per-step q field; exact UI conversion remains unresolved |
+
+Holding a lit step in WRITE mode is a separate editing context. The
+[extended control guide](https://cubeleco.blogspot.com/2019/05/po-33-ko-hidden-features.html)
+describes knob A as note/slice selection, knob B as melodic note length, and
+held-step plus BPM as drum retrigger selection. These UI operations must not
+be confused with TONE/FILTER knob automation or TRIM coordinates.
+
+These are control functions and observed storage roles, not a calibrated
+conversion from displayed knob values. For example, q1 `32 -> 41` gave about
+`+2.77 dB` in one repeatable noise test with an exact bank readback; another
+stimulus/recording workflow gave about `+1.61 dB`. Neither supplies a universal
+gain law. q2 `47 -> 63` changed the spectral response without establishing a
+cutoff in Hz. q3 `26 -> 30` at q2 `7` survived an exact readback, but did not
+produce a resolved playback difference. The resonance identity remains open.
+Trim start/end coordinates likewise do not establish a knob scale, a direct
+stored-length field, or inclusive/exclusive endpoint behavior.
+
 Raw bit 5 is zero in the inspected corpus. Both 6+6+6+6 and 5+7+6+6 layouts
 fit; regrouping as 5+7+7+5 also remains possible. Signedness and field boundaries
-must not be inferred from the chunk names alone.
+must not be inferred from the chunk names alone. Each q extraction yields
+0..63 by construction; this is not proof of the physical knob's range or a
+six-bit field boundary.
 
 Parameter words with zero control are meaningful stored data. Frekvens has a
 pattern with 15 q1-only cells and every control byte zero; other intermediate
@@ -152,7 +193,11 @@ These observations do not by themselves prove runtime hold or interpolation.
 The old note/Param B control captures leave the three-byte word unchanged and
 vary low/high control nibbles. Some nominally adjacent captures also change
 pattern selection, tempo, swing or a second event. They are not isolated q3
-sweeps or evidence for a nonlinear joint parameter encoding.
+sweeps or evidence for a nonlinear joint parameter encoding. Their labels do
+not by themselves establish calibrated knob values. The held-step editing
+context explains why note and melodic timing edits can affect control nibbles
+without changing q0..q3. Similarly, A/B/A in
+measurement descriptions names comparison variants, not the two physical knobs.
 
 For the comparisons below, `q0 = W & 63`, where `W` is the little-endian
 event word. This is a descriptive coordinate, not a proven field width.
@@ -171,6 +216,13 @@ sound 8 (zero-based). Moving only the word and control produces the entire
 counterpart bank exactly. The stored codes therefore do not require a
 step-dependent lookup for those two positions; audible repeat counts remain
 unverified.
+
+The high-nibble datasets cover different sound contexts: the melodic edits are
+on sound 0, while the drum retrigger edits are on sound 8. Complete word/control
+combinations also occur in both melodic and drum slots. Consequently, the raw
+timing nibble is not a universal duration or repeat count; sound context must
+accompany a musical interpretation. The structural codecs preserve both nibbles
+without inventing a key-number, note-length or retrigger conversion.
 
 Capture names are experiment labels, not calibrated values. For example,
 `note_11` and `note_12` contain identical banks in distinct source-audio files.
@@ -224,15 +276,39 @@ of each step, `f6` primarily changed one-based note 2, while `6f` primarily
 changed note 1. Both had smaller following-note transients. This supports
 high-first association for the first byte; short-event pitch estimates did
 not reach the sustained octave ratio, so they are not a new pitch scale.
-Other footer bytes and cross-step effect behavior still need separate checks.
+This first-byte probe alone does not establish the remaining byte order or
+general cross-step effect behavior.
 
 The complete 423-packet hardware readback preserved all patterns and sample
 data. Only settings changed: chain slot 0 selected pattern 1, and state bytes
 386/387 became 2/1. For the first byte's low nibble, state 2 fits high-first-next
 rather than the previously competing low-first-current rule, which predicts 0.
 These were generated footer edits followed by playback, not an isolated manual
-FX write. No readback occurred between loading and playback, so receive/send
-normalization remains an alternative to a runtime FX-position update.
+FX write. No readback occurred between loading and playback, so that trial
+alone cannot distinguish receive/send normalization from a runtime update.
+
+A later PO-33 probe tested all 16 nibble positions in an automatic chain of
+16 patterns. Each pattern contained one code `6` at a different position and
+three separated pitch markers for independent pattern identification. A
+200-second capture had no timestamp gaps or dropped frames. On both channels,
+at least three complete loops of each pattern placed the largest note change
+at its high-first target step, covering all eight footer bytes. The selected
+notes also shortened relative to the clean reference. This establishes the
+storage order above; short-event transients still differ from sustained FX.
+
+Complete 423-packet readbacks immediately after loading and after chained
+playback were both byte-identical to the generated bank. The state vector
+remained fifteen zeros followed by `7`, despite every stored FX event being
+exercised. The final nonzero coordinate makes the unchanged result observable
+even for a proposed wrap to zero. Thus zero does not disable stored FX in this
+flow, and these bytes do not unconditionally track playback or the last FX
+position. The earlier manual-selection/FX interactions remain distinct cases.
+
+The user subsequently identified that chained run as WRITE enabled. A repeat
+with WRITE explicitly off, using the same loaded bank, returned the identical
+68,450-byte frame with all 423 packets valid. Thus the exported state had no net
+change in either reported mode for this chained flow. Endpoint backups do not
+exclude transient runtime changes or establish update rules for other gestures.
 
 Sound header: nine bytes: LE32 range start, LE32 range end, source selector.
 These are raw coordinates: inclusive/exclusive conventions and all range
@@ -286,8 +362,11 @@ Rechecking 237 archived sampler identities (187 distinct frames) also finds
 nonzero coordinates alongside all-`ff` footers, and nondefault footers alongside
 zero coordinates. Thus these bytes are not a current FX count or occupancy map
 and cannot be derived solely from the current footer. The old FX pair and new
-asymmetric probe fit retained FX-position state, with values 1 and 2 associated
-with the first and second FX slots. They do not establish a general update rule,
+asymmetric probe show FX-position associations, with values 1 and 2 associated
+with the first and second FX slots. The chained playback test above leaves
+every coordinate unchanged while stored FX executes, so a retained FX-position
+model must have additional update conditions. These observations do not establish
+a general update rule,
 wrap behavior, or whether the value denotes a current or next position under
 the device's indexing convention. Preserve it when editing unrelated fields.
 
@@ -302,6 +381,11 @@ the entire bank, including these 16 bytes, identical to the clean baseline.
 After the subsequent octave-up procedure, byte 386 was 11 as described above.
 These observations do not support a continuously serialized playback position in
 that test, but do not establish a write cursor or other retained-state meaning.
+Automatic chained playback and the earlier manually selected patterns also
+differed in their control sequence. The chained WRITE-on/off comparison above
+does not explain the earlier state changes; selection-side updates, explicit FX
+gestures and the earlier trial's mode remain unisolated. Do not attribute the
+difference to one cause.
 
 Some legacy single-channel "decoded" grids were still projections of
 whitened stereo wire bytes. In three verified old exports, the range formerly
