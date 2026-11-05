@@ -484,6 +484,36 @@ static void test_decode_wav_edge_cases(void) {
   assert(!ok);
 }
 
+static void test_decode_wav_extensible(void) {
+  /* PCM32 with 24 valid bits, two mono samples at +0.5 and -0.5. */
+  uint8_t bytes[] = {'R',  'I', 'F', 'F',  68, 0,    0,    0,    'W',  'A', 'V', 'E',  'f',
+                     'm',  't', ' ', 40,   0,  0,    0,    0xfe, 0xff, 1,   0,   0x80, 0xbb,
+                     0,    0,   0,   0xee, 2,  0,    4,    0,    32,   0,   22,  0,    24,
+                     0,    4,   0,   0,    0,  1,    0,    0,    0,    0,   0,   0x10, 0,
+                     0x80, 0,   0,   0xaa, 0,  0x38, 0x9b, 0x71, 'd',  'a', 't', 'a',  8,
+                     0,    0,   0,   0,    0,  0,    0x40, 0,    0,    0,   0xc0};
+  wav_data_t wav = {0};
+  int ok;
+  for (unsigned floating = 0; floating < 2; ++floating) {
+    if (floating) {
+      bytes[38] = 32;
+      bytes[44] = 3;
+      bytes[71] = 0x3f;
+      bytes[75] = 0xbf;
+    }
+    assert(write_binary_file("decode_capture_extensible.wav", bytes, sizeof(bytes)));
+    ok = decode_wav("decode_capture_extensible.wav", &wav);
+    assert(ok);
+    assert(wav.sample_rate == 48000u && wav.sample_count == 2u);
+    assert(wav.samples[0] == 0.5f && wav.samples[1] == -0.5f);
+    free(wav.samples);
+  }
+  bytes[59] ^= 1; /* A matching format number alone is not a valid subtype GUID. */
+  assert(write_binary_file("decode_capture_extensible.wav", bytes, sizeof(bytes)));
+  ok = decode_wav("decode_capture_extensible.wav", &wav);
+  assert(!ok);
+}
+
 static void test_decode_capture_main_paths(void) {
   char *usage_argv[] = {"po32_decode_capture", NULL};
   char *missing_argv[] = {"po32_decode_capture", "missing.wav", "out", NULL};
@@ -680,6 +710,7 @@ int main(void) {
   test_decode_wav_formats();
   test_decode_wav_pcm24_and_pcm32();
   test_decode_wav_edge_cases();
+  test_decode_wav_extensible();
   test_decode_capture_main_paths();
   test_packet_dump_helpers();
   test_summary_helpers_direct();
