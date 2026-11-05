@@ -30,7 +30,7 @@ typedef struct po33_settings {
   uint8_t prefix_raw[255];
   uint8_t chain[PO33_CHAIN_CAPACITY];
   uint8_t chain_length, tempo, swing_raw;
-  uint8_t state_raw[16]; /* Retained state; meaning and UI relationship are unassigned. */
+  uint8_t state_raw[16]; /* Retained state; FX associations observed, update rules unresolved. */
   uint8_t suffix_raw[108];
 } po33_settings_t;
 
@@ -46,7 +46,7 @@ typedef struct po33_pattern_event {
 
 typedef struct po33_pattern {
   po33_pattern_event_t events[PO33_STEP_COUNT][PO33_SOUND_COUNT];
-  uint8_t footer_raw[8]; /* Effect-associated bytes; packing/IDs are not mapped. */
+  uint8_t footer_raw[8]; /* Raw FX nibbles: 6 = octave-up; full step order/other IDs unresolved. */
 } po33_pattern_t;
 
 typedef struct po33_sound_header {
