@@ -37,6 +37,8 @@ extern "C" {
 #define PO32_TAG_ERASE   0xB892u
 #define PO32_TAG_STATE   0x505Au
 #define PO32_TAG_KNOB    0xA354u
+/* One-byte slot marker observed in place of a full pattern; preserve as raw data. */
+#define PO32_TAG_PATTERN_SLOT 0x496Fu
 
 /* ══════════════════════════════════════════════════════════
  * Types

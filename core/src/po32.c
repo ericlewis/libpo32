@@ -81,6 +81,7 @@ static const po32_tag_spec_t po32_tag_specs[] = {
     {PO32_TAG_KNOB, 2u, 2u},
     {PO32_TAG_RESET, 1u, 1u},
     {PO32_TAG_ERASE, 1u, 1u},
+    {PO32_TAG_PATTERN_SLOT, 1u, 1u},
 };
 
 #define PO32_TAG_SPEC_COUNT (sizeof(po32_tag_specs) / sizeof(po32_tag_specs[0]))
@@ -144,6 +145,8 @@ const char *po32_tag_name(uint16_t tag_code) {
     return "state";
   case PO32_TAG_KNOB:
     return "knob";
+  case PO32_TAG_PATTERN_SLOT:
+    return "pattern_slot";
   default:
     return "unknown";
   }
