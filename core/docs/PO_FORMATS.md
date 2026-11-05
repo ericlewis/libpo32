@@ -47,6 +47,36 @@ Pattern record: 1032 bytes. Steps and sound indices below are zero-based.
 
 The event word, high control nibble and parameter scaling are not fully mapped.
 
+For the comparisons below, `q0 = W & 63`, where `W` is the little-endian
+event word. This is a descriptive coordinate, not a proven field width.
+
+The archived `factory`-labelled capture also has q0=14 on a zero-control row
+between two q0=13 control events (pattern 6, sound 9, steps 12..14). Thus
+copying either adjacent control event cannot explain all stored q0 values.
+The capture label does not independently authenticate factory provenance.
+
+Four captured banks contain controls `fc`, `1c`, `10` and `f0` at pattern 0
+offset 768, with every other logical byte identical. This establishes that
+the two nibbles can vary independently over those observed combinations.
+Six other matched pairs retain word `0d f8 83` and controls
+`19`, `29`, `39`, `49`, `69`, `89` when relocated between steps 6 and 15,
+sound 8 (zero-based). Moving only the word and control produces the entire
+counterpart bank exactly. The stored codes therefore do not require a
+step-dependent lookup for those two positions; audible repeat counts remain
+unverified.
+
+Capture names are experiment labels, not calibrated values. For example,
+`note_11` and `note_12` contain identical banks in distinct source-audio files.
+Historical label-based note maps and retrigger ordinals must not be exposed
+as verified key, pitch or repeat-count conversions.
+
+The closest effect-labelled pair changes only pattern 0 byte 1024 from `ff`
+to `7f` and settings byte 386 from `00` to `01`. It does not isolate either
+field's playback effect. Its step-16 label is insufficient to establish
+footer order or effect IDs. All 48 pattern footers in the inspected official
+Escalate, Frekvens and #16operators packs are `ff` bytes, so those packs add
+no nondefault footer contrast.
+
 Sound header: nine bytes: LE32 range start, LE32 range end, source selector.
 These are raw coordinates: inclusive/exclusive conventions and all range
 constraints remain unresolved. Populated pools contain following mu-law bytes
