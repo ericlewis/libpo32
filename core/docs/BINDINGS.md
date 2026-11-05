@@ -75,6 +75,27 @@ publish that version of the Go module.
 See the [C API](C_API.md) and [formats](PO_FORMATS.md) for the underlying
 contracts and limitations. Software success does not prove device acceptance.
 
+## Raw Preservation and Field Meanings
+
+`po32.StatePacket` has capacity for 16 chain entries; a valid official backup
+uses 22, so raw `libpo.Packet` values are required to retain that state.
+`po32.PatternPacket` re-encodes inactive trigger bytes as zero, losing stored
+selector/accent bits on those bytes. It preserves parameter pairs, the final
+accent mask and the independently varying bytes named `Reserved`. Use raw
+packets for byte-exact backups; typed conversion is not a lossless substitute.
+
+PO-33 pattern records preserve event words even when their control byte is zero.
+The observed q0 pitch/q1 level roles, inferred q2 cutoff role and unconfirmed
+q3 resonance candidate do not define exact numeric scales, field widths or
+zero/sentinel rules. Sample references address whole stored pools, including
+bytes outside the owner's trim. Preserve raw endpoints and resolve aliases
+before applying any application-level trim.
+
+The shared stereo modem does not make PO-33/133 and PO-35/137 record meanings
+interchangeable. Existing hardware evidence covers specific PO-33 tests, not
+every model, edit or transfer. The [canonical field map](PO_FORMATS.md) separates
+observed roles, inferences and unresolved behavior.
+
 ## Maintaining the Bundled Core
 
 `core/` remains authoritative. `bindings/go/internal/ccore/SOURCES.txt` lists

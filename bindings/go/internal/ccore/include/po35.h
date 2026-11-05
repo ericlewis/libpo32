@@ -72,7 +72,7 @@ typedef struct po35_speech_header {
   uint8_t slot;
   uint16_t record_count;
   uint8_t records_per_second;
-  uint8_t metadata[5]; /* Original payload bytes 4..8; semantics unresolved. */
+  uint8_t metadata[5]; /* Payload 4..8; tuning/gain/noise interpretations are candidates. */
 } po35_speech_header_t;
 
 typedef struct po35_speech_record {
@@ -84,7 +84,7 @@ typedef struct po35_speech_record {
 } po35_speech_record_t;
 
 typedef struct po35_speech_controls {
-  uint8_t parameters[4]; /* Byte order is known; individual names are not. */
+  uint8_t parameters[4]; /* Same four-byte order as per-step speech parameters. */
   uint8_t state_raw[4];
 } po35_speech_controls_t;
 
@@ -97,7 +97,8 @@ typedef struct po35_settings {
   po35_speech_controls_t speech[PO35_SPEECH_SLOT_COUNT];
   po35_drum_controls_t drums[PO35_DRUM_COUNT];
   uint8_t tempo;
-  uint8_t state_raw[2]; /* Payload bytes 153..154. */
+  /* Payload 153..154; the second byte is a candidate remembered sound ID. */
+  uint8_t state_raw[2];
   uint8_t chain_count;
   uint8_t chain[PO35_CHAIN_MAX_COUNT]; /* Zero-based indices; repeats preserved. */
 } po35_settings_t;

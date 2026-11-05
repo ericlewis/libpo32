@@ -162,6 +162,8 @@ typedef struct po32_state_packet {
   po32_morph_pair_t morph_pairs[PO32_STATE_MORPH_PAIR_COUNT];
   uint8_t tempo;
   uint8_t swing_times_12;
+  /* Typed capacity is 16, not a wire limit; official captures include 22.
+   * Preserve larger chains through raw packets. */
   uint8_t pattern_numbers[PO32_PATTERN_STEP_COUNT];
   size_t pattern_count;
 } po32_state_packet_t;
@@ -174,10 +176,12 @@ typedef struct po32_pattern_step {
 
 typedef struct po32_pattern_packet {
   uint8_t pattern_number;
-  /* Decoded per-lane-step triggers. Populated by decode, consumed by encode. */
+  /* Decoded triggers. Encoding an inactive instrument writes zero, so this
+   * representation does not preserve every inactive raw selector/accent bit. */
   po32_pattern_step_t steps[PO32_PATTERN_LANE_COUNT * PO32_PATTERN_STEP_COUNT];
   /* Wire order is per lane: 16 trigger bytes, then 16 morph pairs, repeated 4 times. */
   po32_morph_pair_t morph_lanes[PO32_PATTERN_LANE_COUNT * PO32_PATTERN_STEP_COUNT];
+  /* Independently varying per-step data; not padding. Meaning remains raw. */
   uint8_t reserved[PO32_PATTERN_RESERVED_COUNT];
   uint16_t accent_bits;
 } po32_pattern_packet_t;

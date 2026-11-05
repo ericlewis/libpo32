@@ -57,9 +57,12 @@ cmp decoded-po33/frame.bin checked-po33/frame.bin
 PO-33 uses the input channels in their supplied order. In addition to the raw
 frame and packet exports, it writes `settings.bin`, `pattern-NN.bin`,
 `sound-NNN.bin` and WAVs for populated sample pools. Sound blobs retain their
-nine-byte headers and padding. Sample WAVs contain expanded PCM16 at 23,438 Hz,
-the nearest integer to the nominal 23,437.5 Hz clock. Trims and slice references
-are not applied.
+nine-byte headers and all allocated sample bytes. Sample WAVs contain expanded
+PCM16 at 23,438 Hz, the nearest integer to the nominal 23,437.5 Hz clock. Trims
+and slice references are not applied. Aliases reference whole stored pools,
+including data outside the owner's trimmed interval. Raw endpoints are retained
+even when they overlap or exceed an allocation; their inclusion convention is
+unresolved.
 
 Both stereo encoders default to 48 kHz. Use `--rate 44100`, `--rate 48000` or
 `--rate 96000` to select the transfer WAV rate. Re-encoding without edits
@@ -71,7 +74,10 @@ Replace an existing sample pool with a nonempty PCM16, PCM24, PCM32 or float32
 WAV at 8–192 kHz, including extensible WAV. The core converts it to the nominal
 23,437.5 Hz clock; exported 23,438 Hz WAVs are treated as native-rate input.
 Samples must be finite and in `[-1,1]`. The sample pool can be shared by several
-drum slices. Pattern replacements remain raw records of their original length.
+drum slices, though one shared pool per drum group is not a universal rule.
+Pattern replacements remain raw records of their original length, including
+parameter-only rows with zero control bytes. The observed parameter roles do
+not define exact scales or sentinel rules; see [Backup formats](../docs/PO_FORMATS.md).
 
 ```sh
 ./build/core/po33_encode_capture decoded-po33/frame.bin edited-po33.wav \
@@ -241,6 +247,8 @@ allocation. Modem, speech analysis and synthesis code live in the freestanding
 C core. See [Architecture](../docs/ARCHITECTURE.md), the [C API](../docs/C_API.md),
 and [Backup formats](../docs/PO_FORMATS.md).
 
-Software roundtrips verify byte preservation. Generated stereo-family
-transfers and speech previews have not been validated against physical-device
-reception or playback.
+The unchanged-frame roundtrips above verify byte preservation. Separate
+physical evidence covers specific PO-33 transfers and parameter comparisons;
+it does not establish acceptance of every edit or validate PO-133, PO-35/137
+or speech-preview fidelity. See [Backup formats](../docs/PO_FORMATS.md) for the
+tested scope and remaining uncertainties.

@@ -7,7 +7,7 @@
 extern "C" {
 #endif
 
-/* Experimental PO-33 backup codec. Generated audio requires device validation. */
+/* PO-33/133 backup codec. Field roles and evidence limits: docs/PO_FORMATS.md. */
 #define PO33_PREAMBLE_BYTES     4096u
 #define PO33_TAG_BEGIN          0x985Bu
 #define PO33_TAG_SETTINGS       0x7D5Cu
@@ -30,22 +30,28 @@ typedef struct po33_settings {
   uint8_t prefix_raw[255];
   uint8_t chain[PO33_CHAIN_CAPACITY];
   uint8_t chain_length, tempo, swing_raw;
-  uint8_t state_raw[16];
+  uint8_t state_raw[16]; /* Retained state; meaning and UI relationship are unassigned. */
   uint8_t suffix_raw[108];
 } po33_settings_t;
 
 typedef struct po33_pattern_event {
+  /* LE24 parameter word: observed pitch, level and filter roles; resonance is
+   * a candidate for the remaining chunk. Widths/scales remain raw. Preserve
+   * parameter-only rows even when control_raw is zero. */
   uint8_t event_raw[3];
-  /* Note-related low nibble; context-dependent parameter/retrigger high nibble. */
+  /* Note/key-related low nibble; retrigger-associated high nibble.
+   * Duration interpretation and exact numeric mappings remain unresolved. */
   uint8_t control_raw;
 } po33_pattern_event_t;
 
 typedef struct po33_pattern {
   po33_pattern_event_t events[PO33_STEP_COUNT][PO33_SOUND_COUNT];
-  uint8_t footer_raw[8];
+  uint8_t footer_raw[8]; /* Effect-associated bytes; packing/IDs are not mapped. */
 } po33_pattern_t;
 
 typedef struct po33_sound_header {
+  /* Raw coordinates into the whole referenced pool, not its owner's trim.
+   * Endpoint inclusion is unassigned; do not clamp to received allocation. */
   uint32_t range_start_raw, range_end_raw;
   uint8_t source_selector;
 } po33_sound_header_t;
@@ -95,9 +101,9 @@ po_status_t po33_pack_symbols(const uint8_t *phases, size_t symbol_count, unsign
 po_status_t po33_frame_parse(const uint8_t *frame, size_t frame_len, po_packet_callback_t callback,
                              void *user, po33_decode_result_t *result);
 
-/* Expand one signed-order mu-law sample byte to linear PCM16. Sound packet
- * headers and padding are not samples; identifying those is the caller's job.
- * The nominal sample clock is PO33_SAMPLE_RATE_HZ. */
+/* Expand one signed-order mu-law sample byte to linear PCM16. Parse framing
+ * and the sound header first; pool padding can be decoded, while applying
+ * trim/slice ranges is separate. The nominal clock is PO33_SAMPLE_RATE_HZ. */
 int16_t po33_sample_decode(uint8_t encoded);
 
 /* Nearest representable signed-order mu-law level, saturating at +/-32124.
