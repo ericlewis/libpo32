@@ -10,10 +10,10 @@ Shared statuses and raw packets are in `po_common.h`. The `po_status_t`,
 
 | Header | Role |
 | --- | --- |
-| [`po32.h`](../include/po32.h) | PO-32 packets, builders and mono modem |
+| [`po32.h`](../include/po32.h) | PO-32 packets, builders, mono modem and lossless control-byte views |
 | [`po32_synth.h`](../include/po32_synth.h) | Drum synthesis |
-| `po33.h` | PO-33/133 framing, sample codec and raw-preserving logical records |
-| `po35.h` | PO-35/137 framing, speech records, settings and patterns |
+| `po33.h` | PO-33/133 framing, samples, logical records, control-nibble and per-step FX views |
+| `po35.h` | PO-35/137 framing, speech/settings/pattern records and indexed-table views |
 | `po35_analysis.h` | One-shot PCM-to-speech analysis with caller-owned workspace |
 | `po35_synth.h` | Borrowed-record speech voices and one-shot rendering |
 | `po_stereo.h` | Shared chunked stereo TX and caller-workspace offline RX |
@@ -21,6 +21,12 @@ Shared statuses and raw packets are in `po_common.h`. The `po_status_t`,
 All modules use caller-owned memory. Files, device access, normalization and
 audio playback belong to the application. See [Architecture](ARCHITECTURE.md)
 for build requirements and [Examples](../examples/README.md) for hosted use.
+
+The C interface groups data and operations by family and domain: `*_t` types
+hold records or working state, `*_decode`/`*_encode` convert serialized data,
+and builders or `*_set_*` helpers edit supported musical structures. Existing
+names remain compatible. Family-specific structs keep differing pattern and
+speech formats explicit; they are not interchangeable wire overlays.
 
 ## PO-32 Core Responsibilities
 
@@ -152,6 +158,29 @@ For pattern triggers, use:
 
 These helpers handle the packed lane-byte format used by
 `po32_pattern_packet_t.steps[]`.
+
+For lossless inspection of a raw trigger byte, use
+`po32_pattern_control_decode` and `po32_pattern_control_encode` with
+`po32_pattern_control_t`:
+
+| Field | Bits | Stored range |
+| --- | --- | --- |
+| `fill_rate_raw` | 0..3 | 0..15 |
+| `instrument_group_raw` | 4..5 | 0..3 |
+| `unknown_bit_raw` | 6 | 0..1 |
+| `accent` | 7 | 0..1 |
+
+All 256 byte values roundtrip, including inactive selector/accent bits and the
+unassigned bit 6. Encode rejects field overflow before writing. The raw view
+does not validate playback meaning. An active instrument also needs its lane:
+`lane + 1 + 4 * instrument_group_raw`. Keep the surrounding raw packet for an
+exact edit; this helper does not make the legacy semantic pattern codec lossless
+or recompute the separate accent mask.
+
+The existing semantic trigger decoder still normalizes zero-fill values and
+rejects bit 6; the full typed pattern decoder turns rejected triggers into
+empty steps. Use `po32_pattern_set_trigger` for musical construction so that
+instrument and lane agree. These established behaviors are unchanged.
 
 Pattern payloads begin with a one-byte pattern number, followed by four lane
 blocks: `16` trigger bytes, then `16` two-byte morph pairs. The payload ends
@@ -337,6 +366,13 @@ the application collects those payloads before calling the record codec.
 Unknown fields, unused chain entries and raw sample ranges are preserved.
 Input and output storage must not overlap.
 
+For these fixed records, null input/output is `PO_ERR_INVALID_ARG`, an incorrect
+decode length is `PO_ERR_FRAME`, and insufficient encode capacity is
+`PO_ERR_BUFFER_TOO_SMALL`. Settings accept chain lengths 0..128 and reject
+larger values with `PO_ERR_RANGE`. Failed operations leave outputs unchanged;
+successful encoders leave excess output capacity untouched. These are the
+existing PO-33 contracts; PO-35's fixed-record length error remains `PO_ERR_PARSE`.
+
 The in-memory record and field views are:
 
 | Type | Fields represented |
@@ -431,6 +467,26 @@ sample bytes, leaving block padding, headers and template edits to the caller.
 header contains a slot, record count, frame rate and five raw metadata bytes.
 Each speech record is 44 bytes. Group collection, ordering and completeness
 checks belong to the application, not the frame parser.
+
+The two indexed table records have additive, tag-named types:
+
+| Type and codec prefix | Payload | Fields |
+| --- | --- | --- |
+| `po35_table_7be7_t`, `po35_table_7be7_*` | 9 bytes | `index`, `data_raw[8]` |
+| `po35_table_1c7f_t`, `po35_table_1c7f_*` | 13 bytes | `index`, `data_raw[12]` |
+
+Each provides `decode(data, len, out)` and `encode(value, out, capacity)` with
+the same fixed-record error and ownership contracts as the other PO-35 codecs.
+All index and body byte values survive roundtrips. Observed indices 0..7 are not
+validation limits. Table bodies remain raw: no gain, detune, voice enum or
+three-integer interpretation is implied. The types work with the tested
+PO-35/137 profile; common structure does not imply identical table contents.
+
+Existing `po35_settings_t`, `po35_pattern_t`, `po35_speech_header_t` and
+`po35_speech_record_t` retain their layouts. Speech gain and unvoiced members
+are raw codes with unresolved transfer functions, not dB or boolean values.
+The pitch/coefficient conversion used by the speech renderer is a reconstruction
+model, not an additional wire-format guarantee.
 
 Settings contain a variable pattern chain, limited to `PO35_CHAIN_MAX_COUNT`
 entries by the packet payload capacity. The record codecs preserve fields

@@ -102,6 +102,12 @@ Two limits apply to the current typed API, rather than to the wire format:
 The raw PO-32 parser currently admits state payloads of 35..70 bytes. That is
 an implementation bound, not a measured maximum chain length for the device.
 
+`po32_pattern_control_t` supplies a separate lossless view of each raw trigger:
+bits 0..3 are the fill code, bits 4..5 the instrument group, bit 6 remains
+unassigned, and bit 7 is accent. Its codecs preserve every byte value; existing
+semantic trigger and pattern conversions retain their normalization behavior.
+Preserving an unassigned bit does not establish its playback meaning.
+
 ## PO-33 / PO-133
 
 The PO-133 uses the same codec family here. Teenage Engineering describes it
@@ -397,9 +403,33 @@ LED image.
 
 ## PO-35 / PO-137
 
+The retained PO-35/137 corpus uses one shared backup grammar and record layout.
+The [PO-35 guide](https://teenage.engineering/guides/po-35/en) and
+[PO-137 guide](https://teenage.engineering/guides/po-137/en) list the same eight
+voices, effect controls and four adjustable speech parameters. This is not
+proof of identical table contents, firmware or rendered audio. The two public
+reference banks have different drum patches, patterns and speech, as well as
+differences in four of eight `7BE7` tables and two of eight `1C7F` tables.
+Offline transfer roundtrips preserve both references; physical cross-loading
+and exact synthesis parity remain unverified.
+
 Tags: `37B2` drum patches; `7BE7` and `1C7F` indexed tables; `CCB2` pattern,
 `29FF` empty pattern; `DC32` speech header, `73B0` records, `29A1` section end;
 `84D8` settings. The indexed tables' semantics remain unresolved.
+
+Both indexed-table layouts are fixed in the inspected corpus:
+
+| Tag | Payload bytes | Layout |
+| --- | ---: | --- |
+| `7BE7` | 9 | One index byte followed by eight uninterpreted bytes |
+| `1C7F` | 13 | One index byte followed by twelve uninterpreted bytes |
+
+All 800 records of each tag across 100 retained capture identities match these
+sizes. The table codecs preserve the full index byte and every body byte rather
+than restrict values to observed indices 0..7. The nonzero bytes of `1C7F` can
+resemble three little-endian integers, but that does not establish integer
+fields instead of bytes with padding. Desktop Bitspeek enums and candidate
+gain/detune interpretations are not imposed on either table.
 
 The 43-byte drum payload is identical to PO-32: selector followed by 21 LE16
 parameters normalized by 65535. Left/right selectors are `0x10 | (slot-1)` and
@@ -450,6 +480,14 @@ The low and high filter banks use 10 and 30 coefficients at 8 and 24 kHz.
 Gain, noise, voice characters and effects are not fully mapped. See the
 [speech analysis API](C_API.md#po-35-speech-analysis) and
 [speech renderer](C_API.md#po-35-speech-rendering) for model limits.
+
+Gain and unvoiced values remain unsigned raw codes. The unvoiced byte spans
+254 distinct values in the inspected speech bodies, so it is not a boolean.
+Bitspeek analysis informs the reconstruction model but does not establish
+device gain/noise laws, header metadata units or equivalent voice selectors.
+Zero excitation gain also does not guarantee immediate zero PCM when a
+renderer retains filter history; no silence predicate or forced terminator is
+inferred from the record values.
 
 All 56 distinct speech bodies in the inspected corpus end with zero gain and
 the previous record's other 43 bytes. Interior silent records have exceptions.
