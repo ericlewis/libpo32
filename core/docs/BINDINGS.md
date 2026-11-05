@@ -1,7 +1,8 @@
 # Go Binding
 
 One module, `github.com/ericlewis/libpo32/bindings/go`, exposes libpo through
-model-specific packages. Its address follows the repository's current name.
+model-specific packages. The module retains its historical `libpo32` import
+path despite the repository rename to `libpo`.
 
 | Package | Scope |
 | --- | --- |
@@ -37,7 +38,7 @@ Before release, a consumer can use a local `go.mod` replacement:
 
 ```text
 require github.com/ericlewis/libpo32/bindings/go v0.0.0
-replace github.com/ericlewis/libpo32/bindings/go => /path/to/libpo32/bindings/go
+replace github.com/ericlewis/libpo32/bindings/go => /path/to/libpo/bindings/go
 ```
 
 ## Migration
