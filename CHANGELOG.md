@@ -6,6 +6,29 @@ The format is based on Keep a Changelog, and the project follows Semantic Versio
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-11-05
+
+### Removed
+- **Breaking:** the in-tree Go module, generated C bundle and Go-specific
+  tooling and CI. Go consumers must pin an earlier revision to keep using
+  the old module; no replacement binding is published with this release.
+
+### Fixed
+- PO-32 capture decoding now accepts extensible PCM and float WAV files,
+  sharing strict subtype validation with the stereo capture reader.
+- PO-32 parsing now accepts one-byte `0x496F` pattern-slot records found in
+  Flat Beat and legacy backups, preserving checksum and length validation.
+
+### Changed
+- Focus the repository and release instructions on the freestanding C library
+  and native tools. Existing C APIs and native package aliases remain available.
+- Expand the format reference with verified field constraints and bounded
+  hardware observations, including footer ordering and retained-state evidence.
+- Synchronize package metadata with version 2.0.0. The published 1.0.0 tag
+  retained 0.3.0 in its VERSION file; its existing tag is unchanged.
+
+## [1.0.0] - 2026-11-04
+
 ### Added
 - PO-33/133 and PO-35/137 frame codecs and shared stereo transfer DSP.
 - Hosted capture export and template editing, including PO-33 sample
@@ -15,11 +38,12 @@ The format is based on Keep a Changelog, and the project follows Semantic Versio
   transfers and speech previews have not been validated on physical hardware.
 - Canonical `LibPO::po` CMake and `pkg-config po` package interfaces, retaining
   the legacy `LibPO32::po32` and `pkg-config po32` interfaces.
+- One standalone Go module with model-specific `po32`, `po33`, `po35` and
+  shared `stereo` packages, including streaming decoding and synthesis.
 
-### Removed
-- **Breaking:** the in-tree Go module, generated C bundle and Go-specific
-  tooling and CI. This checkout now provides the C library and native tools;
-  Go consumers must pin an earlier revision to keep using the old module.
+### Changed
+- The Go root package is now `libpo`; former root PO-32 APIs moved to `/po32`.
+  Shared status error messages use the `libpo:` prefix.
 
 ### Fixed
 - PO-32 attack, modulation and EQ mappings from Joseph Holland's

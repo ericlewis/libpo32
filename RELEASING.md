@@ -21,7 +21,7 @@ for PO-32, PO-33/133 and PO-35/137. Run commands from the repository root.
    [example guide](core/examples/README.md). Keep software checks and
    physical-device acceptance distinct in release notes.
 4. Check the working tree for unrelated changes, then create and push the
-   repository release tag, such as `v0.4.0`.
+   repository release tag using the exact value in `VERSION`, such as `2.0.0`.
 
 ## Package compatibility
 
