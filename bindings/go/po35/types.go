@@ -8,7 +8,9 @@ type SpeechHeader struct {
 	Metadata         [5]uint8
 }
 
-// SpeechRecord stores both LPC coefficient banks without normalization.
+// SpeechRecord stores both LPC coefficient banks without normalization. The
+// renderer's pitch, gain and excitation interpretations are reconstruction-model
+// choices; exact device quantization and gain laws remain unresolved.
 type SpeechRecord struct {
 	Pitch      int16 // Signed Q11 octaves relative to C4 in reconstruction model 1.
 	Gain       uint8

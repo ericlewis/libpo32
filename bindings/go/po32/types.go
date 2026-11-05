@@ -53,7 +53,9 @@ type ResetPacket struct {
 	Instrument uint8
 }
 
-// StatePacket holds synth state: morph defaults, tempo, swing, and pattern list.
+// StatePacket holds synth state: morph defaults, tempo, swing, and an ordered
+// pattern chain that may contain repeats. Its capacity is 16 entries; valid
+// official data includes a 22-entry chain and must be retained as a raw Packet.
 type StatePacket struct {
 	MorphPairs     [StateMorphPairCount]MorphPair
 	Tempo          uint8
@@ -62,14 +64,20 @@ type StatePacket struct {
 	PatternCount   int
 }
 
-// PatternStep describes one trigger slot in a pattern lane.
+// PatternStep describes one trigger slot in a pattern lane. Encoding an inactive
+// Instrument (zero) emits a zero trigger byte, losing any original selector/accent
+// bits on that byte. Preserve the raw Packet when exact bytes are required.
 type PatternStep struct {
 	Instrument uint8
 	FillRate   uint8
 	Accent     bool
 }
 
-// PatternPacket holds a full 16-step, 4-lane pattern.
+// PatternPacket holds a full 16-step, 4-lane pattern. Reserved contains independent
+// per-step data with unresolved control/effect semantics, not padding. AccentBits
+// can include steps without an active accented trigger; do not derive it from
+// Steps alone. Typed encoding preserves MorphLanes, Reserved and AccentBits but
+// normalizes inactive trigger bytes as described by PatternStep.
 type PatternPacket struct {
 	PatternNumber uint8
 	Steps         [PatternLaneCount * PatternStepCount]PatternStep
