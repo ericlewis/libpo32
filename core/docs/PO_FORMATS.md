@@ -375,6 +375,33 @@ preceding source-to-first-copy comparison also changes audio and allocation and 
 isolate copy behavior. All copy-series patterns are empty, leaving the extended
 guide's claim that destination tone/filter settings survive copying untested.
 
+A controlled PO-33 copy on 2026-11-05 extends that evidence to a nonzero start
+and a span not divisible by sixteen. The baseline readback retains source
+range `(257,33028)` and its 45,056-byte pool, with drum selectors 8..23 empty.
+Copying melodic Sound 1 to drum Sound 9 fills only those sixteen selectors
+with nine-byte headers referencing source 0. Every other logical record,
+including settings, all patterns and the source pool, remains byte-identical.
+The before/after transfers validate 423 and 439 packets; both recordings have
+zero reported dropped frames or sample-time gaps.
+
+For this copy, all sixteen ranges satisfy the following coordinate rule,
+where `S=257`, `E=33028`, and `i=0..15`:
+
+```text
+end(i)   = S + floor((E - S) * (i + 1) / 16)
+start(0) = S
+start(i) = end(i - 1) + 1, for i > 0
+```
+
+This distinguishes flooring each boundary from truncating one shared stride
+or rounding boundaries to nearest. The sixth end is 12,546 and the final end
+is 33,028; a truncated stride would yield 12,545 and 33,025. The same rule fits
+the archived divisible-span copy. These two cases constrain copy-generated
+coordinates, not every source length, internal arithmetic or audible endpoint
+inclusion. The baseline is the actual readback: an initial key tap had also
+changed one pattern step before copying, and that step remained unchanged
+across the copy comparison.
+
 An editor must distinguish replacing a shared pool from replacing one slot or
 slice: every reference to an edited pool can be affected. These captures do not
 establish pool reclamation after deletion, detaching a single alias, or how an
