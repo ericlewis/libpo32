@@ -184,6 +184,16 @@ footer order or effect IDs. All 48 pattern footers in the inspected official
 Escalate, Frekvens and #16operators packs are `ff` bytes, so those packs add
 no nondefault footer contrast.
 
+A hardware probe with distinct tones changed high-first footer nibble indices
+5..10 to `a` and settings byte 386 from 0 to 11, with all note/control and
+sample bytes unchanged. Across 26 complete loops, one-based steps 6/8/10 were
+silent and steps 7/9/11 matched the former step-6 tone signature. This favors
+direct high-first slot association in that region. Step 12 retained its own
+signature with a release transient, so buffering and cross-step behavior
+remain relevant. The final changed nibble was high: both high-first-next and
+low-first-current position rules predict state 11. This does not identify a
+cursor, a complete footer ordering, or the musical name of raw `a`.
+
 Sound header: nine bytes: LE32 range start, LE32 range end, source selector.
 These are raw coordinates: inclusive/exclusive conventions and all range
 constraints remain unresolved. Populated pools contain following mu-law bytes
@@ -231,6 +241,12 @@ when no pattern events are present. Conversely, populated patterns can have
 all-zero state bytes. This rules out a simple event-occupancy map but does not
 prove LED brightness, spatial order or snapshot timing. Retained selection or
 effect state remains another explanation.
+
+A separate hardware interaction changed only settings byte 386 from 0 to 6;
+every other logical byte matched the baseline. This state coordinate therefore
+cannot be derived solely from the other serialized content in those captures.
+The observation does not establish its meaning or the ownership of the other
+fifteen coordinates.
 
 Some legacy single-channel "decoded" grids were still projections of
 whitened stereo wire bytes. In three verified old exports, the range formerly
