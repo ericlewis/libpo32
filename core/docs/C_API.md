@@ -127,6 +127,12 @@ Use:
 Use the typed packet structs plus `po32_packet_encode(...)` when constructing
 wire payloads.
 
+Typed conversion is not a byte-preserving path for every valid backup.
+`po32_state_packet_t` holds at most 16 chain entries, while the official Basic
+Beats 1 pack contains a valid 22-entry chain; its typed decode returns
+`PO32_ERR_FRAME`. Raw packet parsing preserves that state payload. The chain
+is ordered and may repeat pattern numbers; the device maximum is not established.
+
 For higher-level pattern editing, prefer:
 
 - `po32_pattern_init(...)`
@@ -151,7 +157,17 @@ Pattern payloads begin with a one-byte pattern number, followed by four lane
 blocks: `16` trigger bytes, then `16` two-byte morph pairs. The payload ends
 with `16` reserved bytes and the two-byte little-endian `accent_bits`.
 A trigger is active only when its low nibble is non-zero. A low nibble of
-`0x00` is empty on the wire.
+`0x00` is inactive, but the other bits and its parameter pair can still be
+nonzero. Typed re-encoding emits zero for inactive triggers: 39 of 57 official
+patterns change in this way, normalizing 602 trigger bytes. This is a known
+byte-preservation limit, not evidence of changed playback semantics. Keep raw
+packet payloads when exact preservation is required.
+
+The field named `reserved` contains independently varying per-step data in
+official packs; it is not padding. Its exact control/effect meaning remains
+unresolved. Typed roundtrips preserve it, the parameter pairs and `accent_bits`.
+Do not regenerate the accent mask solely from active trigger accents. See
+[Backup formats](PO_FORMATS.md) for the canonical field map and evidence limits.
 
 ## Patch Text Import
 
@@ -321,11 +337,22 @@ the application collects those payloads before calling the record codec.
 Unknown fields, unused chain entries and raw sample ranges are preserved.
 Input and output storage must not overlap.
 
+Pattern event words remain raw. In the descriptive q0–q3 partition, q0 has an
+observed pitch role and q1 an observed level role; q2 controls a filter-like
+response, with cutoff a strong inference. q3's resonance interpretation remains
+an unconfirmed candidate. Exact scales, field widths, zero/sentinel behavior
+and playback state carry are unresolved. Preserve parameter-only rows with
+zero control bytes. See [Backup formats](PO_FORMATS.md) for the field map and
+the distinction between observed behavior and candidate meanings.
+
 `po33_sample_decode` expands one signed-order mu-law byte to PCM16.
 `po33_sample_encode` selects the nearest representable level, with ties toward
-zero. The nominal sample clock is 23,437.5 Hz. Header bytes and allocation
-padding must be handled by the application; the sample codec does not apply
-trims or resolve slice references.
+zero. The nominal sample clock is 23,437.5 Hz. Headers and full allocated pools
+must be handled by the application; the sample codec does not apply trims or
+resolve slice references. Resolve a source selector against the whole stored
+pool, not its owner's trimmed interval. Raw range endpoints can overlap or
+exceed an allocation; endpoint inclusion and the cause of those anomalous
+ranges remain unresolved. Do not clamp, wrap or rescale them on decode.
 
 `po33_sample_count_for_pcm(count, rate, &required)` sizes a bulk conversion from
 finite normalized mono PCM at 8,000–192,000 Hz. Except for the native WAV alias
@@ -359,6 +386,10 @@ without normalizing their values. PO-35 drum patches use `po32_patch_packet_t`
 and `po32_packet_encode` / `po32_packet_decode`.
 
 See [Backup formats](PO_FORMATS.md) for record offsets and unresolved fields.
+The shared stereo transport does not imply shared PO-33/35 field semantics.
+Speech header metadata, exact voice/effect behavior and gain laws remain
+unresolved; structural preservation does not establish model identity or
+physical cross-loading compatibility.
 
 ## Shared Stereo Modem
 
