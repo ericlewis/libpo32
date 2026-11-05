@@ -40,7 +40,8 @@ cross-compilation alone is not runtime validation.
 `po_wire_internal.h` is the shared source for CRC, whitening, ordinary packets,
 4 KiB counter preambles and the special final tail. Family parsers retain their
 own grammar and validation. PO-32's tag whitelist remains strict; the newer
-families preserve unknown packets where their grammar allows them.
+families preserve unknown packets where their grammar allows them. Shared
+transport does not imply shared record layouts or musical field meanings.
 
 `po_math_internal.h` supplies bounded private double-precision DSP helpers.
 PO-35 uses a double LAR table and double filter state for its 30th-order filter.
@@ -57,8 +58,16 @@ Keep raw packet payloads, encoded packet bodies and complete frames distinct.
 Typed settings/pattern/speech records are another domain: one logical record
 can span multiple packets. The PO-33/35 record codecs preserve raw fields,
 including unused chain entries and anomalous sample ranges. PO-32 typed
-pattern conversion can normalize unsupported trigger bits; retain raw packet
-payloads when byte-for-byte preservation is required.
+pattern conversion normalizes inactive trigger bytes to zero; the resulting
+loss of stored selector/accent bits is a byte-preservation limit, not a proven
+playback change. Its 16-entry typed state capacity also excludes a valid
+official 22-entry chain. Retain raw packet payloads for byte-exact backups.
+
+PO-33 zero-control parameter rows must survive conversion. Sample aliases refer
+to the whole stored pool, not the owner's trimmed interval, and endpoint
+inclusion remains unresolved. PO-32's field named `reserved` contains independent
+per-step data. These fields remain raw because observed roles do not establish
+complete musical semantics; see the [canonical field map](PO_FORMATS.md).
 
 Raw callbacks borrow a packet struct with inline payload bytes; copying the
 struct retains its contents. Offsets include the complete model preamble. A
@@ -131,11 +140,13 @@ Use `po.h` or individual model headers. `LibPO::po` and `pkg-config po` provide
 umbrella discovery; `LibPO32::po32`, `pkg-config po32`, the `po32` build target
 and legacy library filename (`libpo32.a` on Unix) remain available. Public PO-32
 symbols, concrete layouts and numeric status values are preserved. The repository
-name remains `libpo32`.
+is named `libpo`; documented compatibility identifiers retain `libpo32`.
 
 ## Validation boundaries
 
 Builds, byte-preserving roundtrips and numerical checks do not establish device
-acceptance. Unmapped controls remain raw. Stereo-family transfers have not been
-validated on physical hardware. Speech analysis and reconstruction are
-approximate; neither reproduces the original Bitspeek or PO-35 implementation.
+acceptance. Existing physical evidence covers specific PO-33 transfers and
+parameter comparisons; it does not validate every generated transfer, PO-133,
+or the PO-35/137 family. Unmapped controls remain raw. Speech analysis and
+reconstruction are approximate; neither reproduces the original Bitspeek or
+PO-35 implementation. See [Backup formats](PO_FORMATS.md) for the tested scope.
