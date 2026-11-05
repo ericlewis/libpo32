@@ -21,6 +21,7 @@ func TestTagName(t *testing.T) {
 		{TagErase, "erase"},
 		{TagState, "state"},
 		{TagKnob, "knob"},
+		{TagPatternSlot, "pattern_slot"},
 		{0xFFFF, "unknown"},
 	}
 	for _, tc := range cases {
@@ -279,6 +280,29 @@ func TestBuilderAndFrameParse(t *testing.T) {
 	}
 	if tail.MarkerC3 != 0xC3 || tail.Marker71 != 0x71 {
 		t.Fatal("bad tail markers")
+	}
+}
+
+func TestRawPatternSlotRoundtrip(t *testing.T) {
+	b := NewBuilder(256)
+	defer b.Close()
+	if _, err := b.AppendRawPacket(TagPatternSlot, []byte{15}); err != nil {
+		t.Fatal(err)
+	}
+	frame, err := b.Finish()
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	_, err = FrameParse(frame, func(p *Packet) bool {
+		count++
+		if p.TagCode != TagPatternSlot || p.PayloadLen != 1 || p.Payload[0] != 15 {
+			t.Errorf("unexpected pattern slot packet: %#v", p)
+		}
+		return true
+	})
+	if err != nil || count != 1 {
+		t.Fatalf("pattern slot parse: count=%d, err=%v", count, err)
 	}
 }
 
