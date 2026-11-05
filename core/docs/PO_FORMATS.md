@@ -182,7 +182,7 @@ to `7f` and settings byte 386 from `00` to `01`. It does not isolate either
 field's playback effect. Fresh decoding of both original recordings validates
 236 packets apiece and reproduces the same frames. Its step-16 label is not
 proof of the stored FX position: the first-byte association tested below places
-that high nibble at step 1. Gesture timing, wraparound and label accuracy are
+that high nibble at one-based step 1. Gesture timing, wraparound and label accuracy are
 not independently recorded. Raw `7` has no verified musical identity here.
 All 48 pattern footers in the inspected official Escalate, Frekvens and
 #16operators packs are `ff` bytes, so those packs add
