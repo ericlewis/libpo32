@@ -22,6 +22,8 @@ const (
 	TagErase   uint16 = 0xB892
 	TagState   uint16 = 0x505A
 	TagKnob    uint16 = 0xA354
+	// TagPatternSlot carries a raw one-byte slot marker in place of a full pattern.
+	TagPatternSlot uint16 = 0x496F
 )
 
 // PatchSide selects the left or right morph endpoint.
