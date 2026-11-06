@@ -14,6 +14,7 @@
 #include "po33.h"
 #include "po35.h"
 #include "po_frame_report.h"
+#include "po_stereo.h"
 #include "po_stereo_wav.h"
 
 #define main po_transfer_verify_main
@@ -28,6 +29,62 @@ static void verify_save(const char *path, const uint8_t *bytes, size_t length) {
   written = fwrite(bytes, 1u, length, file);
   status = fclose(file);
   assert(written == length && status == 0);
+}
+
+static void verify_write_le16(uint8_t *out, uint16_t value) {
+  out[0] = (uint8_t)value;
+  out[1] = (uint8_t)(value >> 8);
+}
+
+static void verify_write_le32(uint8_t *out, uint32_t value) {
+  for (unsigned int index = 0u; index < 4u; ++index)
+    out[index] = (uint8_t)(value >> (8u * index));
+}
+
+static void verify_write_raw_transfer_wav(const char *path, const uint8_t *wire,
+                                          size_t wire_bytes) {
+  po_stereo_modulator_t modulator;
+  uint8_t header[44] = {0};
+  uint8_t pcm[4096];
+  float samples[2048];
+  FILE *file;
+  size_t count;
+  size_t frames;
+  size_t written;
+  int status;
+
+  assert(po_stereo_modulator_init(&modulator, wire, wire_bytes, 48000u) == PO_OK);
+  frames = po_stereo_modulator_remaining(&modulator);
+  assert(frames <= (UINT32_MAX - 36u) / 4u);
+  memcpy(header, "RIFF", 4u);
+  verify_write_le32(header + 4u, (uint32_t)(36u + frames * 4u));
+  memcpy(header + 8u, "WAVEfmt ", 8u);
+  verify_write_le32(header + 16u, 16u);
+  verify_write_le16(header + 20u, 1u);
+  verify_write_le16(header + 22u, 2u);
+  verify_write_le32(header + 24u, 48000u);
+  verify_write_le32(header + 28u, 192000u);
+  verify_write_le16(header + 32u, 4u);
+  verify_write_le16(header + 34u, 16u);
+  memcpy(header + 36u, "data", 4u);
+  verify_write_le32(header + 40u, (uint32_t)(frames * 4u));
+  file = fopen(path, "wb");
+  assert(file != NULL);
+  written = fwrite(header, 1u, sizeof(header), file);
+  assert(written == sizeof(header));
+  while (!po_stereo_modulator_done(&modulator)) {
+    assert(po_stereo_modulator_render_f32(&modulator, samples, 1024u, &count) == PO_OK);
+    assert(count != 0u);
+    for (size_t index = 0u; index < count * 2u; ++index) {
+      float sample = samples[index];
+      int32_t value = (int32_t)(sample * 32767.0f + (sample < 0.0f ? -0.5f : 0.5f));
+      verify_write_le16(pcm + 2u * index, (uint16_t)value);
+    }
+    written = fwrite(pcm, 4u, count, file);
+    assert(written == count);
+  }
+  status = fclose(file);
+  assert(status == 0);
 }
 
 static size_t verify_frame(uint8_t *frame, size_t capacity, uint8_t value) {
@@ -130,7 +187,7 @@ static int verify_run_cli(int argc, char **argv, char *stdout_text, size_t stdou
 }
 
 static void test_transfer_verification(void) {
-  uint8_t reference[8192], different[8192], reference35[8192];
+  uint8_t reference[8192], corrupt[8192], different[8192], reference35[8192];
   char stdout_text[2048], stderr_text[1024];
   size_t reference_length = verify_frame(reference, sizeof(reference), 0x40u);
   size_t different_length = verify_frame(different, sizeof(different), 0x41u);
@@ -147,12 +204,17 @@ static void test_transfer_verification(void) {
                          "reference.bin",      "unrecovered.wav", NULL};
   char *normal35[] = {"po_transfer_verify", "--family",      "po35",
                       "reference35.bin",    "capture35.wav", NULL};
+  char *parser_failure[] = {"po_transfer_verify", "--family",           "po33",
+                            "reference.bin",      "parser-failure.wav", NULL};
 
   verify_save("reference.bin", reference, reference_length);
   verify_save("different.bin", different, different_length);
   verify_save("reference35.bin", reference35, reference35_length);
   assert(po33_write_transfer_wav("capture.wav", reference, reference_length, 48000));
   assert(po35_write_transfer_wav("capture35.wav", reference35, reference35_length, 48000));
+  memcpy(corrupt, reference, reference_length);
+  corrupt[reference_length - 1u] ^= 1u;
+  verify_write_raw_transfer_wav("parser-failure.wav", corrupt, reference_length);
   verify_swap_pcm16_stereo("capture.wav", "swapped.wav");
   verify_zero_pcm16_stereo("capture.wav", "unrecovered.wav");
   verify_save("invalid.bin", reference, reference_length - 1u);
@@ -180,6 +242,13 @@ static void test_transfer_verification(void) {
          strstr(stdout_text,
                 "channel_order=normal transport=recovered parser=complete exact=yes") != NULL &&
          strstr(stdout_text, "verification=exact matches=1") != NULL);
+
+  assert(verify_run_cli(5, parser_failure, stdout_text, sizeof(stdout_text), stderr_text,
+                        sizeof(stderr_text)) == 1);
+  assert(stderr_text[0] == '\0' &&
+         strstr(stdout_text, "channel_order=normal transport=recovered parser=frame exact=no") !=
+             NULL &&
+         strstr(stdout_text, "verification=not-exact matches=0") != NULL);
 
   assert(verify_run_cli(5, mismatch, stdout_text, sizeof(stdout_text), stderr_text,
                         sizeof(stderr_text)) == 1);
