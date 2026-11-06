@@ -160,3 +160,330 @@ po_status_t po33_frame_parse(const uint8_t *frame, size_t frame_len, po_packet_c
   }
   return PO_ERR_FRAME;
 }
+
+typedef struct po33_topology_record_state {
+  uint8_t selector;
+  uint8_t header_bytes[PO33_SOUND_HEADER_BYTES];
+  size_t header_length;
+  size_t data_bytes;
+  size_t selection_offset;
+  size_t selection_length;
+  size_t first_data_offset;
+  size_t last_data_end;
+  int active;
+  int have_data;
+  int unknown_extension;
+} po33_topology_record_state_t;
+
+typedef struct po33_topology_observed_record {
+  uint8_t selector;
+  po33_sound_header_t header;
+  po33_frame_span_t selection_span;
+  po33_frame_span_t data_span;
+  size_t data_bytes;
+  unsigned int flags;
+} po33_topology_observed_record_t;
+
+typedef po_status_t (*po33_topology_record_callback_t)(
+    const po33_topology_observed_record_t *record, void *user);
+
+typedef struct po33_topology_stream {
+  po33_topology_record_state_t record;
+  po33_topology_record_callback_t callback;
+  void *user;
+  po_status_t status;
+} po33_topology_stream_t;
+
+static po_status_t topology_finish_record(po33_topology_stream_t *stream) {
+  po33_topology_observed_record_t observed;
+  po_status_t status;
+  if (!stream->record.active)
+    return PO_OK;
+  if (!stream->record.have_data || stream->record.header_length != PO33_SOUND_HEADER_BYTES)
+    return PO_ERR_FRAME;
+  observed = (po33_topology_observed_record_t){0};
+  status = po33_sound_header_decode(stream->record.header_bytes, PO33_SOUND_HEADER_BYTES,
+                                    &observed.header);
+  if (status != PO_OK)
+    return status;
+  observed.selector = stream->record.selector;
+  observed.selection_span =
+      (po33_frame_span_t){stream->record.selection_offset, stream->record.selection_length};
+  observed.data_span =
+      (po33_frame_span_t){stream->record.first_data_offset,
+                          stream->record.last_data_end - stream->record.first_data_offset};
+  observed.data_bytes = stream->record.data_bytes;
+  if (stream->record.data_bytes == PO33_SOUND_HEADER_BYTES)
+    observed.flags |= PO33_SOUND_RECORD_FLAG_HEADER_ONLY;
+  if (stream->record.unknown_extension)
+    observed.flags |= PO33_SOUND_RECORD_FLAG_UNKNOWN_EXTENSION;
+  status = stream->callback(&observed, stream->user);
+  if (status != PO_OK)
+    return status;
+  stream->record = (po33_topology_record_state_t){0};
+  return PO_OK;
+}
+
+static po_status_t topology_start_record(po33_topology_stream_t *stream,
+                                         const po_packet_t *packet) {
+  po_status_t status = topology_finish_record(stream);
+  if (status != PO_OK)
+    return status;
+  if (packet->payload_len != 1u)
+    return PO_ERR_FRAME;
+  stream->record = (po33_topology_record_state_t){
+      .selector = packet->payload[0],
+      .selection_offset = packet->offset,
+      .selection_length = PO_WIRE_OVERHEAD_BYTES + packet->payload_len,
+      .active = 1,
+  };
+  return PO_OK;
+}
+
+static po_status_t topology_append_data(po33_topology_stream_t *stream, const po_packet_t *packet) {
+  size_t copied = 0u;
+  if (!stream->record.active)
+    return PO_ERR_FRAME;
+  if (packet->payload_len > SIZE_MAX - stream->record.data_bytes)
+    return PO_ERR_RANGE;
+  if (!stream->record.have_data) {
+    stream->record.first_data_offset = packet->offset;
+    stream->record.have_data = 1;
+  }
+  stream->record.last_data_end = packet->offset + PO_WIRE_OVERHEAD_BYTES + packet->payload_len;
+  if (stream->record.header_length < PO33_SOUND_HEADER_BYTES) {
+    copied = PO33_SOUND_HEADER_BYTES - stream->record.header_length;
+    if (copied > packet->payload_len)
+      copied = packet->payload_len;
+    for (size_t i = 0; i < copied; ++i)
+      stream->record.header_bytes[stream->record.header_length + i] = packet->payload[i];
+    stream->record.header_length += copied;
+  }
+  stream->record.data_bytes += packet->payload_len;
+  return PO_OK;
+}
+
+static int topology_packet(const po_packet_t *packet, void *user) {
+  po33_topology_stream_t *stream = (po33_topology_stream_t *)user;
+  po_status_t status = PO_OK;
+  switch (packet->tag_code) {
+  case PO33_TAG_SOUND_SELECT:
+    status = topology_start_record(stream, packet);
+    break;
+  case PO33_TAG_SOUND_DATA:
+    status = topology_append_data(stream, packet);
+    break;
+  case PO33_TAG_END:
+    status = topology_finish_record(stream);
+    break;
+  default:
+    if (stream->record.active)
+      stream->record.unknown_extension = 1;
+    break;
+  }
+  stream->status = status;
+  return status != PO_OK;
+}
+
+static po_status_t topology_parse_records(const uint8_t *frame, size_t frame_len,
+                                          po33_topology_record_callback_t callback, void *user) {
+  po33_decode_result_t result;
+  po33_topology_stream_t stream = {
+      .callback = callback,
+      .user = user,
+      .status = PO_OK,
+  };
+  po_status_t status = po33_frame_parse(frame, frame_len, topology_packet, &stream, &result);
+  if (stream.status != PO_OK)
+    return stream.status;
+  if (status != PO_OK || !result.done)
+    return PO_ERR_FRAME;
+  return PO_OK;
+}
+
+typedef struct po33_topology_count_pass {
+  size_t sound_record_count;
+  size_t pool_count;
+  uint8_t owner_count[UINT8_MAX + 1u];
+} po33_topology_count_pass_t;
+
+static po_status_t topology_count_record(const po33_topology_observed_record_t *record,
+                                         void *user) {
+  po33_topology_count_pass_t *pass = (po33_topology_count_pass_t *)user;
+  if (pass->sound_record_count == SIZE_MAX)
+    return PO_ERR_RANGE;
+  ++pass->sound_record_count;
+  if (record->data_bytes > PO33_SOUND_HEADER_BYTES) {
+    if (pass->pool_count == SIZE_MAX)
+      return PO_ERR_RANGE;
+    ++pass->pool_count;
+    if (pass->owner_count[record->selector] < 2u)
+      ++pass->owner_count[record->selector];
+  }
+  return PO_OK;
+}
+
+typedef struct po33_topology_reference_pass {
+  const uint8_t *owner_count;
+  size_t reference_count;
+} po33_topology_reference_pass_t;
+
+static po_status_t topology_count_reference(const po33_topology_observed_record_t *record,
+                                            void *user) {
+  po33_topology_reference_pass_t *pass = (po33_topology_reference_pass_t *)user;
+  if (pass->owner_count[record->header.source_selector] != 1u)
+    return PO_OK;
+  if (pass->reference_count == SIZE_MAX)
+    return PO_ERR_RANGE;
+  ++pass->reference_count;
+  return PO_OK;
+}
+
+typedef struct po33_topology_measurement {
+  size_t sound_record_count;
+  size_t pool_count;
+  size_t reference_count;
+} po33_topology_measurement_t;
+
+static po_status_t topology_measure(const uint8_t *frame, size_t frame_len,
+                                    po33_topology_measurement_t *measurement) {
+  po33_topology_count_pass_t count_pass = {0};
+  po33_topology_reference_pass_t reference_pass;
+  po_status_t status = topology_parse_records(frame, frame_len, topology_count_record, &count_pass);
+  if (status != PO_OK)
+    return status;
+  reference_pass = (po33_topology_reference_pass_t){
+      .owner_count = count_pass.owner_count,
+  };
+  status = topology_parse_records(frame, frame_len, topology_count_reference, &reference_pass);
+  if (status != PO_OK)
+    return status;
+  *measurement = (po33_topology_measurement_t){
+      .sound_record_count = count_pass.sound_record_count,
+      .pool_count = count_pass.pool_count,
+      .reference_count = reference_pass.reference_count,
+  };
+  return PO_OK;
+}
+
+po_status_t po33_pool_topology_requirements(const uint8_t *frame, size_t frame_len,
+                                            size_t *sound_record_count, size_t *pool_count,
+                                            size_t *reference_count) {
+  po33_topology_measurement_t measurement;
+  po_status_t status;
+  if (frame == NULL || sound_record_count == NULL || pool_count == NULL || reference_count == NULL)
+    return PO_ERR_INVALID_ARG;
+  status = topology_measure(frame, frame_len, &measurement);
+  if (status != PO_OK)
+    return status;
+  *sound_record_count = measurement.sound_record_count;
+  *pool_count = measurement.pool_count;
+  *reference_count = measurement.reference_count;
+  return PO_OK;
+}
+
+typedef struct po33_topology_build_pass {
+  po33_sound_record_t *sound_records;
+  po33_pool_t *pools;
+  size_t sound_record_count;
+  size_t pool_count;
+} po33_topology_build_pass_t;
+
+static po_status_t topology_build_record(const po33_topology_observed_record_t *record,
+                                         void *user) {
+  po33_topology_build_pass_t *pass = (po33_topology_build_pass_t *)user;
+  po33_sound_record_t *output = pass->sound_records + pass->sound_record_count;
+  *output = (po33_sound_record_t){
+      .selector = record->selector,
+      .range_start_raw = record->header.range_start_raw,
+      .range_end_raw = record->header.range_end_raw,
+      .source_selector = record->header.source_selector,
+      .flags = record->flags,
+      .selection_span = record->selection_span,
+      .data_span = record->data_span,
+      .owned_pool_index = SIZE_MAX,
+      .referenced_pool_index = SIZE_MAX,
+  };
+  if (record->data_bytes > PO33_SOUND_HEADER_BYTES) {
+    output->owned_pool_index = pass->pool_count;
+    pass->pools[pass->pool_count] = (po33_pool_t){
+        .owner_record_index = pass->sound_record_count,
+        .data_span = record->data_span,
+        .data_bytes = record->data_bytes,
+    };
+    ++pass->pool_count;
+  }
+  ++pass->sound_record_count;
+  return PO_OK;
+}
+
+static void topology_resolve_references(po33_sound_record_t *sound_records,
+                                        size_t sound_record_count,
+                                        po33_pool_reference_t *references) {
+  uint8_t selector_count[UINT8_MAX + 1u] = {0};
+  uint8_t owner_count[UINT8_MAX + 1u] = {0};
+  size_t owner_pool[UINT8_MAX + 1u];
+  size_t reference_index = 0u;
+  for (size_t i = 0; i <= UINT8_MAX; ++i)
+    owner_pool[i] = SIZE_MAX;
+  for (size_t i = 0; i < sound_record_count; ++i) {
+    po33_sound_record_t *record = sound_records + i;
+    if (selector_count[record->selector] < 2u)
+      ++selector_count[record->selector];
+    if (record->owned_pool_index != SIZE_MAX) {
+      if (owner_count[record->selector] == 0u)
+        owner_pool[record->selector] = record->owned_pool_index;
+      if (owner_count[record->selector] < 2u)
+        ++owner_count[record->selector];
+    }
+  }
+  for (size_t i = 0; i < sound_record_count; ++i) {
+    po33_sound_record_t *record = sound_records + i;
+    if (selector_count[record->selector] > 1u)
+      record->flags |= PO33_SOUND_RECORD_FLAG_DUPLICATE_SELECTOR;
+    if (owner_count[record->source_selector] == 0u) {
+      record->flags |= PO33_SOUND_RECORD_FLAG_SOURCE_UNRESOLVED;
+    } else if (owner_count[record->source_selector] > 1u) {
+      record->flags |= PO33_SOUND_RECORD_FLAG_SOURCE_AMBIGUOUS;
+    } else {
+      record->referenced_pool_index = owner_pool[record->source_selector];
+      references[reference_index++] = (po33_pool_reference_t){
+          .pool_index = record->referenced_pool_index,
+          .sound_record_index = i,
+      };
+    }
+  }
+}
+
+po_status_t po33_pool_topology_build(const uint8_t *frame, size_t frame_len,
+                                     po33_sound_record_t *sound_records,
+                                     size_t sound_record_capacity, po33_pool_t *pools,
+                                     size_t pool_capacity, po33_pool_reference_t *references,
+                                     size_t reference_capacity) {
+  po33_topology_measurement_t measurement;
+  po33_topology_build_pass_t build_pass;
+  po_status_t status;
+  if (frame == NULL || (sound_records == NULL && sound_record_capacity != 0u) ||
+      (pools == NULL && pool_capacity != 0u) || (references == NULL && reference_capacity != 0u))
+    return PO_ERR_INVALID_ARG;
+  status = topology_measure(frame, frame_len, &measurement);
+  if (status != PO_OK)
+    return status;
+  if ((measurement.sound_record_count != 0u && sound_records == NULL) ||
+      (measurement.pool_count != 0u && pools == NULL) ||
+      (measurement.reference_count != 0u && references == NULL))
+    return PO_ERR_INVALID_ARG;
+  if (sound_record_capacity < measurement.sound_record_count ||
+      pool_capacity < measurement.pool_count || reference_capacity < measurement.reference_count)
+    return PO_ERR_BUFFER_TOO_SMALL;
+  build_pass = (po33_topology_build_pass_t){
+      .sound_records = sound_records,
+      .pools = pools,
+  };
+  status = topology_parse_records(frame, frame_len, topology_build_record, &build_pass);
+  if (status != PO_OK || build_pass.sound_record_count != measurement.sound_record_count ||
+      build_pass.pool_count != measurement.pool_count)
+    return status == PO_OK ? PO_ERR_FRAME : status;
+  topology_resolve_references(sound_records, measurement.sound_record_count, references);
+  return PO_OK;
+}

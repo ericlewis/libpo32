@@ -189,6 +189,21 @@ po_status_t po33_pool_topology_requirements(const uint8_t *frame, size_t frame_l
                                             size_t *sound_record_count, size_t *pool_count,
                                             size_t *reference_count);
 
+/* Build the views measured by po33_pool_topology_requirements(). Each array
+ * capacity must cover its queried count; an array may be NULL only with zero
+ * queried count and zero capacity. Insufficient storage returns
+ * PO_ERR_BUFFER_TOO_SMALL before changing any array. Null required storage
+ * returns PO_ERR_INVALID_ARG.
+ * Malformed source frames return PO_ERR_FRAME; unrepresentable counts return
+ * PO_ERR_RANGE. On every failure all supplied arrays remain unchanged.
+ * Successful calls write exactly the queried elements and leave capacity beyond
+ * them untouched. */
+po_status_t po33_pool_topology_build(const uint8_t *frame, size_t frame_len,
+                                     po33_sound_record_t *sound_records,
+                                     size_t sound_record_capacity, po33_pool_t *pools,
+                                     size_t pool_capacity, po33_pool_reference_t *references,
+                                     size_t reference_capacity);
+
 /* Expand one signed-order mu-law sample byte to linear PCM16. Parse framing
  * and the sound header first; pool padding can be decoded, while applying
  * trim/slice ranges is separate. The nominal clock is PO33_SAMPLE_RATE_HZ. */
