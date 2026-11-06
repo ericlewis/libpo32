@@ -776,7 +776,7 @@ static po_status_t capacity_pool(const po33_topology_observed_record_t *r, void 
   po33_capacity_scan_t *s = user;
   size_t bytes = r->data_bytes - PO33_SOUND_HEADER_BYTES, rounded;
   if (r->flags & PO33_SOUND_RECORD_FLAG_UNKNOWN_EXTENSION)
-    return PO_ERR_PARSE;
+    s->unsafe = 1;
   if (!bytes) {
     ++s->report.alias_count;
     return PO_OK;

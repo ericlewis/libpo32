@@ -127,7 +127,7 @@ typedef struct po33_pool_reference {
 
 /* Sample storage accounting, not total firmware RAM use. Each owned pool is
  * counted once, including padding and audio outside trims. Aliases add no
- * sample storage. rounded_sample_bytes rounds each pool independently to4096;
+ * sample storage. rounded_sample_bytes rounds each pool independently to 4096;
  * serialized_sample_bytes reports its actual received bytes. frame_bytes also
  * includes framing, settings, patterns and headers and is a different budget. */
 typedef struct po33_capacity_report {
@@ -151,7 +151,7 @@ po_status_t po33_capacity_measure(const uint8_t *frame, size_t frame_len,
 
 /* Project one owned-pool change against a caller-supplied sample-storage limit.
  * Use allocation sizes from edit plans, including any guard, not PCM bytes or
- * trimmed lengths. Each old/new allocation is independently rounded to4096.
+ * trimmed lengths. Each old/new allocation is independently rounded to 4096.
  * For insertion/detachment old_pool_bytes=0: the original shared pool remains.
  * This arithmetic does not validate pool identity, reclaimability or hardware
  * acceptance. report must come from capacity_measure and remain unmodified.
