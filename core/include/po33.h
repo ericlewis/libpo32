@@ -125,6 +125,43 @@ typedef struct po33_pool_reference {
   size_t sound_record_index;
 } po33_pool_reference_t;
 
+/* Sample storage accounting, not total firmware RAM use. Each owned pool is
+ * counted once, including padding and audio outside trims. Aliases add no
+ * sample storage. rounded_sample_bytes rounds each pool independently to4096;
+ * serialized_sample_bytes reports its actual received bytes. frame_bytes also
+ * includes framing, settings, patterns and headers and is a different budget. */
+typedef struct po33_capacity_report {
+  size_t frame_bytes, pool_count, alias_count, shared_pool_count;
+  size_t unaligned_pool_count, serialized_sample_bytes, rounded_sample_bytes;
+} po33_capacity_report_t;
+
+typedef struct po33_capacity_budget {
+  size_t removed_bytes, added_bytes, projected_bytes, limit_bytes;
+  size_t remaining_bytes, excess_bytes;
+  int fits;
+} po33_capacity_budget_t;
+
+/* Measure one complete frame without trailing data. Reject duplicate selectors,
+ * unknown sound-group extensions and unresolved sources with PARSE; invalid
+ * framing/records returns FRAME. Unaligned pools are reported, not silently
+ * normalized. No heap or writes to frame. Null/overlapping input-output is
+ * INVALID_ARG; overflow is RANGE. All failures leave out unchanged. */
+po_status_t po33_capacity_measure(const uint8_t *frame, size_t frame_len,
+                                  po33_capacity_report_t *out);
+
+/* Project one owned-pool change against a caller-supplied sample-storage limit.
+ * Use allocation sizes from edit plans, including any guard, not PCM bytes or
+ * trimmed lengths. Each old/new allocation is independently rounded to4096.
+ * For insertion/detachment old_pool_bytes=0: the original shared pool remains.
+ * This arithmetic does not validate pool identity, reclaimability or hardware
+ * acceptance. report must come from capacity_measure and remain unmodified.
+ * Over-budget returns OK with fits=0 and excess_bytes; zero limit is literal.
+ * Invalid pointers/overlap returns INVALID_ARG; overflow, invalid rounding or
+ * removal above the current budget returns RANGE. Failures leave out unchanged. */
+po_status_t po33_capacity_project_pool_change(const po33_capacity_report_t *report,
+                                              size_t old_pool_bytes, size_t new_pool_bytes,
+                                              size_t limit_bytes, po33_capacity_budget_t *out);
+
 /* Why a requested owned-pool replacement cannot be planned safely. These
  * reasons describe topology facts or allocation shape; they do not assign
  * playback semantics to a raw range or establish device capacity. */
