@@ -73,8 +73,10 @@ static void po35_manifest_observe_speech_packet(po35_manifest_t *manifest,
     po35_speech_header_t header;
     uint16_t bit;
     ++manifest->speech_header_records;
-    if (manifest->speech_active_slot >= 0)
+    if (manifest->speech_active_slot >= 0) {
+      manifest->speech_invalid = 1;
       po35_manifest_finish_speech_group(manifest);
+    }
     if (po35_speech_header_decode(packet->payload, packet->payload_len, &header) != PO_OK ||
         header.slot >= PO35_SPEECH_SLOT_COUNT) {
       manifest->speech_invalid = 1;
