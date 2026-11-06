@@ -195,6 +195,10 @@ target_link_libraries(po33_pool_manifest_tests PRIVATE po_frame_report)
 add_test(NAME po33_pool_manifest_tests COMMAND po33_pool_manifest_tests)
 set_tests_properties(po33_pool_manifest_tests PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
 
+add_executable(po33_pool_edit_tests tests/test_po33_pool_edit.c)
+target_link_libraries(po33_pool_edit_tests PRIVATE po32)
+add_test(NAME po33_pool_edit_tests COMMAND po33_pool_edit_tests)
+
 add_executable(po35_transfer_manifest_tests tests/test_po35_transfer_manifest.c)
 target_link_libraries(po35_transfer_manifest_tests PRIVATE po_frame_report)
 add_test(NAME po35_transfer_manifest_tests COMMAND po35_transfer_manifest_tests)
