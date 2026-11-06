@@ -91,6 +91,12 @@ add_library(po_frame_report STATIC examples/po_frame_report.c)
 target_link_libraries(po_frame_report PUBLIC po32)
 target_include_directories(po_frame_report PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/examples)
 
+add_executable(po_inspect examples/po_inspect.c)
+target_link_libraries(po_inspect PRIVATE po_frame_report)
+
+add_executable(po_diff examples/po_diff.c)
+target_link_libraries(po_diff PRIVATE po_frame_report)
+
 add_executable(po33_encode_capture examples/po33_encode_capture.c)
 target_link_libraries(po33_encode_capture PRIVATE po_capture po_stereo_wav)
 
@@ -206,7 +212,7 @@ add_executable(po32_pattern_editor_tests tests/test_example_pattern_editor.c)
 target_link_libraries(po32_pattern_editor_tests PRIVATE po32)
 
 add_executable(po32_decode_capture_tests tests/test_example_decode_capture.c)
-target_link_libraries(po32_decode_capture_tests PRIVATE po32)
+target_link_libraries(po32_decode_capture_tests PRIVATE po_frame_report)
 
 add_executable(po32_example_cli_tests tests/test_example_roundtrip_cli.c)
 target_link_libraries(po32_example_cli_tests PRIVATE po32)

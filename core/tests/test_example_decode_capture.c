@@ -1,3 +1,4 @@
+#define _POSIX_C_SOURCE 200809L
 #ifdef NDEBUG
 #undef NDEBUG
 #endif
@@ -11,6 +12,14 @@
 
 #define main po32_decode_capture_example_main
 #include "../examples/po32_decode_capture.c"
+#undef main
+
+#define main po_inspect_example_main
+#include "../examples/po_inspect.c"
+#undef main
+
+#define main po_diff_example_main
+#include "../examples/po_diff.c"
 #undef main
 
 static void write_pcm16_wav(const char *path, const int16_t *samples, size_t sample_count,
@@ -705,6 +714,274 @@ static void test_summary_helpers_direct(void) {
   write_pattern_summary(NULL, 4, &pattern);
 }
 
+static void forensics_write_file(const char *path, const uint8_t *bytes, size_t length) {
+  FILE *file = fopen(path, "wb");
+  size_t written = 0;
+  int status;
+
+  assert(file != NULL);
+  if (length != 0u)
+    written = fwrite(bytes, 1u, length, file);
+  assert(length == 0u || written == length);
+  status = fclose(file);
+  assert(status == 0);
+}
+
+static void forensics_read_text(const char *path, char *out, size_t capacity) {
+  FILE *file = fopen(path, "rb");
+  long end;
+  size_t length;
+  size_t read = 0;
+  int status;
+
+  assert(file != NULL && capacity != 0u);
+  status = fseek(file, 0, SEEK_END);
+  assert(status == 0);
+  end = ftell(file);
+  assert(end >= 0 && (uintmax_t)end < capacity);
+  length = (size_t)end;
+  status = fseek(file, 0, SEEK_SET);
+  assert(status == 0);
+  if (length != 0u)
+    read = fread(out, 1u, length, file);
+  assert(length == 0u || read == length);
+  out[length] = '\0';
+  status = fclose(file);
+  assert(status == 0);
+}
+
+static int forensics_run_cli(int (*entry)(int, char **), int argc, char **argv, char *stdout_text,
+                             size_t stdout_capacity, char *stderr_text, size_t stderr_capacity) {
+  const char *stdout_path = "forensics-cli-stdout.txt";
+  const char *stderr_path = "forensics-cli-stderr.txt";
+  FILE *stdout_file = fopen(stdout_path, "wb");
+  FILE *stderr_file = fopen(stderr_path, "wb");
+  int stdout_fd;
+  int stderr_fd;
+  int rc;
+  int status;
+  int stdout_close;
+  int stderr_close;
+
+  assert(stdout_file != NULL && stderr_file != NULL);
+  status = fflush(stdout);
+  assert(status == 0);
+  status = fflush(stderr);
+  assert(status == 0);
+  stdout_fd = dup(STDOUT_FILENO);
+  stderr_fd = dup(STDERR_FILENO);
+  assert(stdout_fd >= 0 && stderr_fd >= 0);
+  status = dup2(fileno(stdout_file), STDOUT_FILENO);
+  assert(status == STDOUT_FILENO);
+  status = dup2(fileno(stderr_file), STDERR_FILENO);
+  assert(status == STDERR_FILENO);
+  rc = entry(argc, argv);
+  status = fflush(stdout);
+  assert(status == 0);
+  status = fflush(stderr);
+  assert(status == 0);
+  status = dup2(stdout_fd, STDOUT_FILENO);
+  assert(status == STDOUT_FILENO);
+  status = dup2(stderr_fd, STDERR_FILENO);
+  assert(status == STDERR_FILENO);
+  status = close(stdout_fd);
+  assert(status == 0);
+  status = close(stderr_fd);
+  assert(status == 0);
+  stdout_close = fclose(stdout_file);
+  stderr_close = fclose(stderr_file);
+  assert(stdout_close == 0 && stderr_close == 0);
+  forensics_read_text(stdout_path, stdout_text, stdout_capacity);
+  forensics_read_text(stderr_path, stderr_text, stderr_capacity);
+  return rc;
+}
+
+static size_t forensics_frame33(uint8_t *frame, size_t capacity, uint16_t raw_tag,
+                                uint8_t first_pattern_byte) {
+  uint8_t settings[PO33_SETTINGS_BYTES] = {0};
+  uint8_t pattern[PO33_PATTERN_BYTES] = {0};
+  const uint8_t selector = 2u;
+  const uint8_t raw[] = {0xa5u};
+  po33_builder_t builder;
+  size_t length = 0;
+  size_t offset = 0;
+
+  pattern[0] = first_pattern_byte;
+  assert(po33_builder_init(&builder, frame, capacity) == PO_OK);
+  while (offset < sizeof(settings)) {
+    size_t count = sizeof(settings) - offset;
+    if (count > PO_MAX_PAYLOAD)
+      count = PO_MAX_PAYLOAD;
+    assert(po33_builder_append_packet(&builder, PO33_TAG_SETTINGS, settings + offset, count,
+                                      NULL) == PO_OK);
+    offset += count;
+  }
+  assert(po33_builder_append_packet(&builder, PO33_TAG_PATTERN_SELECT, &selector, sizeof(selector),
+                                    NULL) == PO_OK);
+  offset = 0;
+  while (offset < sizeof(pattern)) {
+    size_t count = sizeof(pattern) - offset;
+    if (count > PO_MAX_PAYLOAD)
+      count = PO_MAX_PAYLOAD;
+    assert(po33_builder_append_packet(&builder, PO33_TAG_PATTERN_DATA, pattern + offset, count,
+                                      NULL) == PO_OK);
+    offset += count;
+  }
+  assert(po33_builder_append_packet(&builder, raw_tag, raw, sizeof(raw), NULL) == PO_OK);
+  assert(po33_builder_finish(&builder, &length) == PO_OK);
+  return length;
+}
+
+static size_t forensics_frame35(uint8_t *frame, size_t capacity, uint8_t first_speech_byte) {
+  const uint8_t pattern[] = {4u};
+  const uint8_t speech_header[PO35_SPEECH_HEADER_BYTES] = {3u, 1u, 0u, 80u, 140u, 1u, 2u, 3u, 4u};
+  uint8_t speech_data[PO35_SPEECH_RECORD_BYTES] = {0};
+  const uint8_t raw[] = {0x50u, 0x60u};
+  po35_builder_t builder;
+  size_t length = 0;
+
+  speech_data[0] = first_speech_byte;
+  speech_data[PO35_SPEECH_RECORD_BYTES - 1u] = 0x40u;
+  assert(po35_builder_init(&builder, frame, capacity) == PO_OK);
+  assert(po35_builder_append_packet(&builder, PO35_TAG_PATTERN_EMPTY, pattern, sizeof(pattern),
+                                    NULL) == PO_OK);
+  assert(po35_builder_append_packet(&builder, PO35_TAG_SPEECH_HEADER, speech_header,
+                                    sizeof(speech_header), NULL) == PO_OK);
+  assert(po35_builder_append_packet(&builder, PO35_TAG_SPEECH_DATA, speech_data,
+                                    sizeof(speech_data), NULL) == PO_OK);
+  assert(po35_builder_append_packet(&builder, PO35_TAG_SPEECH_END, NULL, 0u, NULL) == PO_OK);
+  assert(po35_builder_append_packet(&builder, 0xabcdu, raw, sizeof(raw), NULL) == PO_OK);
+  assert(po35_builder_finish(&builder, &length) == PO_OK);
+  return length;
+}
+
+static void test_capture_forensics_cli(void) {
+  uint8_t before[8192];
+  uint8_t after[8192];
+  uint8_t po35[8192];
+  char stdout_text[4096];
+  char stderr_text[1024];
+  size_t before_length;
+  size_t after_length;
+  size_t po35_length;
+  int rc;
+  char *inspect33[] = {"po_inspect", "--family", "po33", "forensics33-before.bin", NULL};
+  char *inspect35[] = {"po_inspect", "--family", "po35", "forensics35.bin", NULL};
+  char *inspect_bad[] = {"po_inspect", "--family", "po33", "forensics-invalid.bin", NULL};
+  char *inspect_trailing[] = {"po_inspect", "--family", "po33", "forensics-trailing.bin", NULL};
+  char *inspect_wrong_family[] = {"po_inspect", "--family", "po35", "forensics33-before.bin", NULL};
+  char *diff_identical[] = {
+      "po_diff", "--family", "po33", "forensics33-before.bin", "forensics33-identical.bin", NULL};
+  char *diff_packet[] = {
+      "po_diff", "--family", "po33", "forensics33-before.bin", "forensics33-packet.bin", NULL};
+  char *diff_record[] = {
+      "po_diff", "--family", "po33", "forensics33-before.bin", "forensics33-record.bin", NULL};
+  char *diff35_record[] = {
+      "po_diff", "--family", "po35", "forensics35.bin", "forensics35-record.bin", NULL};
+  char *diff_invalid[] = {
+      "po_diff", "--family", "po33", "forensics33-before.bin", "forensics-invalid.bin", NULL};
+  char *diff_trailing[] = {
+      "po_diff", "--family", "po33", "forensics33-before.bin", "forensics-trailing.bin", NULL};
+
+  before_length = forensics_frame33(before, sizeof(before), 0x1234u, 0x20u);
+  after_length = forensics_frame33(after, sizeof(after), 0x4321u, 0x20u);
+  po35_length = forensics_frame35(po35, sizeof(po35), 0x10u);
+  forensics_write_file("forensics33-before.bin", before, before_length);
+  forensics_write_file("forensics33-identical.bin", before, before_length);
+  forensics_write_file("forensics33-packet.bin", after, after_length);
+  after_length = forensics_frame33(after, sizeof(after), 0x1234u, 0x21u);
+  forensics_write_file("forensics33-record.bin", after, after_length);
+  forensics_write_file("forensics35.bin", po35, po35_length);
+  po35_length = forensics_frame35(po35, sizeof(po35), 0x11u);
+  forensics_write_file("forensics35-record.bin", po35, po35_length);
+  forensics_write_file("forensics-invalid.bin", before, before_length - 1u);
+  before[before_length] = 0x5au;
+  forensics_write_file("forensics-trailing.bin", before, before_length + 1u);
+
+  rc = forensics_run_cli(po_inspect_example_main, 4, inspect33, stdout_text, sizeof(stdout_text),
+                         stderr_text, sizeof(stderr_text));
+  assert(rc == 0 && stderr_text[0] == '\0');
+  assert(!strcmp(
+      stdout_text,
+      "po33 parser=ok complete=yes stopped=no packets=11 input=5695 consumed=5695 trailing=0 "
+      "unparsed=0 state=0x521a selectors=patterns[2x1];sounds[-];speech[-];invalid=0/0/0 "
+      "unknown=packets:1,bytes:1,tags[0x1234x1/1]\n"));
+  rc = forensics_run_cli(po_inspect_example_main, 4, inspect35, stdout_text, sizeof(stdout_text),
+                         stderr_text, sizeof(stderr_text));
+  assert(rc == 0 && stderr_text[0] == '\0');
+  assert(!strcmp(
+      stdout_text,
+      "po35 parser=ok complete=yes stopped=no packets=5 input=4182 consumed=4182 trailing=0 "
+      "unparsed=0 state=0xcc30 selectors=patterns[4x1];sounds[-];speech[3x1];invalid=0/0/0 "
+      "unknown=packets:1,bytes:2,tags[0xabcdx1/2]\n"));
+
+  rc = forensics_run_cli(po_diff_example_main, 5, diff_identical, stdout_text, sizeof(stdout_text),
+                         stderr_text, sizeof(stderr_text));
+  assert(rc == 0 && stderr_text[0] == '\0');
+  assert(!strcmp(stdout_text, "family=po33\n"
+                              "bytes identical count=5695\n"
+                              "packets topology identical count=11\n"
+                              "packets payload identical count=11\n"
+                              "records topology identical count=3\n"
+                              "records payload identical count=3\n"));
+  rc = forensics_run_cli(po_diff_example_main, 5, diff_packet, stdout_text, sizeof(stdout_text),
+                         stderr_text, sizeof(stderr_text));
+  assert(rc == 0 && stderr_text[0] == '\0');
+  assert(!strcmp(
+      stdout_text,
+      "family=po33\n"
+      "bytes changed before=5695 after=5695 changed=11 first_offset=5684 before=0x4b after=0x38\n"
+      "packets topology changed before=11 after=11 first_index=9 "
+      "before=raw(tag=0x1234,raw_bytes=1) after=raw(tag=0x4321,raw_bytes=1)\n"
+      "packets payload not-compared topology=changed\n"
+      "records topology changed before=3 after=3 first_index=2 "
+      "before=raw(tag=0x1234,packets=1,raw_bytes=1) "
+      "after=raw(tag=0x4321,packets=1,raw_bytes=1)\n"
+      "records payload not-compared topology=changed\n"));
+  rc = forensics_run_cli(po_diff_example_main, 5, diff_record, stdout_text, sizeof(stdout_text),
+                         stderr_text, sizeof(stderr_text));
+  assert(rc == 0 && stderr_text[0] == '\0');
+  assert(!strcmp(
+      stdout_text,
+      "family=po33\n"
+      "bytes changed before=5695 after=5695 changed=1062 first_offset=4630 before=0x00 after=0x01\n"
+      "packets topology identical count=11\n"
+      "packets payload changed count=1 first_index=4 first_raw_offset=0 before=0x20 after=0x21\n"
+      "records topology identical count=3\n"
+      "records payload changed count=1 first_index=1 first_packet=4 first_raw_offset=0 "
+      "before=0x20 after=0x21 record=po33-pattern(selector_raw=2,packets=6,raw_bytes=1033)\n"));
+  rc = forensics_run_cli(po_diff_example_main, 5, diff35_record, stdout_text, sizeof(stdout_text),
+                         stderr_text, sizeof(stderr_text));
+  assert(rc == 0 && stderr_text[0] == '\0');
+  assert(!strcmp(
+      stdout_text,
+      "family=po35\n"
+      "bytes changed before=4182 after=4182 changed=63 first_offset=4119 before=0xfb after=0xfc\n"
+      "packets topology identical count=5\n"
+      "packets payload changed count=1 first_index=2 first_raw_offset=0 before=0x10 after=0x11\n"
+      "records topology identical count=3\n"
+      "records payload changed count=1 first_index=1 first_packet=2 first_raw_offset=0 "
+      "before=0x10 after=0x11 record=po35-speech(slot_raw=3,packets=3,raw_bytes=53)\n"));
+
+  rc = forensics_run_cli(po_inspect_example_main, 4, inspect_bad, stdout_text, sizeof(stdout_text),
+                         stderr_text, sizeof(stderr_text));
+  assert(rc == 1 && stdout_text[0] == '\0' && strstr(stderr_text, "not one complete po33 frame"));
+  rc = forensics_run_cli(po_inspect_example_main, 4, inspect_trailing, stdout_text,
+                         sizeof(stdout_text), stderr_text, sizeof(stderr_text));
+  assert(rc == 1 && stdout_text[0] == '\0' && strstr(stderr_text, "not one complete po33 frame"));
+  rc = forensics_run_cli(po_inspect_example_main, 4, inspect_wrong_family, stdout_text,
+                         sizeof(stdout_text), stderr_text, sizeof(stderr_text));
+  assert(rc == 1 && stdout_text[0] == '\0' && strstr(stderr_text, "not one complete po35 frame"));
+  rc = forensics_run_cli(po_diff_example_main, 5, diff_invalid, stdout_text, sizeof(stdout_text),
+                         stderr_text, sizeof(stderr_text));
+  assert(rc == 1 && stdout_text[0] == '\0' &&
+         strstr(stderr_text, "After input is not one complete"));
+  rc = forensics_run_cli(po_diff_example_main, 5, diff_trailing, stdout_text, sizeof(stdout_text),
+                         stderr_text, sizeof(stderr_text));
+  assert(rc == 1 && stdout_text[0] == '\0' &&
+         strstr(stderr_text, "After input is not one complete"));
+}
+
 int main(void) {
   test_decode_helpers();
   test_decode_wav_formats();
@@ -714,5 +991,6 @@ int main(void) {
   test_decode_capture_main_paths();
   test_packet_dump_helpers();
   test_summary_helpers_direct();
+  test_capture_forensics_cli();
   return 0;
 }
