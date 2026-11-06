@@ -31,7 +31,7 @@ that does not require assigning those bytes a musical role.
 | --- | --- | --- |
 | PO-32 | Mono modem, drum patch parameters, synthesis and pattern editing | Some per-step/control bits and slot-marker receive behavior; typed chain/trigger preservation limits |
 | PO-33 / PO-133 | Stereo modem, lossless records, sample codec/resampling, shared-pool topology and replacement; exact PO-33 replacement/growth readbacks | Audible range endpoints and slice mapping, full note/timing/parameter scales, most FX codes and retained-state update rules, maximum storage capacity |
-| PO-35 / PO-137 | Stereo modem, lossless records, speech-group replacement and approximate PCM speech analysis/rendering; shared PO-32 drum patch codec | Indexed voice/effect tables, exact speech gain/noise and synthesis behavior, header metadata units, key/scale and other pattern/control semantics; generated speech hardware acceptance |
+| PO-35 / PO-137 | Stereo modem, lossless records, speech-group replacement and approximate PCM speech analysis/rendering; shared PO-32 drum patch codec; PO-35 root and normal pitch/formant storage observations | Indexed voice/effect tables, exact speech gain/noise and synthesis behavior, root acoustic scale and other header metadata, key/scale and other pattern/control semantics; generated speech hardware acceptance |
 
 PO-133 and PO-137 share the inspected 33/35 record grammars, respectively;
 that does not establish identical firmware, audio or physical cross-loading.
