@@ -663,6 +663,15 @@ static void test_speech_edit_rebuild(void) {
 
   memset(output, 0xa5, sizeof(output));
   output_len = 99u;
+  assert(po35_speech_edit_rebuild(source, source_len, edits, sizeof(edits) / sizeof(edits[0]), NULL,
+                                  NULL, 1u, output, sizeof(output),
+                                  &output_len) == PO_ERR_INVALID_ARG);
+  assert(output_len == 0u);
+  for (size_t i = 0; i < sizeof(output); ++i)
+    assert(output[i] == 0xa5u);
+
+  memset(output, 0xa5, sizeof(output));
+  output_len = 99u;
   assert(po35_speech_edit_rebuild(source, source_len, edits, sizeof(edits) / sizeof(edits[0]),
                                   &plan, workspace, plan.required_workspace_bytes - 1u, output,
                                   sizeof(output), &output_len) == PO_ERR_BUFFER_TOO_SMALL);
