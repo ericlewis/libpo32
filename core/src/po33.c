@@ -199,7 +199,11 @@ static po_status_t topology_finish_record(po33_topology_stream_t *stream) {
   po_status_t status;
   if (!stream->record.active)
     return PO_OK;
-  if (!stream->record.have_data || stream->record.header_length != PO33_SOUND_HEADER_BYTES)
+  if (!stream->record.have_data) {
+    stream->record = (po33_topology_record_state_t){0};
+    return PO_OK;
+  }
+  if (stream->record.header_length != PO33_SOUND_HEADER_BYTES)
     return PO_ERR_FRAME;
   observed = (po33_topology_observed_record_t){0};
   status = po33_sound_header_decode(stream->record.header_bytes, PO33_SOUND_HEADER_BYTES,

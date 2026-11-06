@@ -373,6 +373,14 @@ static void test_pool_topology_failures(void) {
   assert(records_required == 0u && pools_required == 0u && references_required == 0u);
   assert(po33_pool_topology_build(empty, length, NULL, 0u, NULL, 0u, NULL, 0u) == PO_OK);
 
+  assert(po33_builder_init(&builder, empty, sizeof(empty)) == PO_OK);
+  topology_append(&builder, PO33_TAG_SOUND_SELECT, &selector, 1u, NULL);
+  assert(po33_builder_finish(&builder, &length) == PO_OK);
+  assert(po33_pool_topology_requirements(empty, length, &records_required, &pools_required,
+                                         &references_required) == PO_OK);
+  assert(records_required == 0u && pools_required == 0u && references_required == 0u);
+  assert(po33_pool_topology_build(empty, length, NULL, 0u, NULL, 0u, NULL, 0u) == PO_OK);
+
   records_required = 31u;
   pools_required = 32u;
   references_required = 33u;

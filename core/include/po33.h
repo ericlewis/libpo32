@@ -90,9 +90,10 @@ typedef struct po33_frame_span {
 #define PO33_SOUND_RECORD_FLAG_SOURCE_UNRESOLVED  0x08u
 #define PO33_SOUND_RECORD_FLAG_SOURCE_AMBIGUOUS   0x10u
 
-/* One SOUND_SELECT record and its following SOUND_DATA region. selection_span
- * covers its selector packet. data_span covers the raw packet region from the
- * first SOUND_DATA packet through the last, including packet framing and any
+/* One SOUND_SELECT record with a following SOUND_DATA region. A selector with
+ * no sound-data packet is omitted from topology views. selection_span covers
+ * its selector packet. data_span covers the raw packet region from the first
+ * SOUND_DATA packet through the last, including packet framing and any
  * intervening unknown extension packets. range_* and source_selector are the
  * decoded nine-byte sound header, not inferred playback coordinates. Either
  * pool index is SIZE_MAX when its relationship is unavailable or ambiguous. */
