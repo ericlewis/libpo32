@@ -116,8 +116,9 @@ typedef struct po33_pool {
   size_t data_bytes;
 } po33_pool_t;
 
-/* A resolved source-selector relationship. The referenced sound record owns
- * the pool; the referenced pool is not necessarily the record's own pool. */
+/* A resolved source-selector relationship. sound_record_index identifies the
+ * referring record; use po33_pool_t.owner_record_index for the pool owner.
+ * The referenced pool is not necessarily the referring record's own pool. */
 typedef struct po33_pool_reference {
   size_t pool_index;
   size_t sound_record_index;
@@ -229,7 +230,8 @@ po_status_t po33_frame_parse(const uint8_t *frame, size_t frame_len, po_packet_c
  * pointer is required. Structurally malformed source records return
  * PO_ERR_FRAME; size overflow returns PO_ERR_RANGE. Duplicate selectors and
  * unknown extensions remain successful topology facts, represented by record
- * flags. On failure, all count outputs are unchanged. */
+ * flags. Count storage must be pairwise disjoint and disjoint from the source
+ * frame. On failure, all count outputs are unchanged. */
 po_status_t po33_pool_topology_requirements(const uint8_t *frame, size_t frame_len,
                                             size_t *sound_record_count, size_t *pool_count,
                                             size_t *reference_count);
