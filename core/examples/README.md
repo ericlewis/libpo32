@@ -25,6 +25,8 @@ Use the [C API guide](../docs/C_API.md) for application integration and the
 | [`po33_encode_capture.c`](po33_encode_capture.c) | Re-encode a PO-33/133 frame, with optional sample and pattern edits |
 | [`po35_decode_capture.c`](po35_decode_capture.c) | Decode PO-35/137 records and render approximate speech previews |
 | [`po35_encode_capture.c`](po35_encode_capture.c) | Replace speech from PCM WAVs in a PO-35/137 frame and emit stereo modem audio |
+| [`po_inspect.c`](po_inspect.c) | Print a stable structural report for one complete PO-33 or PO-35 raw frame |
+| [`po_diff.c`](po_diff.c) | Compare two complete raw frames by bytes, packet topology, and raw-record topology |
 
 ## Build
 
@@ -38,7 +40,22 @@ cmake --build build
 ./build/core/po32_demo
 ./build/core/po32_pattern_editor
 ./build/core/po32_decode_capture input.wav decoded-po32
+./build/core/po_inspect --family po33 decoded-po33/frame.bin
+./build/core/po_diff --family po33 before/frame.bin after/frame.bin
 ```
+
+## Raw Frame Inspection
+
+`po_inspect` and `po_diff` take raw `frame.bin` files emitted by the family
+decoders. Select the parser family explicitly with `--family po33` or
+`--family po35`; the commands never infer it from the input.
+
+Both inputs must be exactly one complete frame for that family. Malformed,
+incomplete, wrong-family, and trailing-byte inputs are rejected. These tools
+do not scan captures, combine transfers, repair bytes, or reinterpret unknown
+payloads. `po_inspect` emits the stable one-line frame report. `po_diff` emits
+deterministic byte, packet, and record topology summaries; unrecognized tags
+and ungroupable records are labelled `raw` with their tag and byte counts.
 
 ## Capture Input
 
