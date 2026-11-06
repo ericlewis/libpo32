@@ -29,6 +29,7 @@ Use the [C API guide](../docs/C_API.md) for application integration and the
 | [`po_diff.c`](po_diff.c) | Compare two complete raw frames by bytes, packet topology, and raw-record topology |
 | [`po_capture_doctor.c`](po_capture_doctor.c) | Diagnose one stereo capture across both channel orders and both backup parsers without exporting a frame |
 | [`po_transfer_verify.c`](po_transfer_verify.c) | Compare one explicit raw frame with both recovery orders from one stereo capture |
+| [`po35_transfer_manifest.c`](po35_transfer_manifest.c) | Describe observed PO-35 partial-transfer pattern/chain/speech relationships without projecting a transfer |
 
 ## Build
 
@@ -47,6 +48,7 @@ cmake --build build
 ./build/core/po_capture_doctor input.wav
 ./build/core/po_capture_doctor --json input.wav
 ./build/core/po_transfer_verify --family po33 decoded-po33/frame.bin readback.wav
+./build/core/po35_transfer_manifest decoded-po35/frame.bin
 ```
 
 ## Raw Frame Inspection
@@ -119,6 +121,25 @@ part of the compared frame. A readable mismatch returns status 1 after its
 report. This is software recovery evidence only: it does not prove that a
 physical device accepted a transfer or that an observed capture came from a
 particular device state.
+
+### PO-35 Transfer Shape Manifest
+
+`po35_transfer_manifest` reads one complete raw PO-35/137 frame and reports
+the observed sets of included pattern indices, active-chain indices, speech
+headers, and active full-pattern speech events. It labels the two corpus-backed
+set comparisons as `match`, `mismatch`, or `not-evaluable` and always ends with
+`projection=none`. A malformed, incomplete, duplicated, or extended speech
+group makes the speech comparison `not-evaluable`.
+
+```sh
+./build/core/po35_transfer_manifest decoded-po35/frame.bin
+```
+
+An `observed-partial-candidate` label means only that a frame with fewer than
+16 patterns has the retained corpus relationship. `full-bank-like` means all
+16 distinct pattern indices are present. Neither result predicts receiver
+merge/clear behavior, creates a selective backup, or establishes a device
+operation.
 
 ## Offline Capture Checks
 
