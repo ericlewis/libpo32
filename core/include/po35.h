@@ -195,9 +195,9 @@ po_status_t po35_speech_record_decode(const uint8_t *data, size_t len, po35_spee
 po_status_t po35_speech_record_encode(const po35_speech_record_t *record, uint8_t *out,
                                       size_t capacity);
 
-/* Reserve the transactional speech-replacement ABI. The implementation is
- * added in the subsequent measurement/rebuild tasks; callers of this staged
- * header must not invoke these declarations until the library links them.
+/* Transactional speech replacement. po35_speech_edit_plan is implemented;
+ * po35_speech_edit_rebuild remains reserved for the following atomic-rebuild
+ * task and must not be invoked until that implementation is linked.
  *
  * Both functions borrow frame, edits and every edit's record storage for the
  * call. Those read-only inputs may overlap each other. A plan output, plan

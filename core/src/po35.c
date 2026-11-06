@@ -209,6 +209,247 @@ po_status_t po35_speech_record_encode(const po35_speech_record_t *record, uint8_
   return PO_OK;
 }
 
+typedef struct po35_speech_edit_scan {
+  const size_t *edit_index_by_slot;
+  uint16_t seen_slots;
+  size_t removed_data_packet_bytes;
+  size_t active_expected;
+  size_t active_received;
+  size_t failed_edit_index;
+  uint8_t failed_slot;
+  int active_slot;
+  po35_speech_edit_reason_t reason;
+  po_status_t status;
+} po35_speech_edit_scan_t;
+
+static void speech_edit_plan_clear(po35_speech_edit_plan_t *plan) {
+  *plan = (po35_speech_edit_plan_t){
+      .failed_edit_index = SIZE_MAX,
+      .failed_slot = UINT8_MAX,
+      .reason = PO35_SPEECH_EDIT_REASON_NONE,
+  };
+}
+
+static void speech_edit_plan_reject(po35_speech_edit_plan_t *plan, size_t edit_index, uint8_t slot,
+                                    po35_speech_edit_reason_t reason) {
+  speech_edit_plan_clear(plan);
+  plan->failed_edit_index = edit_index;
+  plan->failed_slot = slot;
+  plan->reason = reason;
+}
+
+static int speech_edit_ranges_overlap(const void *left, size_t left_bytes, const void *right,
+                                      size_t right_bytes) {
+  uintptr_t left_start, right_start;
+  if (left_bytes == 0u || right_bytes == 0u)
+    return 0;
+  left_start = (uintptr_t)left;
+  right_start = (uintptr_t)right;
+  if (left_start > UINTPTR_MAX - left_bytes || right_start > UINTPTR_MAX - right_bytes)
+    return 1;
+  return left_start < right_start + right_bytes && right_start < left_start + left_bytes;
+}
+
+static void speech_edit_scan_fail(po35_speech_edit_scan_t *scan, po_status_t status) {
+  scan->status = status;
+}
+
+static void speech_edit_scan_reject_active(po35_speech_edit_scan_t *scan,
+                                           po35_speech_edit_reason_t reason) {
+  size_t edit_index = SIZE_MAX;
+  if (scan->active_slot >= 0)
+    edit_index = scan->edit_index_by_slot[scan->active_slot];
+  scan->status = PO_ERR_PARSE;
+  if (edit_index != SIZE_MAX) {
+    scan->failed_edit_index = edit_index;
+    scan->failed_slot = (uint8_t)scan->active_slot;
+    scan->reason = reason;
+  }
+}
+
+static int speech_edit_known_group_interruption(uint16_t tag_code) {
+  switch (tag_code) {
+  case PO35_TAG_PATCH:
+  case PO35_TAG_TABLE_7BE7:
+  case PO35_TAG_TABLE_1C7F:
+  case PO35_TAG_PATTERN_EMPTY:
+  case PO35_TAG_PATTERN:
+  case PO35_TAG_SETTINGS:
+    return 1;
+  default:
+    return 0;
+  }
+}
+
+static int speech_edit_scan_packet(const po_packet_t *packet, void *user) {
+  po35_speech_edit_scan_t *scan = (po35_speech_edit_scan_t *)user;
+  switch (packet->tag_code) {
+  case PO35_TAG_SPEECH_HEADER: {
+    po35_speech_header_t header;
+    if (scan->active_slot >= 0) {
+      speech_edit_scan_reject_active(scan, PO35_SPEECH_EDIT_REASON_INCOMPLETE_GROUP);
+      return 1;
+    }
+    if (po35_speech_header_decode(packet->payload, packet->payload_len, &header) != PO_OK ||
+        header.slot >= PO35_SPEECH_SLOT_COUNT ||
+        (scan->seen_slots & (uint16_t)(1u << header.slot))) {
+      speech_edit_scan_fail(scan, PO_ERR_PARSE);
+      return 1;
+    }
+    scan->seen_slots |= (uint16_t)(1u << header.slot);
+    scan->active_slot = header.slot;
+    scan->active_expected = (size_t)header.record_count * PO35_SPEECH_RECORD_BYTES;
+    scan->active_received = 0u;
+    return 0;
+  }
+  case PO35_TAG_SPEECH_DATA:
+    if (scan->active_slot < 0 || packet->payload_len == 0u ||
+        packet->payload_len > scan->active_expected - scan->active_received) {
+      speech_edit_scan_reject_active(scan, PO35_SPEECH_EDIT_REASON_INCOMPLETE_GROUP);
+      return 1;
+    }
+    scan->active_received += packet->payload_len;
+    if (scan->edit_index_by_slot[scan->active_slot] != SIZE_MAX) {
+      size_t packet_bytes = packet->payload_len + PO_WIRE_OVERHEAD_BYTES;
+      if (scan->removed_data_packet_bytes > SIZE_MAX - packet_bytes) {
+        speech_edit_scan_fail(scan, PO_ERR_RANGE);
+        return 1;
+      }
+      scan->removed_data_packet_bytes += packet_bytes;
+    }
+    return 0;
+  case PO35_TAG_SPEECH_END:
+    if (scan->active_slot < 0 || packet->payload_len != 0u ||
+        scan->active_received != scan->active_expected) {
+      speech_edit_scan_reject_active(scan, PO35_SPEECH_EDIT_REASON_INCOMPLETE_GROUP);
+      return 1;
+    }
+    scan->active_slot = -1;
+    return 0;
+  default:
+    if (scan->active_slot >= 0) {
+      if (scan->edit_index_by_slot[scan->active_slot] != SIZE_MAX) {
+        speech_edit_scan_reject_active(scan,
+                                       PO35_SPEECH_EDIT_REASON_UNKNOWN_SELECTED_GROUP_EXTENSION);
+        return 1;
+      }
+      if (speech_edit_known_group_interruption(packet->tag_code)) {
+        speech_edit_scan_fail(scan, PO_ERR_PARSE);
+        return 1;
+      }
+    }
+    return 0;
+  }
+}
+
+po_status_t po35_speech_edit_plan(const uint8_t *frame, size_t frame_len,
+                                  const po35_speech_edit_t *edits, size_t edit_count,
+                                  po35_speech_edit_plan_t *plan) {
+  size_t edit_index_by_slot[PO35_SPEECH_SLOT_COUNT];
+  po35_speech_edit_scan_t scan = {
+      .edit_index_by_slot = edit_index_by_slot,
+      .failed_edit_index = SIZE_MAX,
+      .failed_slot = UINT8_MAX,
+      .active_slot = -1,
+      .reason = PO35_SPEECH_EDIT_REASON_NONE,
+      .status = PO_OK,
+  };
+  po35_decode_result_t result;
+  po_status_t status;
+  uint16_t selected_slots = 0u;
+  size_t required_frame_bytes;
+
+  if (plan == NULL)
+    return PO_ERR_INVALID_ARG;
+  if ((frame != NULL && speech_edit_ranges_overlap(plan, sizeof(*plan), frame, frame_len)) ||
+      (edits != NULL &&
+       (edit_count > SIZE_MAX / sizeof(*edits) ||
+        speech_edit_ranges_overlap(plan, sizeof(*plan), edits, edit_count * sizeof(*edits)))))
+    return PO_ERR_INVALID_ARG;
+  if (edits != NULL) {
+    for (size_t i = 0; i < edit_count; ++i)
+      if (edits[i].records != NULL && edits[i].record_bytes % PO35_SPEECH_RECORD_BYTES == 0u &&
+          edits[i].record_bytes / PO35_SPEECH_RECORD_BYTES <= UINT16_MAX &&
+          speech_edit_ranges_overlap(plan, sizeof(*plan), edits[i].records, edits[i].record_bytes))
+        return PO_ERR_INVALID_ARG;
+  }
+
+  speech_edit_plan_clear(plan);
+  if (frame == NULL || (edit_count != 0u && edits == NULL))
+    return PO_ERR_INVALID_ARG;
+  for (size_t i = 0; i < PO35_SPEECH_SLOT_COUNT; ++i)
+    edit_index_by_slot[i] = SIZE_MAX;
+  for (size_t i = 0; i < edit_count; ++i) {
+    const po35_speech_edit_t *edit = edits + i;
+    uint16_t slot_bit;
+    if (edit->slot >= PO35_SPEECH_SLOT_COUNT) {
+      speech_edit_plan_reject(plan, i, edit->slot, PO35_SPEECH_EDIT_REASON_SLOT_OUT_OF_RANGE);
+      return PO_ERR_RANGE;
+    }
+    slot_bit = (uint16_t)(1u << edit->slot);
+    if (selected_slots & slot_bit) {
+      speech_edit_plan_reject(plan, i, edit->slot, PO35_SPEECH_EDIT_REASON_DUPLICATE_SLOT);
+      return PO_ERR_RANGE;
+    }
+    if (edit->record_bytes != 0u && edit->records == NULL)
+      return PO_ERR_INVALID_ARG;
+    if (edit->record_bytes % PO35_SPEECH_RECORD_BYTES != 0u) {
+      speech_edit_plan_reject(plan, i, edit->slot, PO35_SPEECH_EDIT_REASON_INVALID_RECORD_SIZE);
+      return PO_ERR_RANGE;
+    }
+    if (edit->record_bytes / PO35_SPEECH_RECORD_BYTES > UINT16_MAX) {
+      speech_edit_plan_reject(plan, i, edit->slot, PO35_SPEECH_EDIT_REASON_INVALID_RECORD_COUNT);
+      return PO_ERR_RANGE;
+    }
+    selected_slots |= slot_bit;
+    edit_index_by_slot[edit->slot] = i;
+  }
+
+  status = po35_frame_parse(frame, frame_len, speech_edit_scan_packet, &scan, &result);
+  if (scan.status != PO_OK) {
+    if (scan.reason != PO35_SPEECH_EDIT_REASON_NONE)
+      speech_edit_plan_reject(plan, scan.failed_edit_index, scan.failed_slot, scan.reason);
+    else
+      speech_edit_plan_clear(plan);
+    return scan.status;
+  }
+  if (status != PO_OK || !result.done || result.stopped || result.frame_bytes != frame_len)
+    return PO_ERR_FRAME;
+  if (scan.active_slot >= 0) {
+    speech_edit_scan_reject_active(&scan, PO35_SPEECH_EDIT_REASON_INCOMPLETE_GROUP);
+    if (scan.reason != PO35_SPEECH_EDIT_REASON_NONE)
+      speech_edit_plan_reject(plan, scan.failed_edit_index, scan.failed_slot, scan.reason);
+    return PO_ERR_PARSE;
+  }
+  for (size_t i = 0; i < edit_count; ++i) {
+    if (!(scan.seen_slots & (uint16_t)(1u << edits[i].slot))) {
+      speech_edit_plan_reject(plan, i, edits[i].slot, PO35_SPEECH_EDIT_REASON_ABSENT_SLOT);
+      return PO_ERR_PARSE;
+    }
+  }
+  if (scan.removed_data_packet_bytes > frame_len)
+    return PO_ERR_RANGE;
+  required_frame_bytes = frame_len - scan.removed_data_packet_bytes;
+  for (size_t i = 0; i < edit_count; ++i) {
+    size_t record_count = edits[i].record_bytes / PO35_SPEECH_RECORD_BYTES;
+    size_t packet_count = record_count / 5u + (record_count % 5u != 0u);
+    size_t replacement_bytes = edits[i].record_bytes + packet_count * PO_WIRE_OVERHEAD_BYTES;
+    if (replacement_bytes > SIZE_MAX - required_frame_bytes)
+      return PO_ERR_RANGE;
+    required_frame_bytes += replacement_bytes;
+  }
+  *plan = (po35_speech_edit_plan_t){
+      .required_workspace_bytes = 0u,
+      .required_frame_bytes = required_frame_bytes,
+      .affected_slot_count = edit_count,
+      .failed_edit_index = SIZE_MAX,
+      .selected_slot_mask = selected_slots,
+      .failed_slot = UINT8_MAX,
+      .reason = PO35_SPEECH_EDIT_REASON_NONE,
+  };
+  return PO_OK;
+}
+
 po_status_t po35_settings_decode(const uint8_t *data, size_t len, po35_settings_t *out) {
   if (data == NULL || out == NULL)
     return PO_ERR_INVALID_ARG;
