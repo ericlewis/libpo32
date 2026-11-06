@@ -149,6 +149,11 @@ the original allocation for shorter audio and clears the unused tail to silence;
 longer audio adds whole 4,096-byte sample blocks. Existing nine-byte headers,
 trim/slice references and unrelated packets remain unchanged. Pool growth does
 not expand the audible trim or establish hardware memory capacity.
+Explicit `--range` edits run after sample replacements through
+`po33_sound_range_plan` and `po33_sound_range_rebuild`. They change only one
+header's raw start/end coordinates, validate against its resolved pool and
+retain the source selector and all other aliases. Endpoint inclusion remains
+unassigned; no time-to-range or automatic full-length conversion is inferred.
 
 `po35_encode_capture` selects or explicitly mixes speech WAV channels, calls
 the core analysis API, and replaces existing speech groups. Its 640-record

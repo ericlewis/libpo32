@@ -375,6 +375,58 @@ static void test_transaction_boundaries(void) {
   save_wav(other_path, 100, 1, 23438, 16, 0, 0, -.25f);
   run(9, argv, 0);
 }
+static void test_range_edits(void) {
+  char *grow[] = {"encode", input_path, output_path, "--range", "7",
+                  "0",      "6000",     "--sample",  "7",       wav_path};
+  char *alias[] = {"encode", input_path, output_path, "--range", "8", "123", "4000"};
+  char *duplicate[] = {"encode", input_path, output_path, "--range", "8",   "123",
+                       "4000",   "--range",  "8",         "0",       "2000"};
+  char *bad[] = {"encode", input_path, output_path, "--sample", "7",
+                 wav_path, "--range",  "8",         "0",        "8192"};
+  make_fixture(4096, 0, 0);
+  save_wav(wav_path, 5000, 1, 23438, 16, 0, 0, .25f);
+  run(10, grow, 1);
+  size_t collected = collect_pool(transmitted, transmitted_bytes, &result);
+  assert(collected == 8201);
+  assert(pool[0] == 0 && pool[1] == 0 && pool[2] == 0 && pool[3] == 0 &&
+         pool[4] == (6000u & 255u) && pool[5] == (6000u >> 8) && pool[6] == 0 && pool[7] == 0 &&
+         pool[8] == header[8]);
+  for (size_t index = 0u; index < 8192; ++index)
+    assert(pool[9 + index] == (index < 5000 ? po33_sample_encode(8192) : 0));
+  for (size_t index = 0u; index + 1u < result.count; ++index)
+    if (result.packets[index].tag_code == PO33_TAG_SOUND_SELECT &&
+        result.packets[index].payload[0] == 8)
+      assert(!memcmp(result.packets[index + 1].payload, header, sizeof(header)));
+
+  run(7, alias, 1);
+  {
+    uint8_t owner_before[4105];
+    collected = collect_pool(fixture, fixture_bytes, &original);
+    assert(collected == sizeof(owner_before));
+    memcpy(owner_before, pool, sizeof(owner_before));
+    collected = collect_pool(transmitted, transmitted_bytes, &result);
+    assert(collected == sizeof(owner_before));
+    assert(!memcmp(owner_before, pool, sizeof(owner_before)));
+    assert(result.count == original.count && transmitted_bytes == fixture_bytes);
+  }
+  for (size_t index = 0u; index + 1u < result.count; ++index)
+    if (result.packets[index].tag_code == PO33_TAG_SOUND_SELECT &&
+        result.packets[index].payload[0] == 8) {
+      const uint8_t *changed = result.packets[index + 1].payload;
+      assert(changed[0] == 123 && changed[1] == 0 && changed[2] == 0 && changed[3] == 0 &&
+             changed[4] == (4000u & 255u) && changed[5] == (4000u >> 8) && changed[6] == 0 &&
+             changed[7] == 0 && changed[8] == 7);
+    }
+  run(11, duplicate, 0);
+  run(10, bad, 0); /* later range fails after sample transaction succeeds */
+  alias[6] = "123";
+  run(7, alias, 0);
+  alias[6] = "122";
+  run(7, alias, 0);
+  alias[6] = "4294967296";
+  run(7, alias, 0);
+}
+
 int main(void) {
   int made = 0;
   for (unsigned i = 0; i < 100 && !made; ++i) {
@@ -393,6 +445,7 @@ int main(void) {
   test_rejections();
   test_multiple_and_existing_output();
   test_transaction_boundaries();
+  test_range_edits();
   puts("PO-33 flexible WAV edit tests passed");
   return 0;
 }

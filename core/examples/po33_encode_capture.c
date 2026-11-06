@@ -8,7 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-typedef enum { EDIT_SAMPLE, EDIT_PATTERN, EDIT_PATTERN_BYTE } edit_kind_t;
+typedef enum { EDIT_SAMPLE, EDIT_PATTERN, EDIT_PATTERN_BYTE, EDIT_RANGE } edit_kind_t;
 typedef enum { CHANNEL_UNSET, CHANNEL_LEFT, CHANNEL_RIGHT, CHANNEL_MIX } edit_channel_t;
 typedef struct {
   edit_kind_t kind;
@@ -19,6 +19,7 @@ typedef struct {
   uint8_t *samples;
   size_t sound_record_index;
   size_t sample_count, allocation;
+  uint32_t range_start_raw, range_end_raw;
 } edit_t;
 typedef struct {
   po32_packet_t *packets;
@@ -30,15 +31,18 @@ static void edit_usage(const char *program) {
   fprintf(stderr,
           "Usage: %s frame.bin output.wav [--sample INDEX audio.wav]\n"
           "       [--pattern INDEX pattern.bin] [--pattern-byte INDEX OFFSET VALUE]\n"
+          "       [--range INDEX START END]\n"
           "       [--rate 44100|48000|96000] [--channel left|right|mix]\n"
           "Indexes and offsets are zero-based; numeric values accept decimal or 0x hex.\n"
           "Samples: mono/stereo PCM16/24/32 or float32 WAV at 8000..192000 Hz.\n"
           "Stereo requires --channel. Audio is resampled to the native clock;\n"
           "23438 Hz is the native WAV alias. Short inputs are padded with silence;\n"
           "long inputs grow existing block-aligned pools in 4096-sample blocks.\n"
-          "Headers, trims and slice references stay unchanged: stored tails may\n"
+          "Sample replacements preserve headers and ranges unless --range is given; tails may\n"
           "extend past the original playback range. Device capacity is unverified.\n"
           "Pattern replacements must have the existing concatenated byte length.\n"
+          "Ranges use raw coordinates, START < END, both below the referenced allocation.\n"
+          "Range edits run after all sample edits; endpoint inclusion is unresolved.\n"
           "Default transfer rate: 48000 Hz. Output must not already exist.\n",
           program);
 }
@@ -100,6 +104,18 @@ static int edit_options(int argc, char **argv, edit_t *edits, size_t *count, uin
       edit.index = (unsigned)index;
       edit.path = argv[i + 2];
       i += 3;
+    } else if (!strcmp(argv[i], "--range")) {
+      if (i + 3 >= argc || !edit_number(argv[i + 1], 255, &index) ||
+          !edit_number(argv[i + 2], UINT32_MAX, &offset) ||
+          !edit_number(argv[i + 3], UINT32_MAX, &value)) {
+        fprintf(stderr, "Expected --range INDEX START END using raw uint32 coordinates.\n");
+        return 0;
+      }
+      edit.kind = EDIT_RANGE;
+      edit.index = (unsigned)index;
+      edit.range_start_raw = (uint32_t)offset;
+      edit.range_end_raw = (uint32_t)value;
+      i += 4;
     } else if (!strcmp(argv[i], "--pattern-byte")) {
       if (i + 3 >= argc || !edit_number(argv[i + 1], 255, &index) ||
           !edit_number(argv[i + 2], (unsigned long long)SIZE_MAX, &offset) ||
@@ -119,7 +135,8 @@ static int edit_options(int argc, char **argv, edit_t *edits, size_t *count, uin
     for (size_t j = 0; j < *count; j++) {
       const edit_t *previous = edits + j;
       if (previous->index != edit.index ||
-          (previous->kind == EDIT_SAMPLE) != (edit.kind == EDIT_SAMPLE))
+          (previous->kind == EDIT_SAMPLE) != (edit.kind == EDIT_SAMPLE) ||
+          (previous->kind == EDIT_RANGE) != (edit.kind == EDIT_RANGE))
         continue;
       if (previous->kind != EDIT_PATTERN_BYTE || edit.kind != EDIT_PATTERN_BYTE ||
           previous->offset == edit.offset) {
@@ -302,8 +319,9 @@ cleanup:
   return ok;
 }
 static int edit_apply(template_t *frame, edit_t *edit, edit_channel_t channel) {
-  uint16_t selector = edit->kind == EDIT_SAMPLE ? PO33_TAG_SOUND_SELECT : PO33_TAG_PATTERN_SELECT;
-  uint16_t data_tag = edit->kind == EDIT_SAMPLE ? PO33_TAG_SOUND_DATA : PO33_TAG_PATTERN_DATA;
+  int sound_edit = edit->kind == EDIT_SAMPLE || edit->kind == EDIT_RANGE;
+  uint16_t selector = sound_edit ? PO33_TAG_SOUND_SELECT : PO33_TAG_PATTERN_SELECT;
+  uint16_t data_tag = sound_edit ? PO33_TAG_SOUND_DATA : PO33_TAG_PATTERN_DATA;
   uint8_t *region = NULL, *file = NULL;
   size_t size = 0, replacement_size = 0;
   int ok = 0;
@@ -322,11 +340,15 @@ static int edit_apply(template_t *frame, edit_t *edit, edit_channel_t channel) {
       goto cleanup;
     }
     memcpy(region, file, size);
+  } else if (edit->kind == EDIT_RANGE) {
+    edit->sound_record_index = edit_sound_record_index(frame, edit->index);
+    if (edit->sound_record_index == SIZE_MAX)
+      goto cleanup;
   } else {
     if (!edit_sample(frame, edit, region, size, channel))
       goto cleanup;
   }
-  if (edit->kind != EDIT_SAMPLE)
+  if (!sound_edit)
     edit_replace_region(frame, selector, data_tag, edit->index, region);
   ok = 1;
 cleanup:
@@ -351,28 +373,49 @@ static int edit_rebuild(const template_t *frame, uint8_t *output, size_t capacit
 /* Each transaction replaces only the in-memory working frame. No output file
  * exists until every sample and pattern edit has succeeded. Record indices
  * stay stable because a transaction changes data packets, not sound records. */
-static int edit_sample_rebuild(uint8_t **frame, size_t *frame_bytes, edit_t *edit) {
-  po33_pool_edit_plan_t plan;
+static int edit_sound_rebuild(uint8_t **frame, size_t *frame_bytes, edit_t *edit) {
+  po33_pool_edit_plan_t sample_plan;
+  po33_sound_range_plan_t range_plan;
+  int range_edit = edit->kind == EDIT_RANGE;
+  po_status_t status;
+  size_t workspace_bytes, required_frame_bytes;
   uint8_t *workspace = NULL, *output = NULL;
   size_t output_bytes = 0;
   int ok = 0;
-  if (po33_pool_edit_plan(*frame, *frame_bytes, edit->sound_record_index, edit->samples,
-                          edit->sample_count, &plan) != PO_OK) {
-    fprintf(stderr, "Sound %u replacement rejected (pool reason %u).\n", edit->index,
-            (unsigned)plan.replacement.reason);
+  status = range_edit
+               ? po33_sound_range_plan(*frame, *frame_bytes, edit->sound_record_index,
+                                       edit->range_start_raw, edit->range_end_raw, &range_plan)
+               : po33_pool_edit_plan(*frame, *frame_bytes, edit->sound_record_index, edit->samples,
+                                     edit->sample_count, &sample_plan);
+  if (status != PO_OK) {
+    fprintf(stderr, "Sound %u %s rejected (reason %u).\n", edit->index,
+            range_edit ? "range" : "replacement",
+            range_edit ? (unsigned)range_plan.reason : (unsigned)sample_plan.replacement.reason);
     return 0;
   }
-  workspace = (uint8_t *)malloc(plan.required_workspace_bytes);
-  output = (uint8_t *)malloc(plan.required_frame_bytes);
-  if (!workspace || !output ||
-      po33_pool_edit_rebuild(*frame, *frame_bytes, edit->sound_record_index, edit->samples,
-                             edit->sample_count, &plan, workspace, plan.required_workspace_bytes,
-                             output, plan.required_frame_bytes, &output_bytes) != PO_OK)
+  workspace_bytes =
+      range_edit ? range_plan.required_workspace_bytes : sample_plan.required_workspace_bytes;
+  required_frame_bytes =
+      range_edit ? range_plan.required_frame_bytes : sample_plan.required_frame_bytes;
+  workspace = (uint8_t *)malloc(workspace_bytes);
+  output = (uint8_t *)malloc(required_frame_bytes);
+  if (!workspace || !output)
+    goto cleanup;
+  status = range_edit ? po33_sound_range_rebuild(*frame, *frame_bytes, edit->sound_record_index,
+                                                 edit->range_start_raw, edit->range_end_raw,
+                                                 &range_plan, workspace, workspace_bytes, output,
+                                                 required_frame_bytes, &output_bytes)
+                      : po33_pool_edit_rebuild(*frame, *frame_bytes, edit->sound_record_index,
+                                               edit->samples, edit->sample_count, &sample_plan,
+                                               workspace, workspace_bytes, output,
+                                               required_frame_bytes, &output_bytes);
+  if (status != PO_OK)
     goto cleanup;
   free(*frame);
   *frame = output;
   *frame_bytes = output_bytes;
-  edit->allocation = plan.replacement.required_allocation_bytes;
+  if (!range_edit)
+    edit->allocation = sample_plan.replacement.required_allocation_bytes;
   output = NULL;
   ok = 1;
 cleanup:
@@ -438,7 +481,10 @@ int main(int argc, char **argv) {
     goto cleanup;
   }
   for (size_t i = 0; i < edit_count; ++i)
-    if (edits[i].kind == EDIT_SAMPLE && !edit_sample_rebuild(&output, &output_length, edits + i))
+    if (edits[i].kind == EDIT_SAMPLE && !edit_sound_rebuild(&output, &output_length, edits + i))
+      goto cleanup;
+  for (size_t i = 0; i < edit_count; ++i)
+    if (edits[i].kind == EDIT_RANGE && !edit_sound_rebuild(&output, &output_length, edits + i))
       goto cleanup;
   if (po33_frame_parse(output, output_length, NULL, NULL, &result) != PO_OK || !result.done ||
       result.frame_bytes != output_length)
@@ -451,7 +497,8 @@ int main(int argc, char **argv) {
   printf("Encoded %zu packets with %zu edits at %u Hz.\n", result.packet_count, edit_count, rate);
   for (size_t i = 0; i < edit_count; ++i)
     if (edits[i].kind == EDIT_SAMPLE)
-      printf("Sound %u: %zu converted samples, %zu allocated; original metadata retained.\n",
+      printf("Sound %u: %zu converted samples, %zu allocated; metadata retained unless range "
+             "edited.\n",
              edits[i].index, edits[i].sample_count, edits[i].allocation);
   rc = 0;
 cleanup:

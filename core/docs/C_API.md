@@ -7,7 +7,7 @@ needs. Start with [installation](#install-and-link) and
 | API | Reference |
 | --- | --- |
 | PO-32 packets, mono modem and drum synthesis | [PO-32 C API](api/PO32.md) |
-| PO-33/133 records, PCM sample conversion and pool edits | [PO-33 C API](api/PO33.md) |
+| PO-33/133 records, PCM conversion, pool and raw range edits | [PO-33 C API](api/PO33.md) |
 | PO-35/137 records, speech analysis and rendering | [PO-35 C API](api/PO35.md) |
 | PO-33/35 frame parsing, builders and stereo modem | [Shared stereo APIs](api/STEREO.md) |
 
