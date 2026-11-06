@@ -485,9 +485,9 @@ static int speech_edit_rebuild_has_invalid_aliases(
     const po35_speech_edit_plan_t *plan, uint8_t *workspace, size_t workspace_bytes,
     uint8_t *out_frame, size_t out_capacity, size_t *out_frame_bytes) {
   const po35_speech_edit_range_t storage[] = {
-      {plan, sizeof(*plan)},
-      {workspace, workspace_bytes},
-      {out_frame, out_capacity},
+      {plan, plan == NULL ? 0u : sizeof(*plan)},
+      {workspace, workspace == NULL ? 0u : workspace_bytes},
+      {out_frame, out_frame == NULL ? 0u : out_capacity},
       {out_frame_bytes, sizeof(*out_frame_bytes)},
   };
   size_t edit_bytes;
