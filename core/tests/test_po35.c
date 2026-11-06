@@ -451,6 +451,17 @@ static void test_speech_edit_plan_group_failures(void) {
                              PO35_SPEECH_EDIT_REASON_UNKNOWN_SELECTED_GROUP_EXTENSION);
 
   assert(po35_builder_init(&builder, source, sizeof(source)) == PO_OK);
+  speech_plan_append_header(&builder, 2u, 1u);
+  speech_plan_append(&builder, PO35_TAG_SETTINGS, records, 1u);
+  speech_plan_finish(&builder, &source_len);
+  assert(po35_speech_edit_plan(source, source_len, &edit, 1u, &plan) == PO_ERR_PARSE);
+  assert_speech_plan_failure(&plan, 0u, 2u, PO35_SPEECH_EDIT_REASON_INCOMPLETE_GROUP);
+  source[source_len - 1u] ^= 1u;
+  assert(po35_speech_edit_plan(source, source_len, &edit, 1u, &plan) == PO_ERR_FRAME);
+  assert_speech_plan_neutral(&plan);
+  source[source_len - 1u] ^= 1u;
+
+  assert(po35_builder_init(&builder, source, sizeof(source)) == PO_OK);
   speech_plan_append(&builder, PO35_TAG_SPEECH_DATA, records, sizeof(records));
   speech_plan_finish(&builder, &source_len);
   assert(po35_speech_edit_plan(source, source_len, &edit, 1u, &plan) == PO_ERR_PARSE);
@@ -524,7 +535,7 @@ static void test_speech_edit_rebuild(void) {
       {5u, 20u, NULL, 0u},
   };
   po35_speech_edit_plan_t plan;
-  po35_speech_edit_plan_t stale_plan;
+  po35_speech_edit_plan_t mismatched_plan;
   po35_builder_t builder;
   speech_rebuild_packets_t source_packets;
   speech_rebuild_packets_t output_packets;
@@ -614,13 +625,38 @@ static void test_speech_edit_rebuild(void) {
   assert(po35_speech_edit_plan(source, source_len, edits, sizeof(edits) / sizeof(edits[0]),
                                &plan) == PO_OK);
 
-  stale_plan = plan;
-  ++stale_plan.required_frame_bytes;
+  replacement_a[0] ^= 0xffu;
   memset(output, 0xa5, sizeof(output));
   output_len = 99u;
   assert(po35_speech_edit_rebuild(source, source_len, edits, sizeof(edits) / sizeof(edits[0]),
-                                  &stale_plan, workspace, plan.required_workspace_bytes, output,
-                                  sizeof(output), &output_len) == PO_ERR_INVALID_ARG);
+                                  &plan, workspace, plan.required_workspace_bytes, output,
+                                  sizeof(output), &output_len) == PO_OK);
+  speech_rebuild_collect_frame(output, output_len, &output_packets);
+  {
+    int active_slot = -1;
+    int found_current_records = 0;
+    for (size_t i = 0; i < output_packets.count; ++i) {
+      const po_packet_t *packet = output_packets.packets + i;
+      if (packet->tag_code == PO35_TAG_SPEECH_HEADER)
+        active_slot = packet->payload[0];
+      else if (packet->tag_code == PO35_TAG_SPEECH_END)
+        active_slot = -1;
+      else if (packet->tag_code == PO35_TAG_SPEECH_DATA && active_slot == 2) {
+        assert(packet->payload[0] == replacement_a[0]);
+        found_current_records = 1;
+        break;
+      }
+    }
+    assert(found_current_records);
+  }
+
+  mismatched_plan = plan;
+  ++mismatched_plan.required_frame_bytes;
+  memset(output, 0xa5, sizeof(output));
+  output_len = 99u;
+  assert(po35_speech_edit_rebuild(source, source_len, edits, sizeof(edits) / sizeof(edits[0]),
+                                  &mismatched_plan, workspace, plan.required_workspace_bytes,
+                                  output, sizeof(output), &output_len) == PO_ERR_INVALID_ARG);
   assert(output_len == 0u);
   for (size_t i = 0; i < sizeof(output); ++i)
     assert(output[i] == 0xa5u);
@@ -640,6 +676,15 @@ static void test_speech_edit_rebuild(void) {
                                   &plan, workspace, plan.required_workspace_bytes, output,
                                   plan.required_frame_bytes - 1u,
                                   &output_len) == PO_ERR_BUFFER_TOO_SMALL);
+  assert(output_len == 0u);
+  for (size_t i = 0; i < sizeof(output); ++i)
+    assert(output[i] == 0xa5u);
+
+  memset(output, 0xa5, sizeof(output));
+  output_len = 99u;
+  assert(po35_speech_edit_rebuild(NULL, source_len, edits, sizeof(edits) / sizeof(edits[0]), &plan,
+                                  workspace, plan.required_workspace_bytes, output, sizeof(output),
+                                  &output_len) == PO_ERR_INVALID_ARG);
   assert(output_len == 0u);
   for (size_t i = 0; i < sizeof(output); ++i)
     assert(output[i] == 0xa5u);
