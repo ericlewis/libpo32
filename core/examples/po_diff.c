@@ -293,7 +293,8 @@ static int po_diff_build_po35_records(po_diff_frame_t *frame) {
         return 0;
     } else if (packet->tag_code == PO35_TAG_SPEECH_HEADER &&
                packet->payload_len == PO35_SPEECH_HEADER_BYTES) {
-      size_t expected = ((size_t)packet->payload[1] | ((size_t)packet->payload[2] << 8u)) *
+      /* DC32 stores its record count as the same BE16 used by the public header codec. */
+      size_t expected = (((size_t)packet->payload[1] << 8u) | (size_t)packet->payload[2]) *
                         PO35_SPEECH_RECORD_BYTES;
       size_t payload_bytes = 0;
       while (end < frame->packets.count &&
