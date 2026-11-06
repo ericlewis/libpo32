@@ -23,6 +23,7 @@ Use the [C API guide](../docs/C_API.md) for application integration and the
 | [`po32_decode_capture.c`](po32_decode_capture.c) | Decode a transfer WAV back to normalized frame bytes, per-packet payload dumps, and a compact `pattern_summary.txt` |
 | [`po33_decode_capture.c`](po33_decode_capture.c) | Decode PO-33/133 records and export sample WAVs |
 | [`po33_encode_capture.c`](po33_encode_capture.c) | Re-encode a PO-33/133 frame, with optional sample and pattern edits |
+| [`po33_pool_manifest.c`](po33_pool_manifest.c) | Describe PO-33/133 sample-pool ownership and resolved references without editing a frame |
 | [`po35_decode_capture.c`](po35_decode_capture.c) | Decode PO-35/137 records and render approximate speech previews |
 | [`po35_encode_capture.c`](po35_encode_capture.c) | Replace speech from PCM WAVs in a PO-35/137 frame and emit stereo modem audio |
 | [`po_inspect.c`](po_inspect.c) | Print a stable structural report for one complete PO-33 or PO-35 raw frame |
@@ -48,6 +49,7 @@ cmake --build build
 ./build/core/po_capture_doctor input.wav
 ./build/core/po_capture_doctor --json input.wav
 ./build/core/po_transfer_verify --family po33 decoded-po33/frame.bin readback.wav
+./build/core/po33_pool_manifest decoded-po33/frame.bin
 ./build/core/po35_transfer_manifest decoded-po35/frame.bin
 ```
 
@@ -63,6 +65,24 @@ do not scan captures, combine transfers, repair bytes, or reinterpret unknown
 payloads. `po_inspect` emits the stable one-line frame report. `po_diff` emits
 deterministic byte, packet, and record topology summaries; unrecognized tags
 and ungroupable records are labelled `raw` with their tag and byte counts.
+
+### PO-33 Pool Topology Manifest
+
+`po33_pool_manifest` reads one complete raw PO-33/133 frame and prints the
+detected sound records, owned pools and resolved source-selector references.
+Use it before a sample replacement to see when several records resolve to the
+same stored pool.
+
+```sh
+./build/core/po33_pool_manifest decoded-po33/frame.bin
+```
+
+Range endpoints, source selectors and frame spans are raw structural values.
+The command does not apply trims or slices, choose an edit target, infer
+audible playback, predict device capacity or modify the frame. A selector with
+no following `SOUND_DATA` packet has no topology record; a nine-byte
+header-only record is retained but does not own a pool. Exact software parsing
+does not establish hardware acceptance.
 
 ## Capture Input
 

@@ -14,7 +14,7 @@ Choose the kind of work first, then your device family.
 | Devices | WAV workflows | C API | Record layouts |
 | --- | --- | --- | --- |
 | PO-32 | [Examples and capture input](../examples/README.md#build) | [Packets, modem and drums](api/PO32.md) | [Preservation limits](formats/PO32.md) · [Protocol](PROTOCOL.md) |
-| PO-33 / PO-133 | [Samples and patterns](guides/PO33.md) | [Records and PCM conversion](api/PO33.md) | [Settings, patterns and samples](formats/PO33.md) |
+| PO-33 / PO-133 | [Samples and patterns](guides/PO33.md) · [pool topology](../examples/README.md#po-33-pool-topology-manifest) | [Records and PCM conversion](api/PO33.md) | [Settings, patterns and samples](formats/PO33.md) |
 | PO-35 / PO-137 | [Speech replacement and previews](guides/PO35.md) · [transfer shapes](../examples/README.md#po-35-transfer-shape-manifest) | [Records and speech audio](api/PO35.md) | [Tables, patterns and speech](formats/PO35.md) |
 
 The stereo families share [frame and modem APIs](api/STEREO.md). PO-33's
