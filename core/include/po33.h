@@ -27,6 +27,8 @@ extern "C" {
 #define PO33_FX_OCTAVE_UP       6u
 #define PO33_FX_BASELINE        15u /* Observed normal baseline; clearing behavior is unresolved. */
 
+#define PO33_POOL_ALLOCATION_BLOCK_BYTES 4096u
+
 /* Logical records may span multiple wire packets. Preserve unused chain
  * entries and uninterpreted bytes; no trim convention is inferred. */
 typedef struct po33_settings {
@@ -121,6 +123,48 @@ typedef struct po33_pool_reference {
   size_t sound_record_index;
 } po33_pool_reference_t;
 
+/* Why a requested owned-pool replacement cannot be planned safely. These
+ * reasons describe topology facts or allocation shape; they do not assign
+ * playback semantics to a raw range or establish device capacity. */
+typedef enum po33_pool_replacement_reason {
+  PO33_POOL_REPLACEMENT_REASON_NONE = 0,
+  PO33_POOL_REPLACEMENT_REASON_TARGET_RECORD_OUT_OF_RANGE = 1,
+  PO33_POOL_REPLACEMENT_REASON_TARGET_NOT_OWNED = 2,
+  PO33_POOL_REPLACEMENT_REASON_DUPLICATE_TARGET_SELECTOR = 3,
+  PO33_POOL_REPLACEMENT_REASON_AMBIGUOUS_SELECTOR = 4,
+  PO33_POOL_REPLACEMENT_REASON_UNKNOWN_TARGET_EXTENSION = 5,
+  PO33_POOL_REPLACEMENT_REASON_AMBIGUOUS_GROUP_BOUNDARY = 6,
+  PO33_POOL_REPLACEMENT_REASON_EXISTING_ALLOCATION_UNALIGNED = 7,
+  PO33_POOL_REPLACEMENT_REASON_REQUIRED_ALLOCATION_OVERFLOW = 8,
+  PO33_POOL_REPLACEMENT_REASON_COUNT_OVERFLOW = 9
+} po33_pool_replacement_reason_t;
+
+/* A read-only replacement readiness plan for one owned pool. requested,
+ * existing and required allocation sizes exclude the nine-byte sound header.
+ * required_allocation_bytes never shrinks an existing pool; growth rounds it
+ * up to PO33_POOL_ALLOCATION_BLOCK_BYTES. reference_count counts every record
+ * whose resolved source points at target_pool_index, including the owner when
+ * it resolves to itself. affected_sound_record_count counts that owner once
+ * plus every other resolved reference. growth_structurally_eligible reports
+ * whether this topology could append whole blocks, even when growth is not
+ * needed for the current request.
+ * On a rejected plan, available facts remain populated and reason explains the
+ * first unsafe condition; target_pool_index is SIZE_MAX when no owned target is
+ * available. */
+typedef struct po33_pool_replacement_plan {
+  size_t target_pool_index;
+  size_t requested_sample_bytes;
+  size_t existing_allocation_bytes;
+  size_t required_allocation_bytes;
+  size_t required_growth_bytes;
+  size_t reference_count;
+  size_t affected_sound_record_count;
+  int existing_allocation_fits;
+  int growth_required;
+  int growth_structurally_eligible;
+  po33_pool_replacement_reason_t reason;
+} po33_pool_replacement_plan_t;
+
 /* Split/combine control_raw: low note/key nibble, high timing nibble.
  * Encode requires both fields in 0..15; invalid input leaves output untouched.
  * Input/output must not overlap. */
@@ -203,6 +247,25 @@ po_status_t po33_pool_topology_build(const uint8_t *frame, size_t frame_len,
                                      size_t sound_record_capacity, po33_pool_t *pools,
                                      size_t pool_capacity, po33_pool_reference_t *references,
                                      size_t reference_capacity);
+
+/* Plan a replacement against caller-owned topology arrays returned together by
+ * po33_pool_topology_build(). target_sound_record_index identifies the pool's
+ * owning record, not a raw source selector. requested_sample_bytes is encoded
+ * sample storage excluding the nine-byte header. No source frame, header,
+ * range, reference or allocation is changed.
+ *
+ * sound_records and pools may be NULL only with their matching zero count.
+ * plan is required and must not overlap either input array. Target range and
+ * ownership failures return PO_ERR_RANGE; unsafe or internally inconsistent
+ * topology returns PO_ERR_PARSE. A valid plan output is cleared for invalid
+ * arguments, while plan.reason describes every target-specific rejection.
+ * PO_OK means the existing allocation fits, or required growth is structurally
+ * eligible; it does not establish an output-frame capacity or device support. */
+po_status_t po33_pool_replacement_plan(const po33_sound_record_t *sound_records,
+                                       size_t sound_record_count, const po33_pool_t *pools,
+                                       size_t pool_count, size_t target_sound_record_index,
+                                       size_t requested_sample_bytes,
+                                       po33_pool_replacement_plan_t *plan);
 
 /* Expand one signed-order mu-law sample byte to linear PCM16. Parse framing
  * and the sound header first; pool padding can be decoded, while applying
