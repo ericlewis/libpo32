@@ -157,31 +157,15 @@ static void test_speech_edit_api_surface(void) {
       records,
       sizeof(records),
   };
-  const po35_speech_edit_t duplicate_slots[] = {
-      {0u, 80u, records, sizeof(records)},
-      {0u, 40u, records, sizeof(records)},
-  };
-  const po35_speech_edit_t partial_record = {1u, 80u, records, sizeof(records) - 1u};
-  const po35_speech_edit_t too_many_records = {
-      2u,
-      80u,
-      records,
-      ((size_t)UINT16_MAX + 1u) * PO35_SPEECH_RECORD_BYTES,
-  };
-  const po35_speech_edit_t bad_slot = {PO35_SPEECH_SLOT_COUNT, 80u, records, sizeof(records)};
   const po35_speech_edit_t empty = {
       0u,
       20u,
       NULL,
       0u,
   };
-  uint8_t workspace[1] = {0};
-  uint8_t source[PO35_PREAMBLE_BYTES + PO_FINAL_TAIL_BYTES] = {0};
-  uint8_t output[sizeof(source)] = {0};
   po35_speech_edit_plan_t plan = {
-      1u, sizeof(source), 1u, SIZE_MAX, 1u, UINT8_MAX, PO35_SPEECH_EDIT_REASON_NONE,
+      1u, 1u, 1u, SIZE_MAX, 1u, UINT8_MAX, PO35_SPEECH_EDIT_REASON_NONE,
   };
-  size_t out_frame_bytes = 0;
 
   assert(sizeof(edit.slot) == sizeof(uint8_t));
   assert(sizeof(edit.records_per_second) == sizeof(uint8_t));
@@ -226,14 +210,6 @@ static void test_speech_edit_api_surface(void) {
   assert(PO35_SPEECH_EDIT_REASON_ABSENT_SLOT == 5);
   assert(PO35_SPEECH_EDIT_REASON_INCOMPLETE_GROUP == 6);
   assert(PO35_SPEECH_EDIT_REASON_UNKNOWN_SELECTED_GROUP_EXTENSION == 7);
-
-  /* The planner has executable coverage below. Rebuild remains declaration-only
-   * in Task 2, so retain unevaluated type checks for its complete ABI. */
-  (void)sizeof(po35_speech_edit_rebuild(source, sizeof(source), &edit, 1u, &plan, workspace,
-                                        sizeof(workspace), output, sizeof(output) - 1u,
-                                        &out_frame_bytes));
-  (void)sizeof(
-      po35_speech_edit_rebuild(source, sizeof(source), &edit, 1u, NULL, NULL, 0u, NULL, 0u, NULL));
 }
 
 static void speech_plan_append(po35_builder_t *builder, uint16_t tag, const uint8_t *payload,
@@ -322,7 +298,7 @@ static void test_speech_edit_plan_measurement(void) {
   memset(&plan, 0xa5, sizeof(plan));
   assert(po35_speech_edit_plan(source, source_len, edits, sizeof(edits) / sizeof(edits[0]),
                                &plan) == PO_OK);
-  assert(plan.required_workspace_bytes == 0u);
+  assert(plan.required_workspace_bytes == plan.required_frame_bytes);
   /* Remove split source data (54 + 191 wire bytes), then add 6- and
    * 2-record replacements (274 + 93 wire bytes). */
   assert(plan.required_frame_bytes == source_len + 122u);
@@ -332,7 +308,7 @@ static void test_speech_edit_plan_measurement(void) {
   assert(plan.failed_slot == UINT8_MAX);
   assert(plan.reason == PO35_SPEECH_EDIT_REASON_NONE);
   assert(po35_speech_edit_plan(source, source_len, NULL, 0u, &plan) == PO_OK);
-  assert(plan.required_workspace_bytes == 0u);
+  assert(plan.required_workspace_bytes == source_len);
   assert(plan.required_frame_bytes == source_len);
   assert(plan.affected_slot_count == 0u);
   assert(plan.selected_slot_mask == 0u);
@@ -369,7 +345,7 @@ static void test_speech_edit_plan_descriptor_failures(void) {
   edit.records = NULL;
   edit.record_bytes = 0u;
   assert(po35_speech_edit_plan(source, source_len, &edit, 1u, &plan) == PO_OK);
-  assert(plan.required_workspace_bytes == 0u);
+  assert(plan.required_workspace_bytes == source_len);
   assert(plan.required_frame_bytes == source_len);
   assert(plan.affected_slot_count == 1u);
   assert(plan.selected_slot_mask == (uint16_t)(1u << 2));
@@ -497,6 +473,202 @@ static void test_speech_edit_plan_group_failures(void) {
   speech_plan_finish(&builder, &source_len);
   assert(po35_speech_edit_plan(source, source_len, &edit, 1u, &plan) == PO_ERR_PARSE);
   assert_speech_plan_neutral(&plan);
+}
+
+typedef struct speech_rebuild_packets {
+  po_packet_t packets[64];
+  size_t count;
+} speech_rebuild_packets_t;
+
+static int speech_rebuild_collect_packet(const po_packet_t *packet, void *user) {
+  speech_rebuild_packets_t *packets = (speech_rebuild_packets_t *)user;
+  assert(packets->count < sizeof(packets->packets) / sizeof(packets->packets[0]));
+  packets->packets[packets->count++] = *packet;
+  return 0;
+}
+
+static void speech_rebuild_collect_frame(const uint8_t *frame, size_t frame_len,
+                                         speech_rebuild_packets_t *packets) {
+  po35_decode_result_t result;
+  po_status_t status;
+  *packets = (speech_rebuild_packets_t){0};
+  status = po35_frame_parse(frame, frame_len, speech_rebuild_collect_packet, packets, &result);
+  assert(status == PO_OK);
+  assert(result.done && !result.stopped && result.frame_bytes == frame_len);
+}
+
+static const po_packet_t *speech_rebuild_find_header(const speech_rebuild_packets_t *packets,
+                                                     uint8_t slot) {
+  for (size_t i = 0; i < packets->count; ++i)
+    if (packets->packets[i].tag_code == PO35_TAG_SPEECH_HEADER &&
+        packets->packets[i].payload[0] == slot)
+      return packets->packets + i;
+  return NULL;
+}
+
+static void test_speech_edit_rebuild(void) {
+  uint8_t source[PO35_PREAMBLE_BYTES + 4096];
+  uint8_t malformed[sizeof(source)];
+  uint8_t source_before[sizeof(source)];
+  uint8_t source_records[3 * PO35_SPEECH_RECORD_BYTES];
+  uint8_t replacement_a[6 * PO35_SPEECH_RECORD_BYTES];
+  uint8_t replacement_b[PO35_SPEECH_RECORD_BYTES];
+  uint8_t workspace[PO35_PREAMBLE_BYTES + 4096];
+  uint8_t output[PO35_PREAMBLE_BYTES + 4096];
+  uint8_t settings[PO35_SETTINGS_BASE_BYTES] = {0};
+  uint8_t raw[] = {0x12u, 0x34u};
+  const size_t split[] = {13u, 31u};
+  const size_t whole[] = {PO35_SPEECH_RECORD_BYTES};
+  const po35_speech_edit_t edits[] = {
+      {2u, 80u, replacement_a, sizeof(replacement_a)},
+      {5u, 20u, NULL, 0u},
+  };
+  po35_speech_edit_plan_t plan;
+  po35_speech_edit_plan_t stale_plan;
+  po35_builder_t builder;
+  speech_rebuild_packets_t source_packets;
+  speech_rebuild_packets_t output_packets;
+  const po_packet_t *source_header;
+  const po_packet_t *output_header;
+  size_t source_len;
+  size_t output_len = 99u;
+
+  for (size_t i = 0; i < sizeof(source_records); ++i)
+    source_records[i] = (uint8_t)(0x10u + i);
+  for (size_t i = 0; i < sizeof(replacement_a); ++i)
+    replacement_a[i] = (uint8_t)(0xa0u + i);
+  for (size_t i = 0; i < sizeof(replacement_b); ++i)
+    replacement_b[i] = (uint8_t)(0x50u + i);
+  assert(po35_builder_init(&builder, source, sizeof(source)) == PO_OK);
+  speech_plan_append(&builder, PO35_TAG_SETTINGS, settings, sizeof(settings));
+  speech_plan_append(&builder, 0x4321u, raw, sizeof(raw));
+  speech_plan_append_group(&builder, 2u, 1u, source_records, split,
+                           sizeof(split) / sizeof(split[0]), 0);
+  speech_plan_append_group(&builder, 5u, 1u, source_records + PO35_SPEECH_RECORD_BYTES, whole,
+                           sizeof(whole) / sizeof(whole[0]), 0);
+  speech_plan_append_group(&builder, 7u, 1u, source_records + 2u * PO35_SPEECH_RECORD_BYTES, whole,
+                           sizeof(whole) / sizeof(whole[0]), 1);
+  speech_plan_finish(&builder, &source_len);
+
+  assert(po35_speech_edit_plan(source, source_len, edits, sizeof(edits) / sizeof(edits[0]),
+                               &plan) == PO_OK);
+  assert(plan.required_workspace_bytes == plan.required_frame_bytes);
+  assert(plan.required_frame_bytes <= sizeof(workspace));
+  speech_rebuild_collect_frame(source, source_len, &source_packets);
+  source_header = speech_rebuild_find_header(&source_packets, 2u);
+  assert(source_header != NULL);
+
+  memset(output, 0xa5, sizeof(output));
+  assert(po35_speech_edit_rebuild(source, source_len, edits, sizeof(edits) / sizeof(edits[0]),
+                                  &plan, workspace, plan.required_workspace_bytes, output,
+                                  sizeof(output), &output_len) == PO_OK);
+  assert(output_len == plan.required_frame_bytes);
+  speech_rebuild_collect_frame(output, output_len, &output_packets);
+  output_header = speech_rebuild_find_header(&output_packets, 2u);
+  assert(output_header != NULL && output_header->payload_len == PO35_SPEECH_HEADER_BYTES);
+  assert(output_header->payload[1] == 0u && output_header->payload[2] == 6u &&
+         output_header->payload[3] == 80u &&
+         memcmp(output_header->payload + 4u, source_header->payload + 4u, 5u) == 0);
+  output_header = speech_rebuild_find_header(&output_packets, 5u);
+  assert(output_header != NULL && output_header->payload[1] == 0u &&
+         output_header->payload[2] == 0u && output_header->payload[3] == 20u);
+  assert(speech_rebuild_find_header(&output_packets, 7u) != NULL);
+
+  {
+    size_t slot2_data_packets = 0u;
+    size_t slot2_data_bytes = 0u;
+    size_t slot5_data_packets = 0u;
+    int active_slot = -1;
+    int found_raw = 0;
+    int found_extension = 0;
+    for (size_t i = 0; i < output_packets.count; ++i) {
+      const po_packet_t *packet = output_packets.packets + i;
+      if (packet->tag_code == PO35_TAG_SPEECH_HEADER)
+        active_slot = packet->payload[0];
+      else if (packet->tag_code == PO35_TAG_SPEECH_END)
+        active_slot = -1;
+      else if (packet->tag_code == PO35_TAG_SPEECH_DATA && active_slot == 2) {
+        ++slot2_data_packets;
+        slot2_data_bytes += packet->payload_len;
+      } else if (packet->tag_code == PO35_TAG_SPEECH_DATA && active_slot == 5) {
+        ++slot5_data_packets;
+      } else if (packet->tag_code == 0x4321u) {
+        found_raw =
+            packet->payload_len == sizeof(raw) && !memcmp(packet->payload, raw, sizeof(raw));
+      } else if (packet->tag_code == 0x5678u && active_slot == 7) {
+        found_extension = 1;
+      }
+    }
+    assert(slot2_data_packets == 2u && slot2_data_bytes == sizeof(replacement_a));
+    assert(slot5_data_packets == 0u && found_raw && found_extension);
+  }
+
+  assert(po35_speech_edit_plan(source, source_len, NULL, 0u, &plan) == PO_OK);
+  memset(output, 0xa5, sizeof(output));
+  output_len = 99u;
+  assert(po35_speech_edit_rebuild(source, source_len, NULL, 0u, &plan, workspace,
+                                  plan.required_workspace_bytes, output, sizeof(output),
+                                  &output_len) == PO_OK);
+  assert(output_len == source_len && memcmp(output, source, source_len) == 0);
+
+  assert(po35_speech_edit_plan(source, source_len, edits, sizeof(edits) / sizeof(edits[0]),
+                               &plan) == PO_OK);
+
+  stale_plan = plan;
+  ++stale_plan.required_frame_bytes;
+  memset(output, 0xa5, sizeof(output));
+  output_len = 99u;
+  assert(po35_speech_edit_rebuild(source, source_len, edits, sizeof(edits) / sizeof(edits[0]),
+                                  &stale_plan, workspace, plan.required_workspace_bytes, output,
+                                  sizeof(output), &output_len) == PO_ERR_INVALID_ARG);
+  assert(output_len == 0u);
+  for (size_t i = 0; i < sizeof(output); ++i)
+    assert(output[i] == 0xa5u);
+
+  memset(output, 0xa5, sizeof(output));
+  output_len = 99u;
+  assert(po35_speech_edit_rebuild(source, source_len, edits, sizeof(edits) / sizeof(edits[0]),
+                                  &plan, workspace, plan.required_workspace_bytes - 1u, output,
+                                  sizeof(output), &output_len) == PO_ERR_BUFFER_TOO_SMALL);
+  assert(output_len == 0u);
+  for (size_t i = 0; i < sizeof(output); ++i)
+    assert(output[i] == 0xa5u);
+
+  memset(output, 0xa5, sizeof(output));
+  output_len = 99u;
+  assert(po35_speech_edit_rebuild(source, source_len, edits, sizeof(edits) / sizeof(edits[0]),
+                                  &plan, workspace, plan.required_workspace_bytes, output,
+                                  plan.required_frame_bytes - 1u,
+                                  &output_len) == PO_ERR_BUFFER_TOO_SMALL);
+  assert(output_len == 0u);
+  for (size_t i = 0; i < sizeof(output); ++i)
+    assert(output[i] == 0xa5u);
+
+  memcpy(source_before, source, sizeof(source));
+  output_len = 99u;
+  assert(po35_speech_edit_rebuild(source, source_len, edits, sizeof(edits) / sizeof(edits[0]),
+                                  &plan, workspace, plan.required_workspace_bytes, source,
+                                  sizeof(source), &output_len) == PO_ERR_INVALID_ARG);
+  assert(output_len == 99u && memcmp(source, source_before, sizeof(source)) == 0);
+
+  output_len = 99u;
+  assert(po35_speech_edit_rebuild(source, source_len, edits, sizeof(edits) / sizeof(edits[0]),
+                                  &plan, workspace, plan.required_workspace_bytes, workspace,
+                                  sizeof(workspace), &output_len) == PO_ERR_INVALID_ARG);
+  assert(output_len == 99u);
+
+  memcpy(malformed, source, sizeof(malformed));
+  ++malformed[0];
+  memset(output, 0xa5, sizeof(output));
+  output_len = 99u;
+  assert(po35_speech_edit_rebuild(malformed, source_len, edits, sizeof(edits) / sizeof(edits[0]),
+                                  &plan, workspace, plan.required_workspace_bytes, output,
+                                  sizeof(output), &output_len) == PO_ERR_INVALID_ARG);
+  assert(output_len == 0u);
+  for (size_t i = 0; i < sizeof(output); ++i)
+    assert(output[i] == 0xa5u);
+
+  assert(replacement_b[0] == 0x50u);
 }
 
 static const uint8_t table_7be7_bytes[][9] = {
@@ -713,6 +885,7 @@ int main(void) {
   test_speech_edit_plan_measurement();
   test_speech_edit_plan_descriptor_failures();
   test_speech_edit_plan_group_failures();
+  test_speech_edit_rebuild();
   test_indexed_table_golden_records();
   test_indexed_table_byte_values();
   test_indexed_table_edit_locality();
