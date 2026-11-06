@@ -1132,6 +1132,19 @@ static void test_capacity_accounting(void) {
   assert(po33_capacity_measure(f.frame, f.length, &report) == PO_ERR_PARSE);
   {
     po33_builder_t builder;
+    uint8_t slot = 1u, incomplete[PO33_SOUND_HEADER_BYTES - 1u] = {0};
+    assert(po33_builder_init(&builder, f.frame, sizeof(f.frame)) == PO_OK);
+    pool_edit_append_sound(&builder, 0u, 0u, 4096u, 1, 1);
+    pool_edit_append(&builder, PO33_TAG_SOUND_SELECT, &slot, 1u);
+    pool_edit_append(&builder, PO33_TAG_SOUND_DATA, incomplete, sizeof(incomplete));
+    assert(po33_builder_finish(&builder, &f.length) == PO_OK);
+    before = report;
+    /* An earlier unknown extension must not mask the later truncated header. */
+    assert(po33_capacity_measure(f.frame, f.length, &report) == PO_ERR_FRAME);
+    assert(!memcmp(&report, &before, sizeof(report)));
+  }
+  {
+    po33_builder_t builder;
     assert(po33_builder_init(&builder, f.frame, sizeof(f.frame)) == PO_OK);
     assert(po33_builder_finish(&builder, &f.length) == PO_OK);
     assert(po33_capacity_measure(f.frame, f.length, &report) == PO_OK);
