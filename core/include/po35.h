@@ -100,6 +100,50 @@ typedef struct po35_speech_record {
   int8_t high_lar_raw[30];
 } po35_speech_record_t;
 
+/* One replacement for a complete speech slot. records names already encoded,
+ * contiguous 44-byte speech records; it is borrowed and is never decoded as a
+ * C struct overlay. record_bytes may be zero, otherwise it must be a multiple
+ * of PO35_SPEECH_RECORD_BYTES. records may be NULL only when record_bytes is
+ * zero. records_per_second is written verbatim to the selected header's rate
+ * byte; this API does not normalize or infer a rate. */
+typedef struct po35_speech_edit {
+  uint8_t slot;
+  uint8_t records_per_second;
+  const uint8_t *records;
+  size_t record_bytes;
+} po35_speech_edit_t;
+
+/* Why a requested edit cannot produce a safe transaction plan. These reasons
+ * describe an edit or its selected source group; framing failure remains
+ * PO_ERR_FRAME and invalid pointers or aliases remain PO_ERR_INVALID_ARG. */
+typedef enum po35_speech_edit_reason {
+  PO35_SPEECH_EDIT_REASON_NONE = 0,
+  PO35_SPEECH_EDIT_REASON_DUPLICATE_SLOT = 1,
+  PO35_SPEECH_EDIT_REASON_SLOT_OUT_OF_RANGE = 2,
+  PO35_SPEECH_EDIT_REASON_INVALID_RECORD_SIZE = 3,
+  PO35_SPEECH_EDIT_REASON_INVALID_RECORD_COUNT = 4,
+  PO35_SPEECH_EDIT_REASON_ABSENT_SLOT = 5,
+  PO35_SPEECH_EDIT_REASON_INCOMPLETE_GROUP = 6,
+  PO35_SPEECH_EDIT_REASON_UNKNOWN_SELECTED_GROUP_EXTENSION = 7
+} po35_speech_edit_reason_t;
+
+/* A read-only transaction plan. On success, selected_slot_mask has one bit for
+ * each selected slot (bit 0 is slot 0), affected_slot_count is its population,
+ * capacities are exact, reason is NONE, failed_edit_index is SIZE_MAX and
+ * failed_slot is UINT8_MAX. On an edit-specific RANGE or PARSE failure, all
+ * capacities and selected fields are zero while reason, failed_edit_index and
+ * failed_slot identify the rejected edit. A plan failure with no rejected edit
+ * has zero capacities and selected fields, NONE, SIZE_MAX and UINT8_MAX. */
+typedef struct po35_speech_edit_plan {
+  size_t required_workspace_bytes;
+  size_t required_frame_bytes;
+  size_t affected_slot_count;
+  size_t failed_edit_index;
+  uint16_t selected_slot_mask;
+  uint8_t failed_slot;
+  po35_speech_edit_reason_t reason;
+} po35_speech_edit_plan_t;
+
 typedef struct po35_speech_controls {
   uint8_t parameters[4]; /* Same four-byte order as per-step speech parameters. */
   uint8_t state_raw[4];
@@ -150,6 +194,45 @@ po_status_t po35_speech_header_encode(const po35_speech_header_t *header, uint8_
 po_status_t po35_speech_record_decode(const uint8_t *data, size_t len, po35_speech_record_t *out);
 po_status_t po35_speech_record_encode(const po35_speech_record_t *record, uint8_t *out,
                                       size_t capacity);
+
+/* Reserve the transactional speech-replacement ABI. The implementation is
+ * added in the subsequent measurement/rebuild tasks; callers of this staged
+ * header must not invoke these declarations until the library links them.
+ *
+ * Both functions borrow frame, edits and every edit's record storage for the
+ * call. Those read-only inputs may overlap each other. A plan output, plan
+ * input, workspace, output frame and output-length storage must be disjoint
+ * from each other and from every borrowed input. Prohibited aliases are
+ * PO_ERR_INVALID_ARG; output guarantees do not apply to invalid aliases.
+ * workspace contents are unspecified after a call.
+ *
+ * plan validates a complete source frame and all requested edits without
+ * writing a frame. edits may be NULL only when edit_count is zero. plan is
+ * required. A nonempty edit body must be divisible by PO35_SPEECH_RECORD_BYTES
+ * and record_bytes / PO35_SPEECH_RECORD_BYTES must not exceed UINT16_MAX;
+ * records may be NULL only for a zero-byte body. PO_ERR_RANGE reports a
+ * duplicate/out-of-range slot or invalid body through plan.reason. PO_ERR_PARSE
+ * reports an absent slot, incomplete selected group or selected-group unknown
+ * extension through plan.reason. PO_ERR_FRAME reports invalid source framing.
+ * For a non-NULL, nonoverlapping plan output, every other failure returns the
+ * no-plan state described above.
+ *
+ * rebuild consumes a successful matching plan and revalidates its inputs. A
+ * stale, mismatched or failed plan is PO_ERR_INVALID_ARG. workspace may be
+ * NULL only when plan.required_workspace_bytes is zero. out_frame and
+ * out_frame_bytes are always required. PO_ERR_BUFFER_TOO_SMALL reports either
+ * insufficient workspace or output capacity. For valid, nonoverlapping output
+ * arguments, every failure leaves out_frame untouched and sets
+ * *out_frame_bytes to zero. */
+po_status_t po35_speech_edit_plan(const uint8_t *frame, size_t frame_len,
+                                  const po35_speech_edit_t *edits, size_t edit_count,
+                                  po35_speech_edit_plan_t *plan);
+po_status_t po35_speech_edit_rebuild(const uint8_t *frame, size_t frame_len,
+                                     const po35_speech_edit_t *edits, size_t edit_count,
+                                     const po35_speech_edit_plan_t *plan, uint8_t *workspace,
+                                     size_t workspace_bytes, uint8_t *out_frame,
+                                     size_t out_capacity, size_t *out_frame_bytes);
+
 po_status_t po35_settings_decode(const uint8_t *data, size_t len, po35_settings_t *out);
 /* chain_count may be 0..PO35_CHAIN_MAX_COUNT. Larger values are PO_ERR_RANGE.
  * This 99-entry record capacity does not establish device support above the
