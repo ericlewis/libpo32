@@ -1036,14 +1036,13 @@ static int pool_edit_plan_matches(const po33_pool_edit_plan_t *left,
          pool_edit_replacement_matches(&left->replacement, &right->replacement);
 }
 
-static int pool_edit_rebuild_has_invalid_aliases(const uint8_t *frame, size_t frame_len,
-                                                 const uint8_t *samples, size_t sample_bytes,
-                                                 const po33_pool_edit_plan_t *plan,
-                                                 uint8_t *workspace, size_t workspace_bytes,
-                                                 uint8_t *out_frame, size_t out_capacity,
-                                                 size_t *out_frame_bytes) {
+static int edit_rebuild_has_invalid_aliases(const uint8_t *frame, size_t frame_len,
+                                            const uint8_t *samples, size_t sample_bytes,
+                                            const void *plan, size_t plan_bytes, uint8_t *workspace,
+                                            size_t workspace_bytes, uint8_t *out_frame,
+                                            size_t out_capacity, size_t *out_frame_bytes) {
   const po33_pool_edit_range_t storage[] = {
-      {plan, plan == NULL ? 0u : sizeof(*plan)},
+      {plan, plan == NULL ? 0u : plan_bytes},
       {workspace, workspace == NULL ? 0u : workspace_bytes},
       {out_frame, out_frame == NULL ? 0u : out_capacity},
       {out_frame_bytes, sizeof(*out_frame_bytes)},
@@ -1061,6 +1060,17 @@ static int pool_edit_rebuild_has_invalid_aliases(const uint8_t *frame, size_t fr
       return 1;
   }
   return 0;
+}
+
+static int pool_edit_rebuild_has_invalid_aliases(const uint8_t *frame, size_t frame_len,
+                                                 const uint8_t *samples, size_t sample_bytes,
+                                                 const po33_pool_edit_plan_t *plan,
+                                                 uint8_t *workspace, size_t workspace_bytes,
+                                                 uint8_t *out_frame, size_t out_capacity,
+                                                 size_t *out_frame_bytes) {
+  return edit_rebuild_has_invalid_aliases(frame, frame_len, samples, sample_bytes, plan,
+                                          sizeof(*plan), workspace, workspace_bytes, out_frame,
+                                          out_capacity, out_frame_bytes);
 }
 
 static int pool_edit_rebuild_can_clear_output_length(const uint8_t *frame, size_t frame_len,
@@ -1214,6 +1224,176 @@ po_status_t po33_pool_edit_rebuild(const uint8_t *frame, size_t frame_len,
       !rebuild.target_finished ||
       rebuild.target_logical_bytes !=
           PO33_SOUND_HEADER_BYTES + expected.replacement.existing_allocation_bytes)
+    return PO_ERR_FRAME;
+  status = po33_builder_finish(&builder, &frame_bytes);
+  if (status != PO_OK)
+    return status;
+  if (frame_bytes != expected.required_frame_bytes)
+    return PO_ERR_FRAME;
+  pool_edit_copy_bytes(out_frame, workspace, frame_bytes);
+  *out_frame_bytes = frame_bytes;
+  return PO_OK;
+}
+
+typedef struct po33_range_source {
+  uint8_t selector;
+  size_t allocation_bytes;
+} po33_range_source_t;
+
+static po_status_t range_measure_source(const po33_topology_observed_record_t *record, void *user) {
+  po33_range_source_t *source = (po33_range_source_t *)user;
+  if (record->selector == source->selector && record->data_bytes > PO33_SOUND_HEADER_BYTES)
+    source->allocation_bytes = record->data_bytes - PO33_SOUND_HEADER_BYTES;
+  return PO_OK;
+}
+
+static void range_plan_clear(po33_sound_range_plan_t *plan) {
+  *plan = (po33_sound_range_plan_t){
+      .target_sound_record_index = SIZE_MAX,
+      .referenced_pool_index = SIZE_MAX,
+      .target_selector = UINT8_MAX,
+      .source_selector = UINT8_MAX,
+  };
+}
+
+po_status_t po33_sound_range_plan(const uint8_t *frame, size_t frame_len,
+                                  size_t target_sound_record_index, uint32_t start_raw,
+                                  uint32_t end_raw, po33_sound_range_plan_t *plan) {
+  po33_pool_edit_measure_t measurement;
+  po33_range_source_t source;
+  po_status_t status;
+  if (plan == NULL)
+    return PO_ERR_INVALID_ARG;
+  if (frame != NULL && po33_ranges_overlap(plan, sizeof(*plan), frame, frame_len))
+    return PO_ERR_INVALID_ARG;
+  range_plan_clear(plan);
+  if (frame == NULL)
+    return PO_ERR_INVALID_ARG;
+  pool_edit_measure_init(&measurement, target_sound_record_index);
+  status = topology_parse_exact_records(frame, frame_len, pool_edit_measure_record, &measurement);
+  if (status != PO_OK)
+    return status;
+  if (!measurement.target_found) {
+    plan->reason = PO33_SOUND_RANGE_REASON_TARGET_OUT_OF_RANGE;
+    return PO_ERR_RANGE;
+  }
+  if (measurement.selector_count[measurement.target.selector] > 1u) {
+    plan->reason = PO33_SOUND_RANGE_REASON_DUPLICATE_TARGET;
+    return PO_ERR_PARSE;
+  }
+  if (measurement.target.flags & PO33_SOUND_RECORD_FLAG_UNKNOWN_EXTENSION) {
+    plan->reason = PO33_SOUND_RANGE_REASON_UNKNOWN_TARGET_EXTENSION;
+    return PO_ERR_PARSE;
+  }
+  source = (po33_range_source_t){.selector = measurement.target.header.source_selector};
+  if (measurement.owner_count[source.selector] != 1u) {
+    plan->reason = measurement.owner_count[source.selector] == 0u
+                       ? PO33_SOUND_RANGE_REASON_SOURCE_UNRESOLVED
+                       : PO33_SOUND_RANGE_REASON_SOURCE_AMBIGUOUS;
+    return PO_ERR_PARSE;
+  }
+  status = topology_parse_exact_records(frame, frame_len, range_measure_source, &source);
+  if (status != PO_OK)
+    return status;
+  if (start_raw >= end_raw || (uintmax_t)end_raw >= source.allocation_bytes) {
+    plan->reason = PO33_SOUND_RANGE_REASON_INVALID_RANGE;
+    return PO_ERR_RANGE;
+  }
+  *plan = (po33_sound_range_plan_t){
+      .required_workspace_bytes = frame_len,
+      .required_frame_bytes = frame_len,
+      .target_sound_record_index = target_sound_record_index,
+      .target_data_span = measurement.target.data_span,
+      .referenced_pool_index = measurement.owner_pool_index[source.selector],
+      .referenced_allocation_bytes = source.allocation_bytes,
+      .range_start_raw = start_raw,
+      .range_end_raw = end_raw,
+      .target_selector = measurement.target.selector,
+      .source_selector = source.selector,
+  };
+  return PO_OK;
+}
+
+static int range_plan_matches(const po33_sound_range_plan_t *left,
+                              const po33_sound_range_plan_t *right) {
+  return left->required_workspace_bytes == right->required_workspace_bytes &&
+         left->required_frame_bytes == right->required_frame_bytes &&
+         left->target_sound_record_index == right->target_sound_record_index &&
+         left->target_data_span.offset == right->target_data_span.offset &&
+         left->target_data_span.length == right->target_data_span.length &&
+         left->referenced_pool_index == right->referenced_pool_index &&
+         left->referenced_allocation_bytes == right->referenced_allocation_bytes &&
+         left->range_start_raw == right->range_start_raw &&
+         left->range_end_raw == right->range_end_raw &&
+         left->target_selector == right->target_selector &&
+         left->source_selector == right->source_selector && left->reason == right->reason;
+}
+
+typedef struct po33_range_rebuild {
+  po33_builder_t *builder;
+  const po33_sound_range_plan_t *plan;
+  size_t header_bytes;
+  po_status_t status;
+} po33_range_rebuild_t;
+
+static int range_rebuild_packet(const po_packet_t *packet, void *user) {
+  po33_range_rebuild_t *rebuild = (po33_range_rebuild_t *)user;
+  const po33_sound_range_plan_t *plan = rebuild->plan;
+  uint8_t payload[PO_MAX_PAYLOAD];
+  const uint8_t *data = packet->payload;
+  if (packet->tag_code == PO33_TAG_BEGIN || packet->tag_code == PO33_TAG_END)
+    return 0;
+  if (packet->tag_code == PO33_TAG_SOUND_DATA && packet->offset >= plan->target_data_span.offset &&
+      packet->offset - plan->target_data_span.offset < plan->target_data_span.length &&
+      rebuild->header_bytes < 8u) {
+    pool_edit_copy_bytes(payload, packet->payload, packet->payload_len);
+    for (size_t index = 0u; index < packet->payload_len && rebuild->header_bytes < 8u; ++index) {
+      size_t byte = rebuild->header_bytes++;
+      uint32_t value = byte < 4u ? plan->range_start_raw : plan->range_end_raw;
+      payload[index] = (uint8_t)(value >> (8u * (byte % 4u)));
+    }
+    data = payload;
+  }
+  rebuild->status = po33_builder_append_packet(rebuild->builder, packet->tag_code, data,
+                                               packet->payload_len, NULL);
+  return rebuild->status != PO_OK;
+}
+
+po_status_t po33_sound_range_rebuild(const uint8_t *frame, size_t frame_len,
+                                     size_t target_sound_record_index, uint32_t start_raw,
+                                     uint32_t end_raw, const po33_sound_range_plan_t *plan,
+                                     uint8_t *workspace, size_t workspace_bytes, uint8_t *out_frame,
+                                     size_t out_capacity, size_t *out_frame_bytes) {
+  po33_sound_range_plan_t expected = {0};
+  po33_builder_t builder;
+  po33_decode_result_t result;
+  po33_range_rebuild_t rebuild;
+  size_t frame_bytes;
+  po_status_t status;
+  int invalid_aliases =
+      edit_rebuild_has_invalid_aliases(frame, frame_len, NULL, 0u, plan, sizeof(*plan), workspace,
+                                       workspace_bytes, out_frame, out_capacity, out_frame_bytes);
+  if (out_frame_bytes != NULL && !invalid_aliases)
+    *out_frame_bytes = 0u;
+  if (frame == NULL || plan == NULL || workspace == NULL || out_frame == NULL ||
+      out_frame_bytes == NULL || invalid_aliases)
+    return PO_ERR_INVALID_ARG;
+  status = po33_sound_range_plan(frame, frame_len, target_sound_record_index, start_raw, end_raw,
+                                 &expected);
+  if (status != PO_OK || !range_plan_matches(plan, &expected))
+    return PO_ERR_INVALID_ARG;
+  if (workspace_bytes < expected.required_workspace_bytes ||
+      out_capacity < expected.required_frame_bytes)
+    return PO_ERR_BUFFER_TOO_SMALL;
+  status = po33_builder_init(&builder, workspace, workspace_bytes);
+  if (status != PO_OK)
+    return status;
+  rebuild = (po33_range_rebuild_t){.builder = &builder, .plan = &expected, .status = PO_OK};
+  status = po33_frame_parse(frame, frame_len, range_rebuild_packet, &rebuild, &result);
+  if (rebuild.status != PO_OK)
+    return rebuild.status;
+  if (status != PO_OK || !result.done || result.stopped || result.frame_bytes != frame_len ||
+      rebuild.header_bytes != 8u)
     return PO_ERR_FRAME;
   status = po33_builder_finish(&builder, &frame_bytes);
   if (status != PO_OK)

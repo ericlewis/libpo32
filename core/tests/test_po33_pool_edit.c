@@ -594,11 +594,129 @@ static void test_pool_edit_rebuild(void) {
   }
 }
 
+static void range_assert_preservation(const pool_edit_fixture_t *fixture, const uint8_t *output,
+                                      size_t output_bytes, const po33_sound_range_plan_t *plan) {
+  pool_edit_packet_list_t before, after;
+  size_t header_index = 0u;
+  pool_edit_collect_packets(fixture->frame, fixture->length, &before);
+  pool_edit_collect_packets(output, output_bytes, &after);
+  assert(before.count == after.count && output_bytes == fixture->length);
+  for (size_t index = 0u; index < before.count; ++index) {
+    const po_packet_t *old = before.items + index, *now = after.items + index;
+    int target = old->tag_code == PO33_TAG_SOUND_DATA &&
+                 old->offset >= plan->target_data_span.offset &&
+                 old->offset - plan->target_data_span.offset < plan->target_data_span.length;
+    assert(old->tag_code == now->tag_code && old->payload_len == now->payload_len);
+    for (size_t byte = 0u; byte < old->payload_len; ++byte) {
+      uint8_t expected = old->payload[byte];
+      if (target && header_index < 8u) {
+        uint32_t value = header_index < 4u ? plan->range_start_raw : plan->range_end_raw;
+        expected = (uint8_t)(value >> (8u * (header_index++ % 4u)));
+      }
+      assert(now->payload[byte] == expected);
+    }
+  }
+  assert(header_index == 8u);
+}
+
+static void test_sound_ranges(void) {
+  pool_edit_fixture_t fixture;
+  po33_sound_range_plan_t plan, stale;
+  uint8_t output[30000], workspace[30000], before[30000];
+  size_t written;
+  pool_edit_make_fixture(&fixture, POOL_EDIT_FIXTURE_ALIAS, 4096u);
+  for (size_t target = 0u; target < 2u; ++target) {
+    assert(po33_sound_range_plan(fixture.frame, fixture.length, target, 17u, 3000u, &plan) ==
+           PO_OK);
+    assert(plan.required_frame_bytes == fixture.length &&
+           plan.required_workspace_bytes == fixture.length && plan.referenced_pool_index == 0u &&
+           plan.referenced_allocation_bytes == 4096u && plan.source_selector == 7u &&
+           plan.reason == PO33_SOUND_RANGE_REASON_NONE);
+    assert(po33_sound_range_rebuild(fixture.frame, fixture.length, target, 17u, 3000u, &plan,
+                                    workspace, sizeof(workspace), output, sizeof(output),
+                                    &written) == PO_OK);
+    range_assert_preservation(&fixture, output, written, &plan);
+  }
+  assert(po33_sound_range_plan(fixture.frame, fixture.length, 1u, 0u, 4095u, &plan) == PO_OK);
+  assert(po33_sound_range_plan(fixture.frame, fixture.length, 1u, 0u, 4096u, &plan) ==
+         PO_ERR_RANGE);
+  assert(plan.reason == PO33_SOUND_RANGE_REASON_INVALID_RANGE && plan.required_frame_bytes == 0u &&
+         plan.target_sound_record_index == SIZE_MAX);
+  assert(po33_sound_range_plan(fixture.frame, fixture.length, 0u, 12u, 12u, &plan) == PO_ERR_RANGE);
+  assert(po33_sound_range_plan(fixture.frame, fixture.length, 0u, 13u, 12u, &plan) == PO_ERR_RANGE);
+  assert(po33_sound_range_plan(fixture.frame, fixture.length, 0u, 0u, UINT32_MAX, &plan) ==
+         PO_ERR_RANGE);
+  assert(po33_sound_range_plan(fixture.frame, fixture.length, 9u, 0u, 1u, &plan) == PO_ERR_RANGE);
+  assert(plan.reason == PO33_SOUND_RANGE_REASON_TARGET_OUT_OF_RANGE);
+  assert(po33_sound_range_plan(fixture.frame, fixture.length + 1u, 0u, 0u, 1u, &plan) ==
+         PO_ERR_FRAME);
+  assert(plan.required_frame_bytes == 0u && plan.reason == PO33_SOUND_RANGE_REASON_NONE);
+  assert(po33_sound_range_plan(NULL, 0u, 0u, 0u, 1u, &plan) == PO_ERR_INVALID_ARG);
+  assert(po33_sound_range_plan(fixture.frame, fixture.length, 0u, 0u, 1u, NULL) ==
+         PO_ERR_INVALID_ARG);
+
+  assert(po33_sound_range_plan(fixture.frame, fixture.length, 1u, 0u, 4095u, &plan) == PO_OK);
+  memset(output, 0xa5, sizeof(output));
+  memcpy(before, output, sizeof(before));
+  written = SIZE_MAX;
+  assert(po33_sound_range_rebuild(fixture.frame, fixture.length, 1u, 0u, 4095u, &plan, workspace,
+                                  fixture.length - 1u, output, sizeof(output),
+                                  &written) == PO_ERR_BUFFER_TOO_SMALL);
+  assert(written == 0u && memcmp(output, before, sizeof(output)) == 0);
+  written = SIZE_MAX;
+  assert(po33_sound_range_rebuild(fixture.frame, fixture.length, 1u, 0u, 4095u, &plan, workspace,
+                                  sizeof(workspace), output, fixture.length - 1u,
+                                  &written) == PO_ERR_BUFFER_TOO_SMALL);
+  assert(written == 0u && memcmp(output, before, sizeof(output)) == 0);
+  stale = plan;
+  ++stale.referenced_allocation_bytes;
+  written = SIZE_MAX;
+  assert(po33_sound_range_rebuild(fixture.frame, fixture.length, 1u, 0u, 4095u, &stale, workspace,
+                                  sizeof(workspace), output, sizeof(output),
+                                  &written) == PO_ERR_INVALID_ARG);
+  assert(written == 0u && memcmp(output, before, sizeof(output)) == 0);
+  assert(po33_sound_range_rebuild(fixture.frame, fixture.length, 1u, 0u, 4095u, &plan, output,
+                                  sizeof(output), output, sizeof(output),
+                                  &written) == PO_ERR_INVALID_ARG);
+  {
+    union {
+      uint8_t bytes[30000];
+      po33_sound_range_plan_t plan;
+      size_t length;
+    } alias;
+    memcpy(alias.bytes, fixture.frame, fixture.length);
+    assert(po33_sound_range_plan(alias.bytes, fixture.length, 0u, 0u, 1u, &alias.plan) ==
+           PO_ERR_INVALID_ARG);
+    assert(memcmp(alias.bytes, fixture.frame, fixture.length) == 0);
+    assert(po33_sound_range_rebuild(fixture.frame, fixture.length, 1u, 0u, 4095u, &plan, workspace,
+                                    sizeof(workspace), alias.bytes, sizeof(alias.bytes),
+                                    &alias.length) == PO_ERR_INVALID_ARG);
+  }
+  pool_edit_make_fixture(&fixture, POOL_EDIT_FIXTURE_DUPLICATE_TARGET, 4096u);
+  assert(po33_sound_range_plan(fixture.frame, fixture.length, 0u, 0u, 1u, &plan) == PO_ERR_PARSE);
+  assert(plan.reason == PO33_SOUND_RANGE_REASON_DUPLICATE_TARGET);
+  pool_edit_make_fixture(&fixture, POOL_EDIT_FIXTURE_UNKNOWN_EXTENSION, 4096u);
+  assert(po33_sound_range_plan(fixture.frame, fixture.length, 0u, 0u, 1u, &plan) == PO_ERR_PARSE);
+  assert(plan.reason == PO33_SOUND_RANGE_REASON_UNKNOWN_TARGET_EXTENSION);
+  pool_edit_make_fixture(&fixture, POOL_EDIT_FIXTURE_AMBIGUOUS_TARGET_SOURCE, 4096u);
+  assert(po33_sound_range_plan(fixture.frame, fixture.length, 0u, 0u, 1u, &plan) == PO_ERR_PARSE);
+  assert(plan.reason == PO33_SOUND_RANGE_REASON_SOURCE_AMBIGUOUS);
+  {
+    po33_builder_t builder;
+    assert(po33_builder_init(&builder, fixture.frame, sizeof(fixture.frame)) == PO_OK);
+    pool_edit_append_sound(&builder, 7u, 99u, 4096u, 1, 0);
+    assert(po33_builder_finish(&builder, &fixture.length) == PO_OK);
+    assert(po33_sound_range_plan(fixture.frame, fixture.length, 0u, 0u, 1u, &plan) == PO_ERR_PARSE);
+    assert(plan.reason == PO33_SOUND_RANGE_REASON_SOURCE_UNRESOLVED);
+  }
+}
+
 int main(void) {
   test_api_surface();
   test_pool_edit_planning();
   test_pool_edit_rejections();
   test_pool_edit_rebuild();
+  test_sound_ranges();
   puts("PO-33 pool edit plan tests passed");
   return 0;
 }

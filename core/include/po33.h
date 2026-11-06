@@ -185,6 +185,32 @@ typedef struct po33_pool_edit_plan {
   uint8_t target_selector;
 } po33_pool_edit_plan_t;
 
+typedef enum po33_sound_range_reason {
+  PO33_SOUND_RANGE_REASON_NONE = 0,
+  PO33_SOUND_RANGE_REASON_TARGET_OUT_OF_RANGE = 1,
+  PO33_SOUND_RANGE_REASON_DUPLICATE_TARGET = 2,
+  PO33_SOUND_RANGE_REASON_UNKNOWN_TARGET_EXTENSION = 3,
+  PO33_SOUND_RANGE_REASON_SOURCE_UNRESOLVED = 4,
+  PO33_SOUND_RANGE_REASON_SOURCE_AMBIGUOUS = 5,
+  PO33_SOUND_RANGE_REASON_INVALID_RANGE = 6
+} po33_sound_range_reason_t;
+
+/* Structural measurement for one explicit raw range edit. Capacities equal
+ * the complete frame length. The referenced allocation excludes its header.
+ * On failure all fields are zero except both indices (SIZE_MAX), both
+ * selectors (UINT8_MAX) and reason. */
+typedef struct po33_sound_range_plan {
+  size_t required_workspace_bytes;
+  size_t required_frame_bytes;
+  size_t target_sound_record_index;
+  po33_frame_span_t target_data_span;
+  size_t referenced_pool_index;
+  size_t referenced_allocation_bytes;
+  uint32_t range_start_raw, range_end_raw;
+  uint8_t target_selector, source_selector;
+  po33_sound_range_reason_t reason;
+} po33_sound_range_plan_t;
+
 /* Split/combine control_raw: low note/key nibble, high timing nibble.
  * Encode requires both fields in 0..15; invalid input leaves output untouched.
  * Input/output must not overlap. */
@@ -325,6 +351,36 @@ po_status_t po33_pool_edit_rebuild(const uint8_t *frame, size_t frame_len,
                                    size_t sample_bytes, const po33_pool_edit_plan_t *plan,
                                    uint8_t *workspace, size_t workspace_bytes, uint8_t *out_frame,
                                    size_t out_capacity, size_t *out_frame_bytes);
+
+/* Edit only the first eight header bytes of one existing sound record; the
+ * source selector, sample bytes, other aliases and unrelated packets remain
+ * unchanged. Header-only aliases are valid targets when their source resolves
+ * to exactly one owned pool. start_raw < end_raw and both must be strictly
+ * below that pool's allocation. These are conservative raw coordinate checks,
+ * not an inclusive/exclusive endpoint or audible-duration convention.
+ *
+ * plan requires exactly one complete frame. An absent target or invalid range
+ * returns PO_ERR_RANGE; duplicate targets, unknown target extensions and
+ * unresolved/ambiguous sources return PO_ERR_PARSE, with plan.reason. Malformed
+ * framing or sound records return PO_ERR_FRAME. A required NULL argument is
+ * PO_ERR_INVALID_ARG. plan must be disjoint from frame; invalid aliases leave
+ * plan unspecified, while every other failure returns the neutral plan above.
+ *
+ * rebuild remeasures the current frame and requested range; failed or mismatched
+ * plans are PO_ERR_INVALID_ARG. Same-shaped current header/sample contents may
+ * differ since planning. plan, workspace, output frame and output-length storage
+ * must be pairwise disjoint and disjoint from frame. All four are required.
+ * Short workspace/output storage is PO_ERR_BUFFER_TOO_SMALL. For valid nonalias
+ * output arguments, failures clear *out_frame_bytes and leave output untouched.
+ * Workspace contents are unspecified after a call; no allocation is performed. */
+po_status_t po33_sound_range_plan(const uint8_t *frame, size_t frame_len,
+                                  size_t target_sound_record_index, uint32_t start_raw,
+                                  uint32_t end_raw, po33_sound_range_plan_t *plan);
+po_status_t po33_sound_range_rebuild(const uint8_t *frame, size_t frame_len,
+                                     size_t target_sound_record_index, uint32_t start_raw,
+                                     uint32_t end_raw, const po33_sound_range_plan_t *plan,
+                                     uint8_t *workspace, size_t workspace_bytes, uint8_t *out_frame,
+                                     size_t out_capacity, size_t *out_frame_bytes);
 
 /* Expand one signed-order mu-law sample byte to linear PCM16. Parse framing
  * and the sound header first; pool padding can be decoded, while applying
