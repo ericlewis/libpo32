@@ -353,6 +353,7 @@ static void test_host_helpers(void) {
 }
 static void test_numbers_and_options(void) {
   const char *invalid[] = {NULL, "", "-1", "+1", "x", "1x", "0x", "999999999999999999999999"};
+  po35_speech_edit_t edits[PO35_SPEECH_SLOT_COUNT];
   unsigned long value = 123;
   e35_options_t options;
   int ok;
@@ -370,48 +371,20 @@ static void test_numbers_and_options(void) {
     char *args[] = {"encode", "frame", "out", "--speech", "0", "audio", "--fps", "60"};
     ok = e35_parse_options(8, args, &options);
     assert(ok && options.fps == 60 && options.edit_count == 1);
+    assert(e35_edit_descriptors(&options, edits) == 1u);
+    assert(edits[0].slot == 0u && edits[0].records_per_second == 60u && edits[0].records == NULL &&
+           edits[0].record_bytes == 0u);
   }
 }
-static void test_rebuild_failures(void) {
-  uint8_t storage[8192], header[9] = {0}, records[264] = {0};
-  e35_options_t options = {0};
-  po_packet_t p = packet(PO35_TAG_SPEECH_HEADER, header, sizeof(header));
-  options.edits[0].path = "replacement";
-  options.edits[0].records = records;
-  options.edits[0].bytes = sizeof(records);
-  options.fps = 60;
-  for (unsigned i = 0; i < 3; ++i) {
-    e35_rebuild_t rebuild = {0};
-    po_status_t status = po35_builder_init(&rebuild.builder, storage, sizeof(storage));
-    int stopped;
-    assert(status == PO_OK);
-    rebuild.active = -1;
-    rebuild.options = i == 2 ? NULL : &options;
-    rebuild.builder.capacity = rebuild.builder.length + (i == 1 ? 14 : 0);
-    stopped = e35_rebuild_packet(&p, &rebuild);
-    assert(stopped == 1 && rebuild.failed);
-  }
-  {
-    const uint16_t tags[] = {PO35_TAG_SETTINGS, PO35_TAG_PATTERN,    PO35_TAG_PATTERN_EMPTY,
-                             PO35_TAG_PATCH,    PO35_TAG_TABLE_7BE7, PO35_TAG_TABLE_1C7F};
-    options.edits[0].path = NULL;
-    for (size_t i = 0; i < sizeof(tags) / sizeof(tags[0]); ++i) {
-      e35_scan_t scan = {0};
-      int stopped;
-      scan.options = &options;
-      p = packet(tags[i], NULL, 0);
-      stopped = e35_scan_packet(&p, &scan);
-      assert(stopped && scan.failed);
-    }
-    {
-      e35_scan_t scan = {0};
-      int stopped;
-      scan.options = &options;
-      p = packet(0x1234, NULL, 0);
-      stopped = e35_scan_packet(&p, &scan);
-      assert(!stopped && !scan.failed && scan.active == 0);
-    }
-  }
+static void test_copy_failure(void) {
+  uint8_t storage[PO35_PREAMBLE_BYTES + 13u], header[9] = {0};
+  e35_copy_t copy = {0};
+  po_packet_t packet_value = packet(PO35_TAG_SPEECH_HEADER, header, sizeof(header));
+  po_status_t status = po35_builder_init(&copy.builder, storage, sizeof(storage));
+  int stopped;
+  assert(status == PO_OK);
+  stopped = e35_copy_packet(&packet_value, &copy);
+  assert(stopped == 1 && copy.failed);
 }
 
 static int run(char *const args[]) {
@@ -667,7 +640,7 @@ int main(int argc, char **argv) {
   test_collection_validation();
   test_host_helpers();
   test_numbers_and_options();
-  test_rebuild_failures();
+  test_copy_failure();
   reset_faults();
   test_real_commands(argv[1], argv[2]);
   puts("PO-35 host failures and executable command lines passed");
