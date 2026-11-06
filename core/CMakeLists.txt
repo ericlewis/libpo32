@@ -97,6 +97,9 @@ target_link_libraries(po_inspect PRIVATE po_frame_report)
 add_executable(po_diff examples/po_diff.c)
 target_link_libraries(po_diff PRIVATE po_frame_report)
 
+add_executable(po_capture_doctor examples/po_capture_doctor.c)
+target_link_libraries(po_capture_doctor PRIVATE po_capture po_frame_report)
+
 add_executable(po33_encode_capture examples/po33_encode_capture.c)
 target_link_libraries(po33_encode_capture PRIVATE po_capture po_stereo_wav)
 

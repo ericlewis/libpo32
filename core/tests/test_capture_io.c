@@ -120,6 +120,10 @@ static po_status_t io_render(po_stereo_modulator_t *state, float *out, size_t ca
 #undef fwrite
 #undef po_stereo_modulator_render_f32
 
+#define main po_capture_doctor_example_main
+#include "../examples/po_capture_doctor.c"
+#undef main
+
 static int exists(const char *path) {
   struct stat st;
   return stat(path, &st) == 0;
@@ -586,6 +590,196 @@ static void test_frame_reports(void) {
          report.unparsed_bytes == 5 && report.packet_count == 5);
   po_frame_report_destroy(&report);
 }
+
+static void doctor_load_file(const char *path, uint8_t **out, size_t *out_size) {
+  FILE *file;
+  long end;
+  size_t size;
+  uint8_t *bytes;
+
+  assert(path != NULL && out != NULL && out_size != NULL);
+  *out = NULL;
+  *out_size = 0;
+  file = fopen(path, "rb");
+  assert(file != NULL);
+  assert(fseek(file, 0, SEEK_END) == 0);
+  end = ftell(file);
+  assert(end >= 0);
+  size = (size_t)end;
+  assert(fseek(file, 0, SEEK_SET) == 0);
+  bytes = (uint8_t *)malloc(size ? size : 1u);
+  assert(bytes != NULL);
+  assert(size == 0u || fread(bytes, 1, size, file) == size);
+  assert(fclose(file) == 0);
+  *out = bytes;
+  *out_size = size;
+}
+
+static void doctor_read_text(const char *path, char *out, size_t capacity) {
+  uint8_t *bytes;
+  size_t size;
+
+  assert(capacity != 0u);
+  doctor_load_file(path, &bytes, &size);
+  assert(size < capacity);
+  memcpy(out, bytes, size);
+  out[size] = '\0';
+  free(bytes);
+}
+
+static int doctor_run_cli(int (*entry)(int, char **), int argc, char **argv, char *stdout_text,
+                          size_t stdout_capacity, char *stderr_text, size_t stderr_capacity) {
+  const char *stdout_path = "doctor-stdout.txt";
+  const char *stderr_path = "doctor-stderr.txt";
+  FILE *stdout_file = fopen(stdout_path, "wb");
+  FILE *stderr_file = fopen(stderr_path, "wb");
+  int stdout_fd;
+  int stderr_fd;
+  int rc;
+
+  assert(stdout_file != NULL && stderr_file != NULL);
+  assert(fflush(stdout) == 0);
+  assert(fflush(stderr) == 0);
+  stdout_fd = dup(STDOUT_FILENO);
+  stderr_fd = dup(STDERR_FILENO);
+  assert(stdout_fd >= 0 && stderr_fd >= 0);
+  assert(dup2(fileno(stdout_file), STDOUT_FILENO) == STDOUT_FILENO);
+  assert(dup2(fileno(stderr_file), STDERR_FILENO) == STDERR_FILENO);
+  rc = entry(argc, argv);
+  assert(fflush(stdout) == 0);
+  assert(fflush(stderr) == 0);
+  assert(dup2(stdout_fd, STDOUT_FILENO) == STDOUT_FILENO);
+  assert(dup2(stderr_fd, STDERR_FILENO) == STDERR_FILENO);
+  assert(close(stdout_fd) == 0);
+  assert(close(stderr_fd) == 0);
+  assert(fclose(stdout_file) == 0);
+  assert(fclose(stderr_file) == 0);
+  doctor_read_text(stdout_path, stdout_text, stdout_capacity);
+  doctor_read_text(stderr_path, stderr_text, stderr_capacity);
+  return rc;
+}
+
+static void doctor_swap_pcm16_stereo(const char *source, const char *destination) {
+  uint8_t *bytes;
+  size_t size;
+
+  doctor_load_file(source, &bytes, &size);
+  assert(size >= 44u && memcmp(bytes, "RIFF", 4u) == 0 && memcmp(bytes + 8u, "WAVE", 4u) == 0 &&
+         memcmp(bytes + 36u, "data", 4u) == 0 && (size - 44u) % 4u == 0u);
+  for (size_t offset = 44u; offset < size; offset += 4u) {
+    uint8_t left0 = bytes[offset];
+    uint8_t left1 = bytes[offset + 1u];
+    bytes[offset] = bytes[offset + 2u];
+    bytes[offset + 1u] = bytes[offset + 3u];
+    bytes[offset + 2u] = left0;
+    bytes[offset + 3u] = left1;
+  }
+  save(destination, bytes, size);
+  free(bytes);
+}
+
+static void doctor_remove_pcm16_preamble(const char *source, const char *destination) {
+  uint8_t *bytes;
+  size_t size;
+
+  doctor_load_file(source, &bytes, &size);
+  assert(size >= 44u && memcmp(bytes, "RIFF", 4u) == 0 && memcmp(bytes + 8u, "WAVE", 4u) == 0 &&
+         memcmp(bytes + 36u, "data", 4u) == 0);
+  memset(bytes + 44u, 0, size - 44u);
+  save(destination, bytes, size);
+  free(bytes);
+}
+
+static size_t doctor_count_text(const char *text, const char *needle) {
+  size_t count = 0;
+  const char *position = text;
+
+  assert(text != NULL && needle != NULL && needle[0] != '\0');
+  while ((position = strstr(position, needle)) != NULL) {
+    ++count;
+    position += strlen(needle);
+  }
+  return count;
+}
+
+static void test_capture_doctor(void) {
+  uint8_t frame33[8192];
+  uint8_t frame35[8192];
+  uint8_t corrupt[8192];
+  char stdout_text[16384];
+  char stdout_again[16384];
+  char stderr_text[1024];
+  size_t frame33_size = make_frame(frame33, sizeof(frame33), 0);
+  size_t frame35_size = make_frame(frame35, sizeof(frame35), 1);
+  int rc;
+  char *po33_text[] = {"po_capture_doctor", "doctor-po33.wav", NULL};
+  char *po35_json[] = {"po_capture_doctor", "--json", "doctor-po35.wav", NULL};
+  char *swapped_text[] = {"po_capture_doctor", "doctor-swapped.wav", NULL};
+  char *no_preamble_text[] = {"po_capture_doctor", "doctor-no-preamble.wav", NULL};
+  char *corrupt_text[] = {"po_capture_doctor", "doctor-corrupt.wav", NULL};
+  char *malformed_text[] = {"po_capture_doctor", "doctor-malformed.wav", NULL};
+
+  assert(po33_write_transfer_wav("doctor-po33.wav", frame33, frame33_size, 48000));
+  assert(po35_write_transfer_wav("doctor-po35.wav", frame35, frame35_size, 48000));
+
+  rc = doctor_run_cli(po_capture_doctor_example_main, 2, po33_text, stdout_text,
+                      sizeof(stdout_text), stderr_text, sizeof(stderr_text));
+  assert(rc == 0 && stderr_text[0] == '\0');
+  assert(
+      strstr(stdout_text, "capture status=ok format=pcm16 channels=2 sample_rate=48000 frames=") ==
+      stdout_text);
+  assert(strstr(stdout_text, "selection=none\n") != NULL);
+  assert(strstr(stdout_text,
+                "candidate channel_order=normal transport=recovered recovered_bytes=") != NULL);
+  assert(strstr(stdout_text, "  po33 parser=ok complete=yes") != NULL);
+  assert(strstr(stdout_text, "candidate channel_order=swapped transport=not-recovered") != NULL);
+  rc = doctor_run_cli(po_capture_doctor_example_main, 2, po33_text, stdout_again,
+                      sizeof(stdout_again), stderr_text, sizeof(stderr_text));
+  assert(rc == 0 && stderr_text[0] == '\0' && strcmp(stdout_text, stdout_again) == 0);
+
+  rc = doctor_run_cli(po_capture_doctor_example_main, 3, po35_json, stdout_text,
+                      sizeof(stdout_text), stderr_text, sizeof(stderr_text));
+  assert(rc == 0 && stderr_text[0] == '\0');
+  assert(strstr(stdout_text, "{\"capture\":{\"status\":\"ok\",\"format\":\"pcm16\",\"channels\":2,"
+                             "\"sample_rate\":48000,") == stdout_text);
+  assert(strstr(stdout_text, "\"selection\":\"none\"") != NULL);
+  assert(strstr(stdout_text, "\"channel_order\":\"normal\",\"transport\":\"recovered\"") != NULL);
+  assert(strstr(stdout_text, "\"family\":\"po35\",\"parser_status\":\"ok\",\"complete\":true") !=
+         NULL);
+
+  doctor_swap_pcm16_stereo("doctor-po33.wav", "doctor-swapped.wav");
+  rc = doctor_run_cli(po_capture_doctor_example_main, 2, swapped_text, stdout_text,
+                      sizeof(stdout_text), stderr_text, sizeof(stderr_text));
+  assert(rc == 0 && stderr_text[0] == '\0');
+  assert(strstr(stdout_text, "candidate channel_order=normal transport=not-recovered") != NULL);
+  assert(strstr(stdout_text,
+                "candidate channel_order=swapped transport=recovered recovered_bytes=") != NULL);
+  assert(strstr(stdout_text, "  po33 parser=ok complete=yes") != NULL);
+
+  doctor_remove_pcm16_preamble("doctor-po33.wav", "doctor-no-preamble.wav");
+  rc = doctor_run_cli(po_capture_doctor_example_main, 2, no_preamble_text, stdout_text,
+                      sizeof(stdout_text), stderr_text, sizeof(stderr_text));
+  assert(rc == 0 && stderr_text[0] == '\0');
+  assert(doctor_count_text(stdout_text, "transport=not-recovered") == 2u);
+  assert(doctor_count_text(stdout_text, "parser=not-run complete=no") == 4u);
+
+  memcpy(corrupt, frame33, frame33_size);
+  corrupt[frame33_size - 1u] ^= 1u;
+  assert(write_stereo_wav("doctor-corrupt.wav", corrupt, frame33_size, 48000));
+  rc = doctor_run_cli(po_capture_doctor_example_main, 2, corrupt_text, stdout_text,
+                      sizeof(stdout_text), stderr_text, sizeof(stderr_text));
+  assert(rc == 0 && stderr_text[0] == '\0');
+  assert(strstr(stdout_text,
+                "candidate channel_order=normal transport=recovered recovered_bytes=") != NULL);
+  assert(strstr(stdout_text, "  po33 parser=frame complete=no") != NULL);
+
+  save("doctor-malformed.wav", "not a WAV", sizeof("not a WAV") - 1u);
+  rc = doctor_run_cli(po_capture_doctor_example_main, 2, malformed_text, stdout_text,
+                      sizeof(stdout_text), stderr_text, sizeof(stderr_text));
+  assert(rc == 1 && stderr_text[0] == '\0');
+  assert(strcmp(stdout_text, "capture status=unreadable\nselection=none\n") == 0);
+}
+
 int main(void) {
   char directory[128];
   int made = 0, status;
@@ -603,6 +797,7 @@ int main(void) {
   test_writer_failures();
   test_writer_validation();
   test_frame_reports();
+  test_capture_doctor();
   puts("Shared capture I/O and WAV failure tests passed");
   return 0;
 }

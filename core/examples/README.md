@@ -27,6 +27,7 @@ Use the [C API guide](../docs/C_API.md) for application integration and the
 | [`po35_encode_capture.c`](po35_encode_capture.c) | Replace speech from PCM WAVs in a PO-35/137 frame and emit stereo modem audio |
 | [`po_inspect.c`](po_inspect.c) | Print a stable structural report for one complete PO-33 or PO-35 raw frame |
 | [`po_diff.c`](po_diff.c) | Compare two complete raw frames by bytes, packet topology, and raw-record topology |
+| [`po_capture_doctor.c`](po_capture_doctor.c) | Diagnose one stereo capture across both channel orders and both backup parsers without exporting a frame |
 
 ## Build
 
@@ -42,6 +43,8 @@ cmake --build build
 ./build/core/po32_decode_capture input.wav decoded-po32
 ./build/core/po_inspect --family po33 decoded-po33/frame.bin
 ./build/core/po_diff --family po33 before/frame.bin after/frame.bin
+./build/core/po_capture_doctor input.wav
+./build/core/po_capture_doctor --json input.wav
 ```
 
 ## Raw Frame Inspection
@@ -76,6 +79,24 @@ for a complete frame before creating exports. Keep `frame.bin`: it is the
 decoded backup used as input to the encoder. The other raw exports include
 `payloads.bin`, `packets.tsv` and `summary.txt`, alongside model-specific
 records and audio. A failed decode is not a valid partial backup.
+
+### Capture Diagnosis
+
+`po_capture_doctor` reads one valid stereo capture and reports its source WAV
+sample format, sample rate and frame count. It then runs the existing one-shot
+receiver once with normal channel order and once with swapped order. For every
+recovered wire span it reports both the PO-33 and PO-35 parser outcomes,
+including completion; when the receiver returns no wire span, the family
+parsers are explicitly `not-run`. Text is the default; `--json` emits the same
+ordered candidate results as JSON.
+
+The command writes no decoded frame and always reports `selection=none`. It
+does not scan or stitch transfers, repair bytes, infer a model family, or
+choose between candidates. `transport=not-recovered` means only that the
+hosted receiver did not return a wire span; it does not assign a waveform
+failure cause. A readable capture produces a diagnostic even if no candidate
+completes; an unreadable or unsupported WAV returns status 1 after its short
+diagnostic.
 
 ## Offline Capture Checks
 
