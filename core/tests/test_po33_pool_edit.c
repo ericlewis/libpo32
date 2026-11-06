@@ -739,7 +739,8 @@ static void test_sound_ranges(void) {
 static void test_full_sample_edit(void) {
   static const size_t lengths[] = {1u, 1000u, 4095u, 4096u, 4097u, 8192u};
   pool_edit_fixture_t fixture;
-  po33_pool_edit_plan_t plan, bad;
+  po33_sample_edit_plan_t plan, bad;
+  po33_pool_edit_plan_t legacy;
   pool_edit_packet_list_t before, after;
   uint8_t samples[8192], workspace[30000], output[30000], body[13000];
   size_t written, start, end;
@@ -761,9 +762,9 @@ static void test_full_sample_edit(void) {
     size_t n = lengths[test], allocation = ((n + 4096u) / 4096u) * 4096u;
     po33_sound_header_t header;
     assert(po33_sample_edit_plan(fixture.frame, fixture.length, 0u, samples, n, &plan) == PO_OK);
-    assert(plan.replacement.requested_sample_bytes == n);
-    assert(plan.replacement.required_allocation_bytes == allocation);
-    assert(plan.replacement.reference_count == 1u);
+    assert(plan.pool.replacement.requested_sample_bytes == n);
+    assert(plan.pool.replacement.required_allocation_bytes == allocation);
+    assert(plan.pool.replacement.reference_count == 1u);
     assert(po33_sample_edit_rebuild(fixture.frame, fixture.length, 0u, samples, n, &plan, workspace,
                                     sizeof(workspace), output, sizeof(output), &written) == PO_OK);
     pool_edit_collect_packets(output, written, &after);
@@ -780,20 +781,26 @@ static void test_full_sample_edit(void) {
     memset(output, 0xa5, sizeof(output));
     written = 99u;
     assert(po33_sample_edit_rebuild(fixture.frame, fixture.length, 0u, samples, n, &plan, workspace,
-                                    plan.required_workspace_bytes - 1u, output, sizeof(output),
+                                    plan.pool.required_workspace_bytes - 1u, output, sizeof(output),
                                     &written) == PO_ERR_BUFFER_TOO_SMALL);
     assert(written == 0u);
     for (size_t i = 0; i < sizeof(output); ++i)
       assert(output[i] == 0xa5);
     bad = plan;
-    ++bad.replacement.requested_sample_bytes;
+    bad.policy = 0u;
+    assert(po33_sample_edit_rebuild(fixture.frame, fixture.length, 0u, samples, n, &bad, workspace,
+                                    sizeof(workspace), output, sizeof(output),
+                                    &written) == PO_ERR_INVALID_ARG);
+    assert(written == 0u && output[0] == 0xa5);
+    bad = plan;
+    ++bad.pool.replacement.requested_sample_bytes;
     assert(po33_sample_edit_rebuild(fixture.frame, fixture.length, 0u, samples, n, &bad, workspace,
                                     sizeof(workspace), output, sizeof(output),
                                     &written) == PO_ERR_INVALID_ARG);
     assert(written == 0u && output[0] == 0xa5);
   }
   assert(po33_sample_edit_plan(fixture.frame, fixture.length, 0u, NULL, 0u, &plan) == PO_ERR_RANGE);
-  pool_edit_assert_neutral(&plan);
+  pool_edit_assert_neutral(&plan.pool);
   assert(po33_sample_edit_plan(fixture.frame, fixture.length, 0u, NULL, 1u, &plan) ==
          PO_ERR_INVALID_ARG);
   assert(po33_sample_edit_plan(fixture.frame, fixture.length, 0u, samples, 1u, NULL) ==
@@ -801,18 +808,18 @@ static void test_full_sample_edit(void) {
   pool_edit_make_fixture(&fixture, POOL_EDIT_FIXTURE_ALIAS, 4096u);
   assert(po33_sample_edit_plan(fixture.frame, fixture.length, 0u, samples, 100u, &plan) ==
          PO_ERR_PARSE);
-  assert(plan.replacement.reason == PO33_POOL_REPLACEMENT_REASON_NOT_EXCLUSIVE);
-  assert(plan.required_frame_bytes == 0u);
+  assert(plan.pool.replacement.reason == PO33_POOL_REPLACEMENT_REASON_NOT_EXCLUSIVE);
+  assert(plan.pool.required_frame_bytes == 0u);
   /* The explicit shared-pool operation keeps its existing contract. */
-  assert(po33_pool_edit_plan(fixture.frame, fixture.length, 0u, samples, 100u, &plan) == PO_OK);
+  assert(po33_pool_edit_plan(fixture.frame, fixture.length, 0u, samples, 100u, &legacy) == PO_OK);
   pool_edit_make_fixture(&fixture, POOL_EDIT_FIXTURE_UNKNOWN_EXTENSION, 4096u);
   assert(po33_sample_edit_plan(fixture.frame, fixture.length, 0u, samples, 100u, &plan) ==
          PO_ERR_PARSE);
-  assert(plan.replacement.reason == PO33_POOL_REPLACEMENT_REASON_UNKNOWN_TARGET_EXTENSION);
+  assert(plan.pool.replacement.reason == PO33_POOL_REPLACEMENT_REASON_UNKNOWN_TARGET_EXTENSION);
   pool_edit_make_fixture(&fixture, POOL_EDIT_FIXTURE_HEADER_ONLY_TARGET, 4096u);
   assert(po33_sample_edit_plan(fixture.frame, fixture.length, 0u, samples, 100u, &plan) ==
          PO_ERR_RANGE);
-  assert(plan.replacement.reason == PO33_POOL_REPLACEMENT_REASON_TARGET_NOT_OWNED);
+  assert(plan.pool.replacement.reason == PO33_POOL_REPLACEMENT_REASON_TARGET_NOT_OWNED);
 }
 
 int main(void) {

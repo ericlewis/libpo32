@@ -186,6 +186,13 @@ typedef struct po33_pool_edit_plan {
   uint8_t target_selector;
 } po33_pool_edit_plan_t;
 
+/* Distinct plan for fitted-range edits. policy is an implementation marker
+ * set by the planner; callers must not modify it or consume pool separately. */
+typedef struct po33_sample_edit_plan {
+  uint32_t policy;
+  po33_pool_edit_plan_t pool;
+} po33_sample_edit_plan_t;
+
 typedef enum po33_sound_range_reason {
   PO33_SOUND_RANGE_REASON_NONE = 0,
   PO33_SOUND_RANGE_REASON_TARGET_OUT_OF_RANGE = 1,
@@ -359,7 +366,8 @@ po_status_t po33_pool_edit_rebuild(const uint8_t *frame, size_t frame_len,
  * duration and device capacity remain unverified. N must fit uint32_t and N+1
  * must fit size_t. Convert PCM with po33_samples_encode_f32 before calling.
  *
- * Uses the pool-edit plan type and the same ownership, alias and failure
+ * Uses a distinct plan type with pool sizing/diagnostics in plan.pool and the
+ * same ownership, alias and failure
  * contracts. requested_sample_bytes counts input; required_allocation_bytes
  * also covers the guard. Allocation is retained or grows in whole blocks.
  * The target must reference its own pool exclusively, else PARSE/NOT_EXCLUSIVE.
@@ -368,10 +376,10 @@ po_status_t po33_pool_edit_rebuild(const uint8_t *frame, size_t frame_len,
  * fitting and one growing replacement; other device limits remain unverified. */
 po_status_t po33_sample_edit_plan(const uint8_t *frame, size_t frame_len,
                                   size_t target_sound_record_index, const uint8_t *samples,
-                                  size_t sample_bytes, po33_pool_edit_plan_t *plan);
+                                  size_t sample_bytes, po33_sample_edit_plan_t *plan);
 po_status_t po33_sample_edit_rebuild(const uint8_t *frame, size_t frame_len,
                                      size_t target_sound_record_index, const uint8_t *samples,
-                                     size_t sample_bytes, const po33_pool_edit_plan_t *plan,
+                                     size_t sample_bytes, const po33_sample_edit_plan_t *plan,
                                      uint8_t *workspace, size_t workspace_bytes, uint8_t *out_frame,
                                      size_t out_capacity, size_t *out_frame_bytes);
 
