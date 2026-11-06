@@ -25,8 +25,9 @@ jobs:
 
       - name: Install clang-format
         run: |
-          sudo apt-get update
-          sudo apt-get install -y clang-format-${{ steps.pin.outputs.major }}
+          python3 -m venv "$RUNNER_TEMP/clang-format"
+          "$RUNNER_TEMP/clang-format/bin/python" -m pip install \
+            "clang-format~=${{ steps.pin.outputs.major }}.0"
 
       - name: Verify formatting
-        run: CLANG_FORMAT=clang-format-${{ steps.pin.outputs.major }} ./scripts/ci-format.sh
+        run: CLANG_FORMAT="$RUNNER_TEMP/clang-format/bin/clang-format" ./scripts/ci-format.sh
