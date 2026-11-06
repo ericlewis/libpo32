@@ -152,6 +152,8 @@ po_status_t po35_speech_record_encode(const po35_speech_record_t *record, uint8_
                                       size_t capacity);
 po_status_t po35_settings_decode(const uint8_t *data, size_t len, po35_settings_t *out);
 /* chain_count may be 0..PO35_CHAIN_MAX_COUNT. Larger values are PO_ERR_RANGE.
+ * This 99-entry record capacity does not establish device support above the
+ * PO-35 manual's 64-pattern chain limit.
  * out_len is optional and is written only on success. */
 po_status_t po35_settings_encode(const po35_settings_t *settings, uint8_t *out, size_t capacity,
                                  size_t *out_len);
