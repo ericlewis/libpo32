@@ -822,6 +822,148 @@ static void test_full_sample_edit(void) {
   assert(plan.pool.replacement.reason == PO33_POOL_REPLACEMENT_REASON_TARGET_NOT_OWNED);
 }
 
+static void insert_fixture(pool_edit_fixture_t *f, unsigned flags) {
+  po33_builder_t b;
+  uint8_t slot = 1u, raw[3] = {1, 2, 3}, header[9] = {0};
+  assert(po33_builder_init(&b, f->frame, sizeof(f->frame)) == PO_OK);
+  pool_edit_append(&b, PO33_TAG_SETTINGS, raw, sizeof(raw));
+  if (!(flags & 16u)) {
+    pool_edit_append(&b, PO33_TAG_SOUND_SELECT, &slot, 1u);
+    if (flags & 1u) {
+      header[8] = slot;
+      pool_edit_append(&b, PO33_TAG_SOUND_DATA, header, sizeof(header));
+    }
+    if (flags & 2u)
+      pool_edit_append(&b, PO33_TAG_SOUND_SELECT, &slot, 1u);
+    if (flags & 8u)
+      pool_edit_append(&b, 0x7777u, raw, sizeof(raw));
+  }
+  pool_edit_append_sound(&b, 7u, flags & 4u ? 1u : 7u, 4096u, 1, 0);
+  assert(po33_builder_finish(&b, &f->length) == PO_OK);
+}
+
+static void test_sample_insertion(void) {
+  const size_t sizes[] = {1, 246, 4095, 4096, 4097, 8192, 14063, 16384};
+  pool_edit_fixture_t f;
+  po33_sample_insert_plan_t plan, bad;
+  pool_edit_packet_list_t before, after;
+  uint8_t samples[16384], workspace[40000], out[40000], body[25000];
+  size_t written, start, end;
+  for (size_t i = 0; i < sizeof(samples); ++i)
+    samples[i] = (uint8_t)(1 + i % 254);
+  insert_fixture(&f, 0);
+  pool_edit_collect_packets(f.frame, f.length, &before);
+  start = pool_edit_find_sound_start(&before, 1u);
+  end = pool_edit_find_sound_end(&before, start);
+  for (size_t k = 0; k < sizeof(sizes) / sizeof(sizes[0]); ++k) {
+    size_t n = sizes[k], blocks = n / 4096u + 1u;
+    po33_sound_header_t header;
+    assert(po33_sample_insert_plan(f.frame, f.length, 1u, samples, n, &plan) == PO_OK);
+    assert(plan.allocation_bytes == blocks * 4096u && plan.sample_bytes == n);
+    assert(plan.required_frame_bytes == f.length + 9u + blocks * (4096u + 85u));
+    assert(po33_sample_insert_rebuild(f.frame, f.length, 1u, samples, n, &plan, workspace,
+                                      sizeof(workspace), out, sizeof(out), &written) == PO_OK);
+    pool_edit_collect_packets(out, written, &after);
+    pool_edit_assert_preserved_outside_target(&before, &after, start, end, blocks * 17u);
+    assert(pool_edit_collect_sound_data(&after, start, pool_edit_find_sound_end(&after, start),
+                                        body, sizeof(body)) == 9u + blocks * 4096u);
+    assert(po33_sound_header_decode(body, 9u, &header) == PO_OK);
+    assert(header.range_start_raw == 0 && header.range_end_raw == n && header.source_selector == 1);
+    assert(!memcmp(body + 9, samples, n));
+    for (size_t i = n; i < blocks * 4096u; ++i)
+      assert(body[9 + i] == 0);
+    /* Regression from real readback: terminate each block, including header
+     * in the first block. Flat 255-byte rechunking corrupted hardware samples. */
+    for (size_t i = 0; i < blocks * 17u; ++i)
+      assert(after.items[start + 1 + i].payload_len ==
+             (i % 17u == 16u ? (i == 16u ? 25u : 16u) : 255u));
+    memset(out, 0xa5, sizeof(out));
+    written = 7;
+    assert(po33_sample_insert_rebuild(f.frame, f.length, 1u, samples, n, &plan, workspace,
+                                      sizeof(workspace), out, plan.required_frame_bytes - 1u,
+                                      &written) == PO_ERR_BUFFER_TOO_SMALL);
+    assert(written == 0);
+    for (size_t i = 0; i < sizeof(out); ++i)
+      assert(out[i] == 0xa5);
+    bad = plan;
+    bad.selector_offset++;
+    assert(po33_sample_insert_rebuild(f.frame, f.length, 1u, samples, n, &bad, workspace,
+                                      sizeof(workspace), out, sizeof(out),
+                                      &written) == PO_ERR_INVALID_ARG);
+    assert(written == 0 && out[0] == 0xa5);
+    assert(po33_sample_insert_rebuild(f.frame, f.length, 1u, samples, n, &plan, workspace,
+                                      sizeof(workspace), workspace, sizeof(workspace),
+                                      &written) == PO_ERR_INVALID_ARG);
+    bad = plan;
+    assert(po33_sample_insert_rebuild(f.frame, f.length, 1u, samples, n, &plan, workspace,
+                                      sizeof(workspace), out, sizeof(out),
+                                      &plan.required_frame_bytes) == PO_ERR_INVALID_ARG);
+    assert(plan.required_frame_bytes == bad.required_frame_bytes);
+  }
+  for (unsigned i = 0; i < 5; ++i) {
+    const po33_sample_insert_reason_t reasons[] = {
+        PO33_SAMPLE_INSERT_REASON_OCCUPIED, PO33_SAMPLE_INSERT_REASON_DUPLICATE_SELECTOR,
+        PO33_SAMPLE_INSERT_REASON_REFERENCED, PO33_SAMPLE_INSERT_REASON_UNKNOWN_EXTENSION,
+        PO33_SAMPLE_INSERT_REASON_MISSING_SELECTOR};
+    insert_fixture(&f, 1u << i);
+    assert(po33_sample_insert_plan(f.frame, f.length, 1u, samples, 100u, &plan) ==
+           (i == 4 ? PO_ERR_RANGE : PO_ERR_PARSE));
+    assert(plan.reason == reasons[i] && plan.required_frame_bytes == 0 && plan.slot == UINT8_MAX);
+  }
+  insert_fixture(&f, 0);
+  assert(po33_sample_insert_plan(f.frame, f.length, 8u, samples, 1u, &plan) == PO_ERR_RANGE);
+  assert(plan.reason == PO33_SAMPLE_INSERT_REASON_SLOT_OUT_OF_RANGE);
+  assert(po33_sample_insert_plan(f.frame, f.length, 1u, samples, 0u, &plan) == PO_ERR_RANGE);
+  assert(po33_sample_insert_plan(f.frame, f.length, 1u, NULL, 1u, &plan) == PO_ERR_INVALID_ARG);
+  assert(po33_sample_insert_plan(NULL, f.length, 1u, samples, 1u, &plan) == PO_ERR_INVALID_ARG);
+  assert(po33_sample_insert_plan(f.frame, f.length, 1u, samples, 1u, NULL) == PO_ERR_INVALID_ARG);
+  assert(po33_sample_insert_plan(f.frame, f.length - 1u, 1u, samples, 1u, &plan) == PO_ERR_FRAME);
+  f.frame[f.length] = 0;
+  assert(po33_sample_insert_plan(f.frame, f.length + 1u, 1u, samples, 1u, &plan) == PO_ERR_FRAME);
+  {
+    union {
+      po33_sample_insert_plan_t plan;
+      uint8_t data[40000];
+    } aliased;
+    memcpy(aliased.data, f.frame, f.length);
+    assert(po33_sample_insert_plan(aliased.data, f.length, 1u, samples, 1u, &aliased.plan) ==
+           PO_ERR_INVALID_ARG);
+    assert(!memcmp(aliased.data, f.frame, f.length));
+  }
+}
+
+static void test_insert_empty_bank_positions(void) {
+  uint8_t frame[5000], workspace[10000], output[10000], sample = 37;
+  po33_builder_t builder;
+  po33_sample_insert_plan_t plan;
+  pool_edit_packet_list_t before, after;
+  size_t length, written;
+  assert(po33_builder_init(&builder, frame, sizeof(frame)) == PO_OK);
+  for (uint8_t slot = 0; slot < 8; ++slot)
+    pool_edit_append(&builder, PO33_TAG_SOUND_SELECT, &slot, 1);
+  assert(po33_builder_finish(&builder, &length) == PO_OK);
+  pool_edit_collect_packets(frame, length, &before);
+  for (uint8_t slot = 0; slot < 8; ++slot) {
+    assert(po33_sample_insert_plan(frame, length, slot, &sample, 1, &plan) == PO_OK);
+    assert(po33_sample_insert_rebuild(frame, length, slot, &sample, 1, &plan, workspace,
+                                      sizeof(workspace), output, sizeof(output),
+                                      &written) == PO_OK);
+    pool_edit_collect_packets(output, written, &after);
+    size_t start = pool_edit_find_sound_start(&before, slot);
+    pool_edit_assert_preserved_outside_target(&before, &after, start,
+                                              pool_edit_find_sound_end(&before, start), 17);
+    memset(output, 0xa5, sizeof(output));
+    assert(po33_sample_insert_rebuild(frame, length, slot, &sample, 1, &plan, workspace,
+                                      plan.required_workspace_bytes - 1, output, sizeof(output),
+                                      &written) == PO_ERR_BUFFER_TOO_SMALL);
+    assert(written == 0 && output[0] == 0xa5);
+    assert(po33_sample_insert_rebuild(frame, length, slot, &sample, 1, NULL, workspace,
+                                      sizeof(workspace), output, sizeof(output),
+                                      &written) == PO_ERR_INVALID_ARG);
+    assert(written == 0 && output[0] == 0xa5);
+  }
+}
+
 int main(void) {
   test_api_surface();
   test_pool_edit_planning();
@@ -829,6 +971,8 @@ int main(void) {
   test_pool_edit_rebuild();
   test_sound_ranges();
   test_full_sample_edit();
+  test_sample_insertion();
+  test_insert_empty_bank_positions();
   puts("PO-33 pool edit plan tests passed");
   return 0;
 }
