@@ -195,12 +195,9 @@ po_status_t po35_speech_record_decode(const uint8_t *data, size_t len, po35_spee
 po_status_t po35_speech_record_encode(const po35_speech_record_t *record, uint8_t *out,
                                       size_t capacity);
 
-/* Transactional speech replacement. po35_speech_edit_plan is implemented;
- * po35_speech_edit_rebuild remains reserved for the following atomic-rebuild
- * task and must not be invoked until that implementation is linked.
- *
- * Both functions borrow frame, edits and every edit's record storage for the
- * call. Those read-only inputs may overlap each other. A plan output, plan
+/* Transactional speech replacement. Both functions borrow frame, edits and
+ * every edit's record storage for the call. Those read-only inputs may overlap
+ * each other. A plan output, plan
  * input, workspace, output frame and output-length storage must be disjoint
  * from each other and from every borrowed input. Prohibited aliases are
  * PO_ERR_INVALID_ARG; output guarantees do not apply to invalid aliases.
@@ -218,11 +215,11 @@ po_status_t po35_speech_record_encode(const po35_speech_record_t *record, uint8_
  * no-plan state described above.
  *
  * rebuild consumes a successful matching plan and revalidates its inputs. A
- * stale, mismatched or failed plan is PO_ERR_INVALID_ARG. workspace may be
- * NULL only when plan.required_workspace_bytes is zero. out_frame and
- * out_frame_bytes are always required. PO_ERR_BUFFER_TOO_SMALL reports either
- * insufficient workspace or output capacity. For valid, nonoverlapping output
- * arguments, every failure leaves out_frame untouched and sets
+ * stale, mismatched or failed plan is PO_ERR_INVALID_ARG. A successful plan
+ * requires a staging workspace at least plan.required_frame_bytes long; the
+ * workspace and output frame are both required. PO_ERR_BUFFER_TOO_SMALL reports
+ * either insufficient workspace or output capacity. For valid, nonoverlapping
+ * output arguments, every failure leaves out_frame untouched and sets
  * *out_frame_bytes to zero. */
 po_status_t po35_speech_edit_plan(const uint8_t *frame, size_t frame_len,
                                   const po35_speech_edit_t *edits, size_t edit_count,

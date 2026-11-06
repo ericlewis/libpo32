@@ -442,7 +442,7 @@ po_status_t po35_speech_edit_plan(const uint8_t *frame, size_t frame_len,
     required_frame_bytes += replacement_bytes;
   }
   *plan = (po35_speech_edit_plan_t){
-      .required_workspace_bytes = 0u,
+      .required_workspace_bytes = required_frame_bytes,
       .required_frame_bytes = required_frame_bytes,
       .affected_slot_count = edit_count,
       .failed_edit_index = SIZE_MAX,
@@ -450,6 +450,181 @@ po_status_t po35_speech_edit_plan(const uint8_t *frame, size_t frame_len,
       .failed_slot = UINT8_MAX,
       .reason = PO35_SPEECH_EDIT_REASON_NONE,
   };
+  return PO_OK;
+}
+
+typedef struct po35_speech_edit_rebuild {
+  po35_builder_t *builder;
+  const po35_speech_edit_t *edits;
+  const size_t *edit_index_by_slot;
+  int active_slot;
+  po_status_t status;
+} po35_speech_edit_rebuild_t;
+
+typedef struct po35_speech_edit_range {
+  const void *data;
+  size_t bytes;
+} po35_speech_edit_range_t;
+
+static int speech_edit_plan_matches(const po35_speech_edit_plan_t *left,
+                                    const po35_speech_edit_plan_t *right) {
+  return left->required_workspace_bytes == right->required_workspace_bytes &&
+         left->required_frame_bytes == right->required_frame_bytes &&
+         left->affected_slot_count == right->affected_slot_count &&
+         left->failed_edit_index == right->failed_edit_index &&
+         left->selected_slot_mask == right->selected_slot_mask &&
+         left->failed_slot == right->failed_slot && left->reason == right->reason;
+}
+
+static int speech_edit_rebuild_has_invalid_aliases(
+    const uint8_t *frame, size_t frame_len, const po35_speech_edit_t *edits, size_t edit_count,
+    const po35_speech_edit_plan_t *plan, uint8_t *workspace, size_t workspace_bytes,
+    uint8_t *out_frame, size_t out_capacity, size_t *out_frame_bytes) {
+  const po35_speech_edit_range_t storage[] = {
+      {plan, sizeof(*plan)},
+      {workspace, workspace_bytes},
+      {out_frame, out_capacity},
+      {out_frame_bytes, sizeof(*out_frame_bytes)},
+  };
+  size_t edit_bytes;
+
+  if (frame == NULL || plan == NULL || workspace == NULL || out_frame == NULL ||
+      out_frame_bytes == NULL || (edit_count != 0u && edits == NULL))
+    return 1;
+  if (edits != NULL && edit_count > SIZE_MAX / sizeof(*edits))
+    return 1;
+  edit_bytes = edit_count * sizeof(*edits);
+  for (size_t i = 0; i < sizeof(storage) / sizeof(storage[0]); ++i) {
+    for (size_t j = 0; j < i; ++j)
+      if (speech_edit_ranges_overlap(storage[i].data, storage[i].bytes, storage[j].data,
+                                     storage[j].bytes))
+        return 1;
+    if (speech_edit_ranges_overlap(storage[i].data, storage[i].bytes, frame, frame_len) ||
+        speech_edit_ranges_overlap(storage[i].data, storage[i].bytes, edits, edit_bytes))
+      return 1;
+    for (size_t j = 0; j < edit_count; ++j)
+      if (speech_edit_ranges_overlap(storage[i].data, storage[i].bytes, edits[j].records,
+                                     edits[j].record_bytes))
+        return 1;
+  }
+  return 0;
+}
+
+static po_status_t speech_edit_rebuild_append_records(po35_speech_edit_rebuild_t *rebuild,
+                                                      const po35_speech_edit_t *edit) {
+  const size_t max_record_bytes = 5u * PO35_SPEECH_RECORD_BYTES;
+  size_t offset = 0u;
+  while (offset < edit->record_bytes) {
+    size_t chunk = edit->record_bytes - offset;
+    po_status_t status;
+    if (chunk > max_record_bytes)
+      chunk = max_record_bytes;
+    status = po35_builder_append_packet(rebuild->builder, PO35_TAG_SPEECH_DATA,
+                                        edit->records + offset, chunk, NULL);
+    if (status != PO_OK)
+      return status;
+    offset += chunk;
+  }
+  return PO_OK;
+}
+
+static int speech_edit_rebuild_packet(const po_packet_t *packet, void *user) {
+  po35_speech_edit_rebuild_t *rebuild = (po35_speech_edit_rebuild_t *)user;
+  size_t edit_index = SIZE_MAX;
+  po_status_t status;
+
+  if (packet->tag_code == PO35_TAG_SPEECH_HEADER) {
+    uint8_t header[PO35_SPEECH_HEADER_BYTES];
+    copy_bytes(header, packet->payload, sizeof(header));
+    rebuild->active_slot = header[0];
+    if (rebuild->active_slot >= 0 && rebuild->active_slot < PO35_SPEECH_SLOT_COUNT)
+      edit_index = rebuild->edit_index_by_slot[rebuild->active_slot];
+    if (edit_index != SIZE_MAX) {
+      size_t record_count = rebuild->edits[edit_index].record_bytes / PO35_SPEECH_RECORD_BYTES;
+      header[1] = (uint8_t)(record_count >> 8);
+      header[2] = (uint8_t)record_count;
+      header[3] = rebuild->edits[edit_index].records_per_second;
+    }
+    status = po35_builder_append_packet(rebuild->builder, packet->tag_code, header, sizeof(header),
+                                        NULL);
+  } else if (packet->tag_code == PO35_TAG_SPEECH_DATA && rebuild->active_slot >= 0 &&
+             rebuild->active_slot < PO35_SPEECH_SLOT_COUNT &&
+             rebuild->edit_index_by_slot[rebuild->active_slot] != SIZE_MAX) {
+    status = PO_OK;
+  } else if (packet->tag_code == PO35_TAG_SPEECH_END) {
+    if (rebuild->active_slot >= 0 && rebuild->active_slot < PO35_SPEECH_SLOT_COUNT)
+      edit_index = rebuild->edit_index_by_slot[rebuild->active_slot];
+    if (edit_index != SIZE_MAX)
+      status = speech_edit_rebuild_append_records(rebuild, rebuild->edits + edit_index);
+    else
+      status = PO_OK;
+    if (status == PO_OK)
+      status = po35_builder_append_packet(rebuild->builder, packet->tag_code, packet->payload,
+                                          packet->payload_len, NULL);
+    rebuild->active_slot = -1;
+  } else {
+    status = po35_builder_append_packet(rebuild->builder, packet->tag_code, packet->payload,
+                                        packet->payload_len, NULL);
+  }
+  if (status != PO_OK) {
+    rebuild->status = status;
+    return 1;
+  }
+  return 0;
+}
+
+po_status_t po35_speech_edit_rebuild(const uint8_t *frame, size_t frame_len,
+                                     const po35_speech_edit_t *edits, size_t edit_count,
+                                     const po35_speech_edit_plan_t *plan, uint8_t *workspace,
+                                     size_t workspace_bytes, uint8_t *out_frame,
+                                     size_t out_capacity, size_t *out_frame_bytes) {
+  size_t edit_index_by_slot[PO35_SPEECH_SLOT_COUNT];
+  po35_speech_edit_plan_t expected;
+  po35_speech_edit_rebuild_t rebuild;
+  po35_decode_result_t result;
+  po35_builder_t builder;
+  po_status_t status;
+  size_t frame_bytes;
+
+  if (speech_edit_rebuild_has_invalid_aliases(frame, frame_len, edits, edit_count, plan, workspace,
+                                              workspace_bytes, out_frame, out_capacity,
+                                              out_frame_bytes))
+    return PO_ERR_INVALID_ARG;
+  *out_frame_bytes = 0u;
+
+  status = po35_speech_edit_plan(frame, frame_len, edits, edit_count, &expected);
+  if (status != PO_OK || !speech_edit_plan_matches(plan, &expected))
+    return PO_ERR_INVALID_ARG;
+  if (workspace_bytes < expected.required_workspace_bytes ||
+      out_capacity < expected.required_frame_bytes)
+    return PO_ERR_BUFFER_TOO_SMALL;
+
+  for (size_t i = 0; i < PO35_SPEECH_SLOT_COUNT; ++i)
+    edit_index_by_slot[i] = SIZE_MAX;
+  for (size_t i = 0; i < edit_count; ++i)
+    edit_index_by_slot[edits[i].slot] = i;
+  status = po35_builder_init(&builder, workspace, workspace_bytes);
+  if (status != PO_OK)
+    return status;
+  rebuild = (po35_speech_edit_rebuild_t){
+      .builder = &builder,
+      .edits = edits,
+      .edit_index_by_slot = edit_index_by_slot,
+      .active_slot = -1,
+      .status = PO_OK,
+  };
+  status = po35_frame_parse(frame, frame_len, speech_edit_rebuild_packet, &rebuild, &result);
+  if (rebuild.status != PO_OK)
+    return rebuild.status;
+  if (status != PO_OK || !result.done || result.stopped || result.frame_bytes != frame_len)
+    return PO_ERR_FRAME;
+  status = po35_builder_finish(&builder, &frame_bytes);
+  if (status != PO_OK)
+    return status;
+  if (frame_bytes != expected.required_frame_bytes)
+    return PO_ERR_FRAME;
+  copy_bytes(out_frame, workspace, frame_bytes);
+  *out_frame_bytes = frame_bytes;
   return PO_OK;
 }
 
