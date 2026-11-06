@@ -4,6 +4,7 @@
 #include "po35.h"
 #include "po32.h"
 #include <assert.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -146,6 +147,103 @@ static void test_speech_codecs(void) {
   assert(po35_speech_record_decode(input, 43, &record) == PO_ERR_PARSE);
   assert(po35_speech_record_decode(NULL, 44, &record) == PO_ERR_INVALID_ARG);
   assert(po35_speech_record_encode(&record, output, 43) == PO_ERR_BUFFER_TOO_SMALL);
+}
+
+static void test_speech_edit_api_surface(void) {
+  static const uint8_t records[PO35_SPEECH_RECORD_BYTES] = {0};
+  const po35_speech_edit_t edit = {
+      PO35_SPEECH_SLOT_COUNT - 1u,
+      80u,
+      records,
+      sizeof(records),
+  };
+  const po35_speech_edit_t duplicate_slots[] = {
+      {0u, 80u, records, sizeof(records)},
+      {0u, 40u, records, sizeof(records)},
+  };
+  const po35_speech_edit_t partial_record = {1u, 80u, records, sizeof(records) - 1u};
+  const po35_speech_edit_t too_many_records = {
+      2u,
+      80u,
+      records,
+      ((size_t)UINT16_MAX + 1u) * PO35_SPEECH_RECORD_BYTES,
+  };
+  const po35_speech_edit_t bad_slot = {PO35_SPEECH_SLOT_COUNT, 80u, records, sizeof(records)};
+  const po35_speech_edit_t empty = {
+      0u,
+      20u,
+      NULL,
+      0u,
+  };
+  uint8_t workspace[1] = {0};
+  uint8_t source[PO35_PREAMBLE_BYTES + PO_FINAL_TAIL_BYTES] = {0};
+  uint8_t output[sizeof(source)] = {0};
+  po35_speech_edit_plan_t plan = {
+      1u, sizeof(source), 1u, SIZE_MAX, 1u, UINT8_MAX, PO35_SPEECH_EDIT_REASON_NONE,
+  };
+  size_t out_frame_bytes = 0;
+
+  assert(sizeof(edit.slot) == sizeof(uint8_t));
+  assert(sizeof(edit.records_per_second) == sizeof(uint8_t));
+  assert(sizeof(edit.records) == sizeof(const uint8_t *));
+  assert(sizeof(edit.record_bytes) == sizeof(size_t));
+  assert(offsetof(po35_speech_edit_t, slot) == 0u);
+  assert(offsetof(po35_speech_edit_t, records_per_second) > offsetof(po35_speech_edit_t, slot));
+  assert(offsetof(po35_speech_edit_t, records) > offsetof(po35_speech_edit_t, records_per_second));
+  assert(offsetof(po35_speech_edit_t, record_bytes) > offsetof(po35_speech_edit_t, records));
+  assert(edit.slot == PO35_SPEECH_SLOT_COUNT - 1u);
+  assert(edit.records_per_second == 80u);
+  assert(edit.records == records && edit.record_bytes == sizeof(records));
+  assert(empty.slot == 0u && empty.records_per_second == 20u);
+  assert(empty.records == NULL && empty.record_bytes == 0u);
+  assert(sizeof(plan.required_workspace_bytes) == sizeof(size_t));
+  assert(sizeof(plan.required_frame_bytes) == sizeof(size_t));
+  assert(sizeof(plan.affected_slot_count) == sizeof(size_t));
+  assert(sizeof(plan.failed_edit_index) == sizeof(size_t));
+  assert(sizeof(plan.selected_slot_mask) == sizeof(uint16_t));
+  assert(sizeof(plan.failed_slot) == sizeof(uint8_t));
+  assert(offsetof(po35_speech_edit_plan_t, required_workspace_bytes) == 0u);
+  assert(offsetof(po35_speech_edit_plan_t, required_frame_bytes) >
+         offsetof(po35_speech_edit_plan_t, required_workspace_bytes));
+  assert(offsetof(po35_speech_edit_plan_t, affected_slot_count) >
+         offsetof(po35_speech_edit_plan_t, required_frame_bytes));
+  assert(offsetof(po35_speech_edit_plan_t, failed_edit_index) >
+         offsetof(po35_speech_edit_plan_t, affected_slot_count));
+  assert(offsetof(po35_speech_edit_plan_t, selected_slot_mask) >
+         offsetof(po35_speech_edit_plan_t, failed_edit_index));
+  assert(offsetof(po35_speech_edit_plan_t, failed_slot) >
+         offsetof(po35_speech_edit_plan_t, selected_slot_mask));
+  assert(offsetof(po35_speech_edit_plan_t, reason) >
+         offsetof(po35_speech_edit_plan_t, failed_slot));
+  assert(plan.reason == PO35_SPEECH_EDIT_REASON_NONE);
+  assert(plan.selected_slot_mask == 1u && plan.affected_slot_count == 1u);
+  assert(plan.failed_edit_index == SIZE_MAX && plan.failed_slot == UINT8_MAX);
+  assert(PO35_SPEECH_EDIT_REASON_NONE == 0);
+  assert(PO35_SPEECH_EDIT_REASON_DUPLICATE_SLOT == 1);
+  assert(PO35_SPEECH_EDIT_REASON_SLOT_OUT_OF_RANGE == 2);
+  assert(PO35_SPEECH_EDIT_REASON_INVALID_RECORD_SIZE == 3);
+  assert(PO35_SPEECH_EDIT_REASON_INVALID_RECORD_COUNT == 4);
+  assert(PO35_SPEECH_EDIT_REASON_ABSENT_SLOT == 5);
+  assert(PO35_SPEECH_EDIT_REASON_INCOMPLETE_GROUP == 6);
+  assert(PO35_SPEECH_EDIT_REASON_UNKNOWN_SELECTED_GROUP_EXTENSION == 7);
+
+  /* These unevaluated calls type-check the complete error-contract inputs
+   * without resolving Task 1's declaration-only symbols. Task 2 turns them
+   * into executed assertions: null pointers, duplicate slots, partial or
+   * oversized record bodies, an out-of-range slot, short output, and untouched
+   * output on failure. */
+  (void)sizeof(po35_speech_edit_plan(NULL, 0u, NULL, 0u, &plan));
+  (void)sizeof(po35_speech_edit_plan(source, sizeof(source), NULL, 1u, &plan));
+  (void)sizeof(po35_speech_edit_plan(source, sizeof(source), &edit, 1u, NULL));
+  (void)sizeof(po35_speech_edit_plan(source, sizeof(source), duplicate_slots, 2u, &plan));
+  (void)sizeof(po35_speech_edit_plan(source, sizeof(source), &partial_record, 1u, &plan));
+  (void)sizeof(po35_speech_edit_plan(source, sizeof(source), &too_many_records, 1u, &plan));
+  (void)sizeof(po35_speech_edit_plan(source, sizeof(source), &bad_slot, 1u, &plan));
+  (void)sizeof(po35_speech_edit_rebuild(source, sizeof(source), &edit, 1u, &plan, workspace,
+                                        sizeof(workspace), output, sizeof(output) - 1u,
+                                        &out_frame_bytes));
+  (void)sizeof(
+      po35_speech_edit_rebuild(source, sizeof(source), &edit, 1u, NULL, NULL, 0u, NULL, 0u, NULL));
 }
 
 static const uint8_t table_7be7_bytes[][9] = {
@@ -358,6 +456,7 @@ int main(void) {
   test_frames();
   test_builder();
   test_speech_codecs();
+  test_speech_edit_api_surface();
   test_indexed_table_golden_records();
   test_indexed_table_byte_values();
   test_indexed_table_edit_locality();
