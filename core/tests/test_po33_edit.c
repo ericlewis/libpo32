@@ -59,7 +59,7 @@ static void emit_packet(uint16_t tag, const uint8_t *payload, size_t n) {
 static const uint8_t sound7[] = {3, 0, 0, 0, 0xa0, 0x86, 1, 0, 42, 0, 255, 1, 254, 127, 128};
 static const uint8_t sound8[] = {2, 0, 0, 0, 90, 0, 0, 0, 7, 255, 2};
 static const uint8_t pattern2[] = {10, 20, 30, 40, 50, 60};
-static void make_fixture(void) {
+static void make_fixture(int extension) {
   const uint8_t sync[] = {0x4d, 0xb8, 0x16, 0x5d}, unknown[] = {0, 255, 129, 42};
   uint8_t selector = 2;
   for (size_t i = 0; i < PO33_PREAMBLE_BYTES - 4; ++i)
@@ -80,7 +80,7 @@ static void make_fixture(void) {
   selector = 7;
   emit_packet(PO33_TAG_SOUND_SELECT, &selector, 1);
   emit_packet(PO33_TAG_SOUND_DATA, sound7, 5);
-  emit_packet(0x4321, unknown, sizeof(unknown));
+  emit_packet(extension ? 0x4321 : PO33_TAG_SOUND_DATA, unknown, extension ? sizeof(unknown) : 0);
   emit_packet(PO33_TAG_SOUND_DATA, sound7 + 5, sizeof(sound7) - 5);
   selector = 8;
   emit_packet(PO33_TAG_SOUND_SELECT, &selector, 1);
@@ -429,7 +429,7 @@ int main(void) {
   PATH(pattern, "pattern.bin");
   PATH(short_pattern, "short-pattern.bin");
   test_pool_replacement_planning();
-  make_fixture();
+  make_fixture(0);
   save_file(input, fixture, fixture_length);
   po33_decode_result_t result;
   po_status_t status = po33_frame_parse(fixture, fixture_length, collect_original, NULL, &result);
@@ -443,6 +443,26 @@ int main(void) {
     uint8_t replacement[] = {6, 5, 4, 3, 2, 1};
     save_file(pattern, replacement, 6);
     save_file(short_pattern, replacement, 5);
+  }
+  {
+    /* Unknown target extensions survive no-op transfers, but now reject even
+     * a fitting sample replacement through the conservative core contract. */
+    char *copy[] = {"encode", input, output};
+    char *replace[] = {"encode", input, output, "--sample", "7", wav};
+    size_t before;
+    int exit_status;
+    make_fixture(1);
+    save_file(input, fixture, fixture_length);
+    exit_status = CALL(copy);
+    assert(exit_status == 0 && rendered_length == fixture_length &&
+           !memcmp(rendered_frame, fixture, fixture_length));
+    exit_status = unlink(output);
+    assert(exit_status == 0);
+    before = render_calls;
+    exit_status = CALL(replace);
+    assert(exit_status != 0 && render_calls == before);
+    make_fixture(0);
+    save_file(input, fixture, fixture_length);
   }
   {
     char *a[] = {"encode", input, output};

@@ -141,6 +141,10 @@ transmitter in WAV/PCM output, and handles exclusive file creation. The PO-33
 and PO-35 examples collect logical records and export their contents.
 
 `po33_encode_capture` uses the PCM converter for sample replacements. It retains
+WAV input, channel selection and native-rate byte preservation in hosted code,
+then applies encoded samples through `po33_pool_edit_plan` and
+`po33_pool_edit_rebuild`. Multiple replacements run against an in-memory frame;
+the output WAV is created only after every edit succeeds. The transaction retains
 the original allocation for shorter audio and clears the unused tail to silence;
 longer audio adds whole 4,096-byte sample blocks. Existing nine-byte headers,
 trim/slice references and unrelated packets remain unchanged. Pool growth does
