@@ -198,6 +198,13 @@ set_tests_properties(po33_pool_manifest_tests PROPERTIES WORKING_DIRECTORY "${CM
 add_executable(po33_pool_edit_tests tests/test_po33_pool_edit.c)
 target_link_libraries(po33_pool_edit_tests PRIVATE po32)
 add_test(NAME po33_pool_edit_tests COMMAND po33_pool_edit_tests)
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+  add_test(NAME po33_plan_type_tests COMMAND ${CMAKE_COMMAND}
+    -DCOMPILER=${CMAKE_C_COMPILER}
+    -DINCLUDE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/include
+    -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/plan-type-checks
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/verify_po33_plan_types.cmake)
+endif()
 
 add_executable(po35_transfer_manifest_tests tests/test_po35_transfer_manifest.c)
 target_link_libraries(po35_transfer_manifest_tests PRIVATE po_frame_report)

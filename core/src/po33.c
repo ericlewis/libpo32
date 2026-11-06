@@ -1262,8 +1262,17 @@ po_status_t po33_pool_edit_plan(const uint8_t *frame, size_t frame_len, size_t t
 
 po_status_t po33_sample_edit_plan(const uint8_t *frame, size_t frame_len, size_t target,
                                   const uint8_t *samples, size_t bytes,
-                                  po33_pool_edit_plan_t *plan) {
-  return pool_edit_plan_internal(frame, frame_len, target, samples, bytes, 1, plan);
+                                  po33_sample_edit_plan_t *plan) {
+  po_status_t status;
+  if (plan == NULL ||
+      (frame != NULL && po33_ranges_overlap(plan, sizeof(*plan), frame, frame_len)) ||
+      (samples != NULL && po33_ranges_overlap(plan, sizeof(*plan), samples, bytes)))
+    return PO_ERR_INVALID_ARG;
+  *plan = (po33_sample_edit_plan_t){0};
+  status = pool_edit_plan_internal(frame, frame_len, target, samples, bytes, 1, &plan->pool);
+  if (status == PO_OK)
+    plan->policy = 1u;
+  return status;
 }
 
 po_status_t po33_pool_edit_rebuild(const uint8_t *frame, size_t frame_len, size_t target,
@@ -1277,11 +1286,18 @@ po_status_t po33_pool_edit_rebuild(const uint8_t *frame, size_t frame_len, size_
 
 po_status_t po33_sample_edit_rebuild(const uint8_t *frame, size_t frame_len, size_t target,
                                      const uint8_t *samples, size_t bytes,
-                                     const po33_pool_edit_plan_t *plan, uint8_t *workspace,
+                                     const po33_sample_edit_plan_t *plan, uint8_t *workspace,
                                      size_t workspace_bytes, uint8_t *out, size_t capacity,
                                      size_t *written) {
-  return pool_edit_rebuild_internal(frame, frame_len, target, samples, bytes, plan, workspace,
-                                    workspace_bytes, out, capacity, written, 1);
+  int invalid_aliases =
+      edit_rebuild_has_invalid_aliases(frame, frame_len, samples, bytes, plan, sizeof(*plan),
+                                       workspace, workspace_bytes, out, capacity, written);
+  if (written != NULL && !invalid_aliases)
+    *written = 0u;
+  if (plan == NULL || invalid_aliases || plan->policy != 1u)
+    return PO_ERR_INVALID_ARG;
+  return pool_edit_rebuild_internal(frame, frame_len, target, samples, bytes, &plan->pool,
+                                    workspace, workspace_bytes, out, capacity, written, 1);
 }
 
 typedef struct po33_range_source {
