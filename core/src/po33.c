@@ -487,3 +487,150 @@ po_status_t po33_pool_topology_build(const uint8_t *frame, size_t frame_len,
   topology_resolve_references(sound_records, measurement.sound_record_count, references);
   return PO_OK;
 }
+
+static int pool_replacement_group_boundary_valid(const po33_sound_record_t *record,
+                                                 const po33_pool_t *pool) {
+  size_t selection_end;
+  if (record->selection_span.length == 0u || record->data_span.length == 0u ||
+      record->selection_span.offset > SIZE_MAX - record->selection_span.length ||
+      record->data_span.offset > SIZE_MAX - record->data_span.length ||
+      record->data_span.offset != pool->data_span.offset ||
+      record->data_span.length != pool->data_span.length ||
+      pool->data_bytes > SIZE_MAX - PO_WIRE_OVERHEAD_BYTES ||
+      pool->data_span.length < pool->data_bytes + PO_WIRE_OVERHEAD_BYTES)
+    return 0;
+  selection_end = record->selection_span.offset + record->selection_span.length;
+  return selection_end <= record->data_span.offset;
+}
+
+po_status_t po33_pool_replacement_plan(const po33_sound_record_t *sound_records,
+                                       size_t sound_record_count, const po33_pool_t *pools,
+                                       size_t pool_count, size_t target_sound_record_index,
+                                       size_t requested_sample_bytes,
+                                       po33_pool_replacement_plan_t *plan) {
+  po33_pool_replacement_plan_t result = {
+      .target_pool_index = SIZE_MAX,
+      .reason = PO33_POOL_REPLACEMENT_REASON_NONE,
+  };
+  const po33_sound_record_t *target;
+  const po33_pool_t *pool;
+  size_t target_pool_index;
+  po_status_t status = PO_OK;
+
+  if (plan == NULL)
+    return PO_ERR_INVALID_ARG;
+  if ((sound_records == NULL && sound_record_count != 0u) || (pools == NULL && pool_count != 0u)) {
+    status = PO_ERR_INVALID_ARG;
+    goto finish;
+  }
+  result.requested_sample_bytes = requested_sample_bytes;
+  if (target_sound_record_index >= sound_record_count) {
+    result.reason = PO33_POOL_REPLACEMENT_REASON_TARGET_RECORD_OUT_OF_RANGE;
+    status = PO_ERR_RANGE;
+    goto finish;
+  }
+  target = sound_records + target_sound_record_index;
+  if ((target->flags & PO33_SOUND_RECORD_FLAG_HEADER_ONLY) != 0u ||
+      target->owned_pool_index == SIZE_MAX) {
+    result.reason = PO33_POOL_REPLACEMENT_REASON_TARGET_NOT_OWNED;
+    status = PO_ERR_RANGE;
+    goto finish;
+  }
+  if (target->owned_pool_index >= pool_count) {
+    result.reason = PO33_POOL_REPLACEMENT_REASON_AMBIGUOUS_GROUP_BOUNDARY;
+    status = PO_ERR_PARSE;
+    goto finish;
+  }
+  target_pool_index = target->owned_pool_index;
+  pool = pools + target_pool_index;
+  result.target_pool_index = target_pool_index;
+  if (pool->owner_record_index != target_sound_record_index ||
+      pool->data_bytes <= PO33_SOUND_HEADER_BYTES ||
+      !pool_replacement_group_boundary_valid(target, pool)) {
+    result.reason = PO33_POOL_REPLACEMENT_REASON_AMBIGUOUS_GROUP_BOUNDARY;
+    status = PO_ERR_PARSE;
+    goto finish;
+  }
+  for (size_t i = 0; i < pool_count; ++i)
+    if (i != target_pool_index && pools[i].owner_record_index == target_sound_record_index) {
+      result.reason = PO33_POOL_REPLACEMENT_REASON_AMBIGUOUS_GROUP_BOUNDARY;
+      status = PO_ERR_PARSE;
+      goto finish;
+    }
+
+  result.existing_allocation_bytes = pool->data_bytes - PO33_SOUND_HEADER_BYTES;
+  result.existing_allocation_fits = requested_sample_bytes <= result.existing_allocation_bytes;
+  result.growth_required = !result.existing_allocation_fits;
+  if (result.existing_allocation_fits) {
+    result.required_allocation_bytes = result.existing_allocation_bytes;
+  } else {
+    if (requested_sample_bytes > SIZE_MAX - (PO33_POOL_ALLOCATION_BLOCK_BYTES - 1u)) {
+      result.reason = PO33_POOL_REPLACEMENT_REASON_REQUIRED_ALLOCATION_OVERFLOW;
+      status = PO_ERR_RANGE;
+      goto finish;
+    }
+    result.required_allocation_bytes =
+        ((requested_sample_bytes + PO33_POOL_ALLOCATION_BLOCK_BYTES - 1u) /
+         PO33_POOL_ALLOCATION_BLOCK_BYTES) *
+        PO33_POOL_ALLOCATION_BLOCK_BYTES;
+    result.required_growth_bytes =
+        result.required_allocation_bytes - result.existing_allocation_bytes;
+  }
+  if ((target->flags & PO33_SOUND_RECORD_FLAG_DUPLICATE_SELECTOR) != 0u) {
+    result.reason = PO33_POOL_REPLACEMENT_REASON_DUPLICATE_TARGET_SELECTOR;
+    status = PO_ERR_PARSE;
+    goto finish;
+  }
+  if ((target->flags & PO33_SOUND_RECORD_FLAG_SOURCE_AMBIGUOUS) != 0u) {
+    result.reason = PO33_POOL_REPLACEMENT_REASON_AMBIGUOUS_SELECTOR;
+    status = PO_ERR_PARSE;
+    goto finish;
+  }
+  if ((target->flags & PO33_SOUND_RECORD_FLAG_UNKNOWN_EXTENSION) != 0u) {
+    result.reason = PO33_POOL_REPLACEMENT_REASON_UNKNOWN_TARGET_EXTENSION;
+    status = PO_ERR_PARSE;
+    goto finish;
+  }
+  result.affected_sound_record_count = 1u;
+  for (size_t i = 0; i < sound_record_count; ++i) {
+    const po33_sound_record_t *record = sound_records + i;
+    if (record->source_selector == target->selector &&
+        record->referenced_pool_index != target_pool_index) {
+      result.reason = PO33_POOL_REPLACEMENT_REASON_AMBIGUOUS_SELECTOR;
+      status = PO_ERR_PARSE;
+      goto finish;
+    }
+    if (record->referenced_pool_index != target_pool_index)
+      continue;
+    if (result.reference_count == SIZE_MAX ||
+        (i != target_sound_record_index && result.affected_sound_record_count == SIZE_MAX)) {
+      result.reason = PO33_POOL_REPLACEMENT_REASON_COUNT_OVERFLOW;
+      status = PO_ERR_RANGE;
+      goto finish;
+    }
+    ++result.reference_count;
+    if (i != target_sound_record_index)
+      ++result.affected_sound_record_count;
+    if (record->source_selector != target->selector ||
+        (record->flags &
+         (PO33_SOUND_RECORD_FLAG_DUPLICATE_SELECTOR | PO33_SOUND_RECORD_FLAG_SOURCE_UNRESOLVED |
+          PO33_SOUND_RECORD_FLAG_SOURCE_AMBIGUOUS)) != 0u) {
+      result.reason = PO33_POOL_REPLACEMENT_REASON_AMBIGUOUS_SELECTOR;
+      status = PO_ERR_PARSE;
+      goto finish;
+    }
+  }
+  if (result.existing_allocation_bytes % PO33_POOL_ALLOCATION_BLOCK_BYTES != 0u) {
+    if (result.growth_required) {
+      result.reason = PO33_POOL_REPLACEMENT_REASON_EXISTING_ALLOCATION_UNALIGNED;
+      status = PO_ERR_RANGE;
+      goto finish;
+    }
+  } else {
+    result.growth_structurally_eligible = 1;
+  }
+
+finish:
+  *plan = result;
+  return status;
+}

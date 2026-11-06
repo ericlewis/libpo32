@@ -2,6 +2,7 @@
 #undef NDEBUG
 #endif
 #include <assert.h>
+#include "po33.h"
 #include "po32.h"
 #include <stdint.h>
 #include <stdio.h>
@@ -130,6 +131,164 @@ static void save_wav(const char *path, const int16_t *pcm, size_t count, uint32_
     put16(b + 44 + 2 * i, (uint16_t)pcm[i]);
   save_file(path, b, 44 + count * 2);
 }
+
+enum planner_fixture_flags {
+  PLANNER_FIXTURE_ALIAS = 0x01u,
+  PLANNER_FIXTURE_UNKNOWN_EXTENSION = 0x02u,
+  PLANNER_FIXTURE_DUPLICATE_TARGET = 0x04u,
+  PLANNER_FIXTURE_AMBIGUOUS_SOURCE = 0x08u
+};
+
+typedef struct planner_fixture {
+  uint8_t frame[20000];
+  po33_sound_record_t records[8];
+  po33_pool_t pools[4];
+  po33_pool_reference_t references[8];
+  size_t frame_length;
+  size_t record_count;
+  size_t pool_count;
+  size_t reference_count;
+} planner_fixture_t;
+
+static planner_fixture_t planner_fixture;
+
+static void planner_append_sound(po33_builder_t *builder, uint8_t selector, uint8_t source,
+                                 size_t sample_allocation, int unknown_extension) {
+  uint8_t header[PO33_SOUND_HEADER_BYTES] = {0};
+  uint8_t zeros[255] = {0};
+  size_t remaining = sample_allocation;
+
+  assert(sample_allocation <= UINT32_MAX);
+  put32(header, 0u);
+  put32(header + 4u, (uint32_t)sample_allocation);
+  header[8] = source;
+  assert(po33_builder_append_packet(builder, PO33_TAG_SOUND_SELECT, &selector, 1u, NULL) == PO_OK);
+  assert(po33_builder_append_packet(builder, PO33_TAG_SOUND_DATA, header, sizeof(header), NULL) ==
+         PO_OK);
+  if (unknown_extension)
+    assert(po33_builder_append_packet(builder, 0x4321u, zeros, 1u, NULL) == PO_OK);
+  while (remaining != 0u) {
+    size_t bytes = remaining < sizeof(zeros) ? remaining : sizeof(zeros);
+    assert(po33_builder_append_packet(builder, PO33_TAG_SOUND_DATA, zeros, bytes, NULL) == PO_OK);
+    remaining -= bytes;
+  }
+}
+
+static void make_planner_fixture(unsigned int flags, size_t target_allocation) {
+  po33_builder_t builder;
+  uint8_t target_source = flags & PLANNER_FIXTURE_AMBIGUOUS_SOURCE ? 9u : 7u;
+
+  memset(&planner_fixture, 0, sizeof(planner_fixture));
+  assert(po33_builder_init(&builder, planner_fixture.frame, sizeof(planner_fixture.frame)) ==
+         PO_OK);
+  planner_append_sound(&builder, 7u, target_source, target_allocation,
+                       (flags & PLANNER_FIXTURE_UNKNOWN_EXTENSION) != 0u);
+  if (flags & PLANNER_FIXTURE_ALIAS)
+    planner_append_sound(&builder, 8u, 7u, 0u, 0);
+  if (flags & PLANNER_FIXTURE_DUPLICATE_TARGET)
+    planner_append_sound(&builder, 7u, 7u, PO33_POOL_ALLOCATION_BLOCK_BYTES, 0);
+  if (flags & PLANNER_FIXTURE_AMBIGUOUS_SOURCE) {
+    planner_append_sound(&builder, 9u, 9u, PO33_POOL_ALLOCATION_BLOCK_BYTES, 0);
+    planner_append_sound(&builder, 9u, 9u, PO33_POOL_ALLOCATION_BLOCK_BYTES, 0);
+  }
+  assert(po33_builder_finish(&builder, &planner_fixture.frame_length) == PO_OK);
+  assert(po33_pool_topology_requirements(planner_fixture.frame, planner_fixture.frame_length,
+                                         &planner_fixture.record_count, &planner_fixture.pool_count,
+                                         &planner_fixture.reference_count) == PO_OK);
+  assert(planner_fixture.record_count <=
+         sizeof(planner_fixture.records) / sizeof(planner_fixture.records[0]));
+  assert(planner_fixture.pool_count <=
+         sizeof(planner_fixture.pools) / sizeof(planner_fixture.pools[0]));
+  assert(planner_fixture.reference_count <=
+         sizeof(planner_fixture.references) / sizeof(planner_fixture.references[0]));
+  assert(po33_pool_topology_build(
+             planner_fixture.frame, planner_fixture.frame_length, planner_fixture.records,
+             planner_fixture.record_count, planner_fixture.pools, planner_fixture.pool_count,
+             planner_fixture.references, planner_fixture.reference_count) == PO_OK);
+}
+
+static void test_pool_replacement_planning(void) {
+  po33_pool_replacement_plan_t plan;
+  po33_pool_t malformed_pools[4];
+  uint8_t target_selectors[2] = {0};
+  size_t target_references = 0u;
+
+  make_planner_fixture(PLANNER_FIXTURE_ALIAS, PO33_POOL_ALLOCATION_BLOCK_BYTES);
+  memset(&plan, 0xa5, sizeof(plan));
+  assert(po33_pool_replacement_plan(planner_fixture.records, planner_fixture.record_count,
+                                    planner_fixture.pools, planner_fixture.pool_count, 0u,
+                                    PO33_POOL_ALLOCATION_BLOCK_BYTES, &plan) == PO_OK);
+  assert(plan.target_pool_index == 0u &&
+         plan.requested_sample_bytes == PO33_POOL_ALLOCATION_BLOCK_BYTES &&
+         plan.existing_allocation_bytes == PO33_POOL_ALLOCATION_BLOCK_BYTES &&
+         plan.required_allocation_bytes == PO33_POOL_ALLOCATION_BLOCK_BYTES &&
+         plan.required_growth_bytes == 0u && plan.existing_allocation_fits &&
+         !plan.growth_required && plan.growth_structurally_eligible && plan.reference_count == 2u &&
+         plan.affected_sound_record_count == 2u &&
+         plan.reason == PO33_POOL_REPLACEMENT_REASON_NONE);
+  for (size_t i = 0; i < planner_fixture.record_count; ++i)
+    if (planner_fixture.records[i].referenced_pool_index == plan.target_pool_index) {
+      assert(target_references < sizeof(target_selectors));
+      target_selectors[target_references] = planner_fixture.records[i].selector;
+      ++target_references;
+    }
+  assert(target_references == plan.reference_count && target_selectors[0] == 7u &&
+         target_selectors[1] == 8u);
+
+  assert(po33_pool_replacement_plan(planner_fixture.records, planner_fixture.record_count,
+                                    planner_fixture.pools, planner_fixture.pool_count, 0u,
+                                    PO33_POOL_ALLOCATION_BLOCK_BYTES + 1u, &plan) == PO_OK);
+  assert(!plan.existing_allocation_fits && plan.growth_required &&
+         plan.growth_structurally_eligible &&
+         plan.required_allocation_bytes == 2u * PO33_POOL_ALLOCATION_BLOCK_BYTES &&
+         plan.required_growth_bytes == PO33_POOL_ALLOCATION_BLOCK_BYTES &&
+         plan.reference_count == 2u && plan.affected_sound_record_count == 2u &&
+         plan.reason == PO33_POOL_REPLACEMENT_REASON_NONE);
+
+  make_planner_fixture(0u, 0u);
+  assert(po33_pool_replacement_plan(planner_fixture.records, planner_fixture.record_count,
+                                    planner_fixture.pools, planner_fixture.pool_count, 0u, 1u,
+                                    &plan) == PO_ERR_RANGE);
+  assert(plan.target_pool_index == SIZE_MAX &&
+         plan.reason == PO33_POOL_REPLACEMENT_REASON_TARGET_NOT_OWNED);
+
+  make_planner_fixture(PLANNER_FIXTURE_UNKNOWN_EXTENSION, PO33_POOL_ALLOCATION_BLOCK_BYTES);
+  assert(po33_pool_replacement_plan(planner_fixture.records, planner_fixture.record_count,
+                                    planner_fixture.pools, planner_fixture.pool_count, 0u,
+                                    PO33_POOL_ALLOCATION_BLOCK_BYTES + 1u, &plan) == PO_ERR_PARSE);
+  assert(plan.target_pool_index == 0u && !plan.growth_structurally_eligible &&
+         plan.reason == PO33_POOL_REPLACEMENT_REASON_UNKNOWN_TARGET_EXTENSION);
+
+  make_planner_fixture(0u, 3u);
+  assert(po33_pool_replacement_plan(planner_fixture.records, planner_fixture.record_count,
+                                    planner_fixture.pools, planner_fixture.pool_count, 0u, 4u,
+                                    &plan) == PO_ERR_RANGE);
+  assert(plan.existing_allocation_bytes == 3u && plan.required_allocation_bytes == 4096u &&
+         plan.required_growth_bytes == 4093u && !plan.growth_structurally_eligible &&
+         plan.reason == PO33_POOL_REPLACEMENT_REASON_EXISTING_ALLOCATION_UNALIGNED);
+
+  make_planner_fixture(PLANNER_FIXTURE_DUPLICATE_TARGET, PO33_POOL_ALLOCATION_BLOCK_BYTES);
+  assert(po33_pool_replacement_plan(planner_fixture.records, planner_fixture.record_count,
+                                    planner_fixture.pools, planner_fixture.pool_count, 0u,
+                                    PO33_POOL_ALLOCATION_BLOCK_BYTES, &plan) == PO_ERR_PARSE);
+  assert(plan.reason == PO33_POOL_REPLACEMENT_REASON_DUPLICATE_TARGET_SELECTOR);
+
+  make_planner_fixture(PLANNER_FIXTURE_AMBIGUOUS_SOURCE, PO33_POOL_ALLOCATION_BLOCK_BYTES);
+  assert(po33_pool_replacement_plan(planner_fixture.records, planner_fixture.record_count,
+                                    planner_fixture.pools, planner_fixture.pool_count, 0u,
+                                    PO33_POOL_ALLOCATION_BLOCK_BYTES, &plan) == PO_ERR_PARSE);
+  assert(plan.reason == PO33_POOL_REPLACEMENT_REASON_AMBIGUOUS_SELECTOR);
+
+  make_planner_fixture(0u, PO33_POOL_ALLOCATION_BLOCK_BYTES);
+  memcpy(malformed_pools, planner_fixture.pools,
+         planner_fixture.pool_count * sizeof(malformed_pools[0]));
+  --malformed_pools[0].data_span.length;
+  assert(po33_pool_replacement_plan(planner_fixture.records, planner_fixture.record_count,
+                                    malformed_pools, planner_fixture.pool_count, 0u,
+                                    PO33_POOL_ALLOCATION_BLOCK_BYTES, &plan) == PO_ERR_PARSE);
+  assert(plan.reason == PO33_POOL_REPLACEMENT_REASON_AMBIGUOUS_GROUP_BOUNDARY);
+}
+
 static po32_packet_t original[64], edited[64];
 static size_t original_count, edited_count;
 static int collect_original(const po32_packet_t *p, void *user) {
@@ -201,6 +360,7 @@ int main(void) {
   PATH(short_wav, "short.wav");
   PATH(pattern, "pattern.bin");
   PATH(short_pattern, "short-pattern.bin");
+  test_pool_replacement_planning();
   make_fixture();
   save_file(input, fixture, fixture_length);
   po33_decode_result_t result;
