@@ -358,21 +358,11 @@ static void helper_boundaries(void) {
   size_t length = 0;
   const size_t capacities[] = {PO33_PREAMBLE_BYTES + 4, PO33_PREAMBLE_BYTES + 5, wire_size - 1};
   for (size_t i = 0; i < sizeof(capacities) / sizeof(capacities[0]); ++i) {
-    status = edit_rebuild(&frame, NULL, 0, rebuilt, capacities[i], &length);
+    status = edit_rebuild(&frame, rebuilt, capacities[i], &length);
     assert(status == 0);
   }
-  uint8_t extension[4096] = {0};
-  edit_t edit = {0};
-  edit.kind = EDIT_SAMPLE;
-  edit.index = 7;
-  edit.extension = extension;
-  edit.extension_bytes = sizeof(extension);
-  status = edit_growth_location(&frame, 7, &edit.extension_after);
-  assert(status == 1);
-  status = edit_rebuild(&frame, &edit, 1, rebuilt, wire_size, &length);
-  assert(status == 0);
-  status = edit_rebuild(&frame, &edit, 1, rebuilt, sizeof(rebuilt), &length);
-  assert(status == 1 && length == wire_size + 4096 + 17 * 5);
+  status = edit_rebuild(&frame, rebuilt, sizeof(rebuilt), &length);
+  assert(status == 1 && length == wire_size);
   parsed_status = po33_frame_parse(rebuilt, length, NULL, NULL, &parsed);
   assert(parsed_status == PO_OK && parsed.done && parsed.frame_bytes == length);
 }
