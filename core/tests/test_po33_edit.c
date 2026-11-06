@@ -217,20 +217,12 @@ static void make_planner_fixture(unsigned int flags, size_t target_allocation) {
              planner_fixture.references, planner_fixture.reference_count) == PO_OK);
 }
 
-static void assert_pool_replacement_plan_neutral(const po33_pool_replacement_plan_t *plan) {
-  assert(plan->target_pool_index == SIZE_MAX && plan->requested_sample_bytes == 0u &&
-         plan->existing_allocation_bytes == 0u && plan->required_allocation_bytes == 0u &&
-         plan->required_growth_bytes == 0u && plan->reference_count == 0u &&
-         plan->affected_sound_record_count == 0u && !plan->existing_allocation_fits &&
-         !plan->growth_required && !plan->growth_structurally_eligible &&
-         plan->reason == PO33_POOL_REPLACEMENT_REASON_NONE);
-}
-
 static void test_pool_replacement_planning(void) {
   po33_pool_replacement_plan_t plan;
   po33_pool_t malformed_pools[4];
   po33_pool_t pools_before[4];
   po33_sound_record_t records_before[8];
+  po33_pool_replacement_plan_t plan_before;
   planner_records_or_plan_t overlapping_records, overlapping_records_before;
   planner_pools_or_plan_t overlapping_pools, overlapping_pools_before;
   uint8_t target_selectors[2] = {0};
@@ -271,6 +263,13 @@ static void test_pool_replacement_planning(void) {
          0);
   assert(memcmp(planner_fixture.pools, pools_before, sizeof(pools_before)) == 0);
 
+  memcpy(&overlapping_records_before, &overlapping_records, sizeof(overlapping_records));
+  assert(po33_pool_replacement_plan(overlapping_records.records, planner_fixture.record_count, NULL,
+                                    1u, 0u, PO33_POOL_ALLOCATION_BLOCK_BYTES,
+                                    &overlapping_records.plan) == PO_ERR_INVALID_ARG);
+  assert(memcmp(&overlapping_records, &overlapping_records_before, sizeof(overlapping_records)) ==
+         0);
+
   memset(&overlapping_pools, 0xa5, sizeof(overlapping_pools));
   memcpy(overlapping_pools.pools, planner_fixture.pools, sizeof(planner_fixture.pools));
   memcpy(&overlapping_pools_before, &overlapping_pools, sizeof(overlapping_pools));
@@ -282,17 +281,19 @@ static void test_pool_replacement_planning(void) {
   assert(memcmp(planner_fixture.records, records_before, sizeof(records_before)) == 0);
 
   memset(&plan, 0xa5, sizeof(plan));
+  plan_before = plan;
   assert(po33_pool_replacement_plan(planner_fixture.records,
                                     SIZE_MAX / sizeof(planner_fixture.records[0]) + 1u,
                                     planner_fixture.pools, planner_fixture.pool_count, 0u,
                                     PO33_POOL_ALLOCATION_BLOCK_BYTES, &plan) == PO_ERR_INVALID_ARG);
-  assert_pool_replacement_plan_neutral(&plan);
+  assert(memcmp(&plan, &plan_before, sizeof(plan)) == 0);
   memset(&plan, 0xa5, sizeof(plan));
+  plan_before = plan;
   assert(po33_pool_replacement_plan(planner_fixture.records, planner_fixture.record_count,
                                     planner_fixture.pools,
                                     SIZE_MAX / sizeof(planner_fixture.pools[0]) + 1u, 0u,
                                     PO33_POOL_ALLOCATION_BLOCK_BYTES, &plan) == PO_ERR_INVALID_ARG);
-  assert_pool_replacement_plan_neutral(&plan);
+  assert(memcmp(&plan, &plan_before, sizeof(plan)) == 0);
 
   assert(po33_pool_replacement_plan(planner_fixture.records, planner_fixture.record_count,
                                     planner_fixture.pools, planner_fixture.pool_count, 0u,
@@ -311,11 +312,13 @@ static void test_pool_replacement_planning(void) {
   assert(plan.target_pool_index == SIZE_MAX &&
          plan.reason == PO33_POOL_REPLACEMENT_REASON_TARGET_NOT_OWNED);
 
-  make_planner_fixture(PLANNER_FIXTURE_UNKNOWN_EXTENSION, PO33_POOL_ALLOCATION_BLOCK_BYTES);
+  make_planner_fixture(PLANNER_FIXTURE_ALIAS | PLANNER_FIXTURE_UNKNOWN_EXTENSION,
+                       PO33_POOL_ALLOCATION_BLOCK_BYTES);
   assert(po33_pool_replacement_plan(planner_fixture.records, planner_fixture.record_count,
                                     planner_fixture.pools, planner_fixture.pool_count, 0u,
                                     PO33_POOL_ALLOCATION_BLOCK_BYTES + 1u, &plan) == PO_ERR_PARSE);
-  assert(plan.target_pool_index == 0u && !plan.growth_structurally_eligible &&
+  assert(plan.target_pool_index == 0u && plan.reference_count == 2u &&
+         plan.affected_sound_record_count == 2u && !plan.growth_structurally_eligible &&
          plan.reason == PO33_POOL_REPLACEMENT_REASON_UNKNOWN_TARGET_EXTENSION);
 
   make_planner_fixture(0u, 3u);
