@@ -832,9 +832,11 @@ static size_t forensics_frame33(uint8_t *frame, size_t capacity, uint16_t raw_ta
   return length;
 }
 
-static size_t forensics_frame35(uint8_t *frame, size_t capacity, uint8_t first_speech_byte) {
+static size_t forensics_frame35(uint8_t *frame, size_t capacity, uint8_t record_count_hi,
+                                uint8_t record_count_lo, uint8_t first_speech_byte) {
   const uint8_t pattern[] = {4u};
-  const uint8_t speech_header[PO35_SPEECH_HEADER_BYTES] = {3u, 1u, 0u, 80u, 140u, 1u, 2u, 3u, 4u};
+  const uint8_t speech_header[PO35_SPEECH_HEADER_BYTES] = {
+      3u, record_count_hi, record_count_lo, 80u, 140u, 1u, 2u, 3u, 4u};
   uint8_t speech_data[PO35_SPEECH_RECORD_BYTES] = {0};
   const uint8_t raw[] = {0x50u, 0x60u};
   po35_builder_t builder;
@@ -878,6 +880,12 @@ static void test_capture_forensics_cli(void) {
       "po_diff", "--family", "po33", "forensics33-before.bin", "forensics33-record.bin", NULL};
   char *diff35_record[] = {
       "po_diff", "--family", "po35", "forensics35.bin", "forensics35-record.bin", NULL};
+  char *diff35_raw[] = {"po_diff",
+                        "--family",
+                        "po35",
+                        "forensics35-invalid-before.bin",
+                        "forensics35-invalid-after.bin",
+                        NULL};
   char *diff_invalid[] = {
       "po_diff", "--family", "po33", "forensics33-before.bin", "forensics-invalid.bin", NULL};
   char *diff_trailing[] = {
@@ -885,15 +893,19 @@ static void test_capture_forensics_cli(void) {
 
   before_length = forensics_frame33(before, sizeof(before), 0x1234u, 0x20u);
   after_length = forensics_frame33(after, sizeof(after), 0x4321u, 0x20u);
-  po35_length = forensics_frame35(po35, sizeof(po35), 0x10u);
+  po35_length = forensics_frame35(po35, sizeof(po35), 0u, 1u, 0x10u);
   forensics_write_file("forensics33-before.bin", before, before_length);
   forensics_write_file("forensics33-identical.bin", before, before_length);
   forensics_write_file("forensics33-packet.bin", after, after_length);
   after_length = forensics_frame33(after, sizeof(after), 0x1234u, 0x21u);
   forensics_write_file("forensics33-record.bin", after, after_length);
   forensics_write_file("forensics35.bin", po35, po35_length);
-  po35_length = forensics_frame35(po35, sizeof(po35), 0x11u);
+  po35_length = forensics_frame35(po35, sizeof(po35), 0u, 1u, 0x11u);
   forensics_write_file("forensics35-record.bin", po35, po35_length);
+  po35_length = forensics_frame35(po35, sizeof(po35), 1u, 0u, 0x10u);
+  forensics_write_file("forensics35-invalid-before.bin", po35, po35_length);
+  po35_length = forensics_frame35(po35, sizeof(po35), 1u, 0u, 0x11u);
+  forensics_write_file("forensics35-invalid-after.bin", po35, po35_length);
   forensics_write_file("forensics-invalid.bin", before, before_length - 1u);
   before[before_length] = 0x5au;
   forensics_write_file("forensics-trailing.bin", before, before_length + 1u);
@@ -912,7 +924,7 @@ static void test_capture_forensics_cli(void) {
   assert(!strcmp(
       stdout_text,
       "po35 parser=ok complete=yes stopped=no packets=5 input=4182 consumed=4182 trailing=0 "
-      "unparsed=0 state=0xcc30 selectors=patterns[4x1];sounds[-];speech[3x1];invalid=0/0/0 "
+      "unparsed=0 state=0x7b17 selectors=patterns[4x1];sounds[-];speech[3x1];invalid=0/0/0 "
       "unknown=packets:1,bytes:2,tags[0xabcdx1/2]\n"));
 
   rc = forensics_run_cli(po_diff_example_main, 5, diff_identical, stdout_text, sizeof(stdout_text),
@@ -956,12 +968,24 @@ static void test_capture_forensics_cli(void) {
   assert(!strcmp(
       stdout_text,
       "family=po35\n"
-      "bytes changed before=4182 after=4182 changed=63 first_offset=4119 before=0xfb after=0xfc\n"
+      "bytes changed before=4182 after=4182 changed=63 first_offset=4119 before=0xf3 after=0xf4\n"
       "packets topology identical count=5\n"
       "packets payload changed count=1 first_index=2 first_raw_offset=0 before=0x10 after=0x11\n"
       "records topology identical count=3\n"
       "records payload changed count=1 first_index=1 first_packet=2 first_raw_offset=0 "
       "before=0x10 after=0x11 record=po35-speech(slot_raw=3,packets=3,raw_bytes=53)\n"));
+  rc = forensics_run_cli(po_diff_example_main, 5, diff35_raw, stdout_text, sizeof(stdout_text),
+                         stderr_text, sizeof(stderr_text));
+  assert(rc == 0 && stderr_text[0] == '\0');
+  assert(!strcmp(
+      stdout_text,
+      "family=po35\n"
+      "bytes changed before=4182 after=4182 changed=63 first_offset=4119 before=0xfb after=0xfc\n"
+      "packets topology identical count=5\n"
+      "packets payload changed count=1 first_index=2 first_raw_offset=0 before=0x10 after=0x11\n"
+      "records topology identical count=5\n"
+      "records payload changed count=1 first_index=2 first_packet=2 first_raw_offset=0 "
+      "before=0x10 after=0x11 record=raw(tag=0x73b0,packets=1,raw_bytes=44)\n"));
 
   rc = forensics_run_cli(po_inspect_example_main, 4, inspect_bad, stdout_text, sizeof(stdout_text),
                          stderr_text, sizeof(stderr_text));
