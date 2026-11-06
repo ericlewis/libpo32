@@ -503,6 +503,18 @@ static int pool_replacement_group_boundary_valid(const po33_sound_record_t *reco
   return selection_end <= record->data_span.offset;
 }
 
+static int pool_replacement_ranges_overlap(const void *left, size_t left_bytes, const void *right,
+                                           size_t right_bytes) {
+  uintptr_t left_start, right_start;
+  if (left_bytes == 0u || right_bytes == 0u)
+    return 0;
+  left_start = (uintptr_t)left;
+  right_start = (uintptr_t)right;
+  if (left_start > UINTPTR_MAX - left_bytes || right_start > UINTPTR_MAX - right_bytes)
+    return 1;
+  return left_start < right_start + right_bytes && right_start < left_start + left_bytes;
+}
+
 po_status_t po33_pool_replacement_plan(const po33_sound_record_t *sound_records,
                                        size_t sound_record_count, const po33_pool_t *pools,
                                        size_t pool_count, size_t target_sound_record_index,
@@ -523,6 +535,12 @@ po_status_t po33_pool_replacement_plan(const po33_sound_record_t *sound_records,
     status = PO_ERR_INVALID_ARG;
     goto finish;
   }
+  if (sound_record_count > SIZE_MAX / sizeof(*sound_records) ||
+      pool_count > SIZE_MAX / sizeof(*pools) ||
+      pool_replacement_ranges_overlap(plan, sizeof(*plan), sound_records,
+                                      sound_record_count * sizeof(*sound_records)) ||
+      pool_replacement_ranges_overlap(plan, sizeof(*plan), pools, pool_count * sizeof(*pools)))
+    return PO_ERR_INVALID_ARG;
   result.requested_sample_bytes = requested_sample_bytes;
   if (target_sound_record_index >= sound_record_count) {
     result.reason = PO33_POOL_REPLACEMENT_REASON_TARGET_RECORD_OUT_OF_RANGE;
