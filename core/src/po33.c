@@ -1488,6 +1488,187 @@ po_status_t po33_sample_insert_rebuild(const uint8_t *frame, size_t frame_len, u
   return PO_OK;
 }
 
+typedef struct po33_detach_scan {
+  uint8_t slot, selectors[256], owners[256];
+  int found, referenced;
+  po33_topology_observed_record_t target;
+} po33_detach_scan_t;
+
+static po_status_t detach_record(const po33_topology_observed_record_t *record, void *user) {
+  po33_detach_scan_t *s = user;
+  if (record->selector == s->slot) {
+    s->target = *record;
+    s->found = 1;
+  } else if (record->header.source_selector == s->slot) {
+    s->referenced = 1;
+  }
+  if (record->data_bytes > PO33_SOUND_HEADER_BYTES && s->owners[record->selector] < 2u)
+    ++s->owners[record->selector];
+  return PO_OK;
+}
+
+static int detach_selectors(const po_packet_t *packet, void *user) {
+  po33_detach_scan_t *s = user;
+  /* Selector payload lengths were validated by the topology pass. */
+  if (packet->tag_code == PO33_TAG_SOUND_SELECT && s->selectors[packet->payload[0]] < 2u)
+    ++s->selectors[packet->payload[0]];
+  return 0;
+}
+
+po_status_t po33_sample_detach_plan(const uint8_t *frame, size_t frame_len, uint8_t slot,
+                                    const uint8_t *samples, size_t sample_bytes,
+                                    po33_sample_detach_plan_t *plan) {
+  po33_detach_scan_t s;
+  po33_decode_result_t parsed;
+  po_status_t status;
+  size_t blocks, base, added, size;
+  uint8_t source;
+  if (plan == NULL ||
+      (frame != NULL && po33_ranges_overlap(plan, sizeof(*plan), frame, frame_len)) ||
+      (samples != NULL && po33_ranges_overlap(plan, sizeof(*plan), samples, sample_bytes)))
+    return PO_ERR_INVALID_ARG;
+  *plan = (po33_sample_detach_plan_t){.slot = UINT8_MAX, .source_selector = UINT8_MAX};
+  if (frame == NULL || samples == NULL)
+    return PO_ERR_INVALID_ARG;
+  if (slot >= 8u) {
+    plan->reason = PO33_SAMPLE_DETACH_REASON_SLOT_OUT_OF_RANGE;
+    return PO_ERR_RANGE;
+  }
+  if (!sample_bytes || sample_bytes > UINT32_MAX || sample_bytes > SIZE_MAX - 4096u)
+    return PO_ERR_RANGE;
+  s.slot = slot;
+  s.found = 0;
+  s.referenced = 0;
+  s.target = (po33_topology_observed_record_t){0};
+  for (size_t i = 0; i <= UINT8_MAX; ++i) {
+    s.selectors[i] = 0;
+    s.owners[i] = 0;
+  }
+  status = topology_parse_exact_records(frame, frame_len, detach_record, &s);
+  if (status != PO_OK)
+    return status;
+  status = po33_frame_parse(frame, frame_len, detach_selectors, &s, &parsed);
+  if (status != PO_OK || !parsed.done || parsed.frame_bytes != frame_len)
+    return PO_ERR_FRAME;
+  if (!s.found) {
+    plan->reason = PO33_SAMPLE_DETACH_REASON_MISSING_TARGET;
+    return PO_ERR_RANGE;
+  }
+  source = s.target.header.source_selector;
+  if (s.selectors[slot] != 1u)
+    plan->reason = PO33_SAMPLE_DETACH_REASON_DUPLICATE_TARGET;
+  else if (s.target.data_bytes != PO33_SOUND_HEADER_BYTES)
+    plan->reason = PO33_SAMPLE_DETACH_REASON_NOT_ALIAS;
+  else if (s.target.flags & PO33_SOUND_RECORD_FLAG_UNKNOWN_EXTENSION)
+    plan->reason = PO33_SAMPLE_DETACH_REASON_UNKNOWN_EXTENSION;
+  else if (!s.owners[source])
+    plan->reason = PO33_SAMPLE_DETACH_REASON_SOURCE_UNRESOLVED;
+  else if (s.owners[source] != 1u || s.selectors[source] != 1u)
+    plan->reason = PO33_SAMPLE_DETACH_REASON_SOURCE_AMBIGUOUS;
+  else if (s.referenced)
+    plan->reason = PO33_SAMPLE_DETACH_REASON_REFERENCED_TARGET;
+  if (plan->reason != PO33_SAMPLE_DETACH_REASON_NONE)
+    return PO_ERR_PARSE;
+  if (s.target.data_span.length > frame_len)
+    return PO_ERR_FRAME;
+  base = frame_len - s.target.data_span.length;
+  blocks = (sample_bytes + PO33_POOL_ALLOCATION_BLOCK_BYTES) / PO33_POOL_ALLOCATION_BLOCK_BYTES;
+  if (blocks > (SIZE_MAX - PO33_SOUND_HEADER_BYTES) /
+                   (PO33_POOL_ALLOCATION_BLOCK_BYTES + 17u * PO_WIRE_OVERHEAD_BYTES))
+    return PO_ERR_RANGE;
+  added = PO33_SOUND_HEADER_BYTES +
+          blocks * (PO33_POOL_ALLOCATION_BLOCK_BYTES + 17u * PO_WIRE_OVERHEAD_BYTES);
+  if (base > SIZE_MAX - added)
+    return PO_ERR_RANGE;
+  size = base + added;
+  if (base > SIZE_MAX - size)
+    return PO_ERR_RANGE;
+  *plan = (po33_sample_detach_plan_t){.required_workspace_bytes = base + size,
+                                      .required_frame_bytes = size,
+                                      .intermediate_frame_bytes = base,
+                                      .sample_bytes = sample_bytes,
+                                      .allocation_bytes = blocks * PO33_POOL_ALLOCATION_BLOCK_BYTES,
+                                      .target_data_span = s.target.data_span,
+                                      .slot = slot,
+                                      .source_selector = source};
+  return PO_OK;
+}
+
+typedef struct po33_detach_strip {
+  po33_builder_t *builder;
+  po33_frame_span_t span;
+  po_status_t status;
+} po33_detach_strip_t;
+
+static int detach_strip_packet(const po_packet_t *p, void *user) {
+  po33_detach_strip_t *s = user;
+  if (p->tag_code == PO33_TAG_BEGIN || p->tag_code == PO33_TAG_END)
+    return 0;
+  if (p->offset >= s->span.offset && p->offset - s->span.offset < s->span.length) {
+    if (p->tag_code != PO33_TAG_SOUND_DATA) {
+      s->status = PO_ERR_FRAME;
+      return 1;
+    }
+    return 0;
+  }
+  s->status = po33_builder_append_packet(s->builder, p->tag_code, p->payload, p->payload_len, NULL);
+  return s->status != PO_OK;
+}
+
+po_status_t po33_sample_detach_rebuild(const uint8_t *frame, size_t frame_len, uint8_t slot,
+                                       const uint8_t *samples, size_t sample_bytes,
+                                       const po33_sample_detach_plan_t *plan, uint8_t *workspace,
+                                       size_t workspace_bytes, uint8_t *out, size_t capacity,
+                                       size_t *written) {
+  po33_sample_detach_plan_t expected = {0};
+  po33_sample_insert_plan_t insertion = {0};
+  po33_builder_t builder;
+  po33_decode_result_t parsed;
+  po33_detach_strip_t strip;
+  po_status_t status;
+  size_t base;
+  int aliases =
+      edit_rebuild_has_invalid_aliases(frame, frame_len, samples, sample_bytes, plan, sizeof(*plan),
+                                       workspace, workspace_bytes, out, capacity, written);
+  if (written != NULL && !aliases)
+    *written = 0;
+  if (plan == NULL || workspace == NULL || out == NULL || written == NULL || aliases)
+    return PO_ERR_INVALID_ARG;
+  status = po33_sample_detach_plan(frame, frame_len, slot, samples, sample_bytes, &expected);
+  if (status != PO_OK || plan->required_workspace_bytes != expected.required_workspace_bytes ||
+      plan->required_frame_bytes != expected.required_frame_bytes ||
+      plan->intermediate_frame_bytes != expected.intermediate_frame_bytes ||
+      plan->sample_bytes != expected.sample_bytes ||
+      plan->allocation_bytes != expected.allocation_bytes ||
+      plan->target_data_span.offset != expected.target_data_span.offset ||
+      plan->target_data_span.length != expected.target_data_span.length ||
+      plan->slot != expected.slot || plan->source_selector != expected.source_selector ||
+      plan->reason != expected.reason)
+    return PO_ERR_INVALID_ARG;
+  if (workspace_bytes < expected.required_workspace_bytes ||
+      capacity < expected.required_frame_bytes)
+    return PO_ERR_BUFFER_TOO_SMALL;
+  status = po33_builder_init(&builder, workspace, expected.intermediate_frame_bytes);
+  if (status != PO_OK)
+    return status;
+  strip = (po33_detach_strip_t){
+      .builder = &builder, .span = expected.target_data_span, .status = PO_OK};
+  status = po33_frame_parse(frame, frame_len, detach_strip_packet, &strip, &parsed);
+  if (strip.status != PO_OK)
+    return strip.status;
+  if (status != PO_OK || !parsed.done || parsed.stopped || parsed.frame_bytes != frame_len)
+    return PO_ERR_FRAME;
+  status = po33_builder_finish(&builder, &base);
+  if (status != PO_OK || base != expected.intermediate_frame_bytes)
+    return PO_ERR_FRAME;
+  status = po33_sample_insert_plan(workspace, base, slot, samples, sample_bytes, &insertion);
+  if (status != PO_OK || insertion.required_frame_bytes != expected.required_frame_bytes)
+    return PO_ERR_FRAME;
+  return po33_sample_insert_rebuild(workspace, base, slot, samples, sample_bytes, &insertion,
+                                    workspace + base, workspace_bytes - base, out, capacity,
+                                    written);
+}
+
 typedef struct po33_range_source {
   uint8_t selector;
   size_t allocation_bytes;
