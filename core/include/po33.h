@@ -257,8 +257,10 @@ po_status_t po33_pool_topology_build(const uint8_t *frame, size_t frame_len,
  * sound_records and pools may be NULL only with their matching zero count.
  * plan is required and must not overlap either input array. Target range and
  * ownership failures return PO_ERR_RANGE; unsafe or internally inconsistent
- * topology returns PO_ERR_PARSE. A valid plan output is cleared for invalid
- * arguments, while plan.reason describes every target-specific rejection.
+ * topology returns PO_ERR_PARSE. An overlapping plan returns PO_ERR_INVALID_ARG
+ * before plan state is written; output guarantees do not apply to an invalid
+ * alias. For nonoverlapping plan storage, other invalid arguments clear the
+ * plan, while plan.reason describes every target-specific rejection.
  * PO_OK means the existing allocation fits, or required growth is structurally
  * eligible; it does not establish an output-frame capacity or device support. */
 po_status_t po33_pool_replacement_plan(const po33_sound_record_t *sound_records,
