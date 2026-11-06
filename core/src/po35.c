@@ -361,15 +361,18 @@ po_status_t po35_speech_edit_plan(const uint8_t *frame, size_t frame_len,
 
   if (plan == NULL)
     return PO_ERR_INVALID_ARG;
-  if ((frame != NULL && speech_edit_ranges_overlap(plan, sizeof(*plan), frame, frame_len)) ||
-      (edits != NULL &&
-       (edit_count > SIZE_MAX / sizeof(*edits) ||
-        speech_edit_ranges_overlap(plan, sizeof(*plan), edits, edit_count * sizeof(*edits)))))
+  if (frame != NULL && speech_edit_ranges_overlap(plan, sizeof(*plan), frame, frame_len))
+    return PO_ERR_INVALID_ARG;
+  if (edits != NULL && edit_count > SIZE_MAX / sizeof(*edits)) {
+    speech_edit_plan_clear(plan);
+    return PO_ERR_RANGE;
+  }
+  if (edits != NULL &&
+      speech_edit_ranges_overlap(plan, sizeof(*plan), edits, edit_count * sizeof(*edits)))
     return PO_ERR_INVALID_ARG;
   if (edits != NULL) {
     for (size_t i = 0; i < edit_count; ++i)
-      if (edits[i].records != NULL && edits[i].record_bytes % PO35_SPEECH_RECORD_BYTES == 0u &&
-          edits[i].record_bytes / PO35_SPEECH_RECORD_BYTES <= UINT16_MAX &&
+      if (edits[i].records != NULL &&
           speech_edit_ranges_overlap(plan, sizeof(*plan), edits[i].records, edits[i].record_bytes))
         return PO_ERR_INVALID_ARG;
   }
