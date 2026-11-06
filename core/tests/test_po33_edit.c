@@ -249,6 +249,11 @@ static void test_pool_replacement_planning(void) {
     }
   assert(target_references == plan.reference_count && target_selectors[0] == 7u &&
          target_selectors[1] == 8u);
+  assert(po33_pool_replacement_plan(planner_fixture.records, planner_fixture.record_count,
+                                    planner_fixture.pools, planner_fixture.pool_count, 0u, SIZE_MAX,
+                                    &plan) == PO_ERR_RANGE);
+  assert(plan.reason == PO33_POOL_REPLACEMENT_REASON_REQUIRED_ALLOCATION_OVERFLOW &&
+         plan.reference_count == 2u && plan.affected_sound_record_count == 2u);
 
   memcpy(records_before, planner_fixture.records, sizeof(records_before));
   memcpy(pools_before, planner_fixture.pools, sizeof(pools_before));
@@ -348,7 +353,8 @@ static void test_pool_replacement_planning(void) {
   assert(po33_pool_replacement_plan(planner_fixture.records, planner_fixture.record_count,
                                     malformed_pools, planner_fixture.pool_count, 0u,
                                     PO33_POOL_ALLOCATION_BLOCK_BYTES, &plan) == PO_ERR_PARSE);
-  assert(plan.reason == PO33_POOL_REPLACEMENT_REASON_AMBIGUOUS_GROUP_BOUNDARY);
+  assert(plan.reason == PO33_POOL_REPLACEMENT_REASON_AMBIGUOUS_GROUP_BOUNDARY &&
+         plan.reference_count == 1u && plan.affected_sound_record_count == 1u);
 }
 
 static po32_packet_t original[64], edited[64];

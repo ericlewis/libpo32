@@ -206,6 +206,10 @@ static int count_packet(const po_packet_t *packet, void *user) {
 static void test_pool_topology(void) {
   union {
     uint8_t frame[PO33_PREAMBLE_BYTES + 512u];
+    size_t count;
+  } frame_or_count;
+  union {
+    uint8_t frame[PO33_PREAMBLE_BYTES + 512u];
     po33_sound_record_t records[10];
   } frame_or_records;
   union {
@@ -221,6 +225,7 @@ static void test_pool_topology(void) {
   po33_decode_result_t before, after;
   size_t records_required = 0u, pools_required = 0u, references_required = 0u;
   size_t before_packets = 0u, after_packets = 0u;
+  size_t shared_count = 71u, other_count = 72u;
 
   make_topology_fixture(&fixture);
   memcpy(saved, fixture.frame, fixture.length);
@@ -230,6 +235,14 @@ static void test_pool_topology(void) {
   assert(po33_pool_topology_requirements(fixture.frame, fixture.length, &records_required,
                                          &pools_required, &references_required) == PO_OK);
   assert(records_required == 9u && pools_required == 5u && references_required == 5u);
+  assert(po33_pool_topology_requirements(fixture.frame, fixture.length, &shared_count,
+                                         &shared_count, &other_count) == PO_ERR_INVALID_ARG);
+  assert(shared_count == 71u && other_count == 72u);
+  memcpy(frame_or_count.frame, fixture.frame, fixture.length);
+  assert(po33_pool_topology_requirements(frame_or_count.frame, fixture.length,
+                                         &frame_or_count.count, &shared_count,
+                                         &other_count) == PO_ERR_INVALID_ARG);
+  assert(memcmp(frame_or_count.frame, fixture.frame, fixture.length) == 0);
 
   memset(records, 0xa5, sizeof(records));
   memset(pools, 0xa5, sizeof(pools));
