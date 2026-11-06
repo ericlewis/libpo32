@@ -21,6 +21,24 @@ preserves values that the semantic model cannot yet reproduce safely.
 Use the [C API guide](C_API.md) for function contracts and the
 [command-line guides](../examples/README.md) for file workflows.
 
+## Current understanding
+
+Transport and record layout are better understood than every field's playback
+meaning. Tested banks can be decoded and rebuilt while retaining unknown bytes;
+that does not require assigning those bytes a musical role.
+
+| Family | Established capabilities | Main remaining gaps |
+| --- | --- | --- |
+| PO-32 | Mono modem, drum patch parameters, synthesis and pattern editing | Some per-step/control bits and slot-marker receive behavior; typed chain/trigger preservation limits |
+| PO-33 / PO-133 | Stereo modem, lossless records, sample codec/resampling, shared-pool topology and replacement; exact PO-33 replacement/growth readbacks | Audible range endpoints and slice mapping, full note/timing/parameter scales, most FX codes and retained-state update rules, maximum storage capacity |
+| PO-35 / PO-137 | Stereo modem, lossless records, speech-group replacement and approximate PCM speech analysis/rendering; shared PO-32 drum patch codec | Indexed voice/effect tables, exact speech gain/noise and synthesis behavior, header metadata units, key/scale and other pattern/control semantics; generated speech hardware acceptance |
+
+PO-133 and PO-137 share the inspected 33/35 record grammars, respectively;
+that does not establish identical firmware, audio or physical cross-loading.
+The family references above distinguish verified layouts, observed roles and
+candidate interpretations. There is no meaningful single completion percentage
+across framing, byte preservation, musical semantics and device validation.
+
 ## Reading the layouts
 
 A **packet** is a tagged, length-delimited unit in a transfer. Its **payload**
