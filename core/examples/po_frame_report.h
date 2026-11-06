@@ -56,6 +56,10 @@ typedef struct po_frame_report {
   size_t unknown_payload_bytes;
 } po_frame_report_t;
 
+/* Load one raw byte file into hosted caller-owned storage. Output pointers are
+ * required and are cleared on failure; caller frees bytes after success. */
+int po_frame_read_file(const char *path, uint8_t **out_bytes, size_t *out_length);
+
 /* Collect a report for one explicitly selected family. out must be zeroed or
  * destroyed before use. A parser failure is represented in parser_status and
  * still returns 1 with its validated-prefix facts. Returns 0 only for an

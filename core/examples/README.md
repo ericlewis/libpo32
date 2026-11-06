@@ -28,6 +28,7 @@ Use the [C API guide](../docs/C_API.md) for application integration and the
 | [`po_inspect.c`](po_inspect.c) | Print a stable structural report for one complete PO-33 or PO-35 raw frame |
 | [`po_diff.c`](po_diff.c) | Compare two complete raw frames by bytes, packet topology, and raw-record topology |
 | [`po_capture_doctor.c`](po_capture_doctor.c) | Diagnose one stereo capture across both channel orders and both backup parsers without exporting a frame |
+| [`po_transfer_verify.c`](po_transfer_verify.c) | Compare one explicit raw frame with both recovery orders from one stereo capture |
 
 ## Build
 
@@ -45,6 +46,7 @@ cmake --build build
 ./build/core/po_diff --family po33 before/frame.bin after/frame.bin
 ./build/core/po_capture_doctor input.wav
 ./build/core/po_capture_doctor --json input.wav
+./build/core/po_transfer_verify --family po33 decoded-po33/frame.bin readback.wav
 ```
 
 ## Raw Frame Inspection
@@ -97,6 +99,26 @@ hosted receiver did not return a wire span; it does not assign a waveform
 failure cause. A readable capture produces a diagnostic even if no candidate
 completes; an unreadable or unsupported WAV returns status 1 after its short
 diagnostic.
+
+### Transfer Readback Verification
+
+`po_transfer_verify` compares one explicit, complete raw reference frame with
+one readable stereo capture. Select `--family po33` or `--family po35`; the
+command runs the existing one-shot receiver for normal and swapped channel
+order and reports both candidates. It does not repair bytes, stitch transfers,
+infer a family, or choose a channel order.
+
+```sh
+./build/core/po_transfer_verify --family po33 decoded-po33/frame.bin readback.wav
+```
+
+Exit status 0 means at least one candidate parsed to a complete frame whose
+consumed bytes exactly match the reference. The report may show raw receiver
+bytes after that frame tail; those are reported as trailing bytes and are not
+part of the compared frame. A readable mismatch returns status 1 after its
+report. This is software recovery evidence only: it does not prove that a
+physical device accepted a transfer or that an observed capture came from a
+particular device state.
 
 ## Offline Capture Checks
 
