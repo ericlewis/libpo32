@@ -449,6 +449,7 @@ int main(void) {
      * a fitting sample replacement through the conservative core contract. */
     char *copy[] = {"encode", input, output};
     char *replace[] = {"encode", input, output, "--sample", "7", wav};
+    char *pattern_only[] = {"encode", input, output, "--pattern", "2", pattern};
     size_t before;
     int exit_status;
     make_fixture(1);
@@ -456,6 +457,16 @@ int main(void) {
     exit_status = CALL(copy);
     assert(exit_status == 0 && rendered_length == fixture_length &&
            !memcmp(rendered_frame, fixture, fixture_length));
+    exit_status = unlink(output);
+    assert(exit_status == 0);
+    exit_status = CALL(pattern_only);
+    assert(exit_status == 0);
+    edited_count = 0;
+    status = po33_frame_parse(rendered_frame, rendered_length, collect_edited, NULL, &result);
+    assert(status == PO_OK && result.done);
+    assert(edited[11].tag_code == 0x4321 && edited[11].payload_len == 4 &&
+           !memcmp(edited[11].payload, "\x00\xff\x81\x2a", 4));
+    assert(edited[4].payload[0] == 6 && edited[6].payload[3] == 1);
     exit_status = unlink(output);
     assert(exit_status == 0);
     before = render_calls;
