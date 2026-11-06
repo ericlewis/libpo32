@@ -219,6 +219,53 @@ typedef struct po33_sound_range_plan {
   po33_sound_range_reason_t reason;
 } po33_sound_range_plan_t;
 
+typedef enum po33_sample_insert_reason {
+  PO33_SAMPLE_INSERT_REASON_NONE = 0,
+  PO33_SAMPLE_INSERT_REASON_SLOT_OUT_OF_RANGE,
+  PO33_SAMPLE_INSERT_REASON_MISSING_SELECTOR,
+  PO33_SAMPLE_INSERT_REASON_DUPLICATE_SELECTOR,
+  PO33_SAMPLE_INSERT_REASON_OCCUPIED,
+  PO33_SAMPLE_INSERT_REASON_REFERENCED,
+  PO33_SAMPLE_INSERT_REASON_UNKNOWN_EXTENSION
+} po33_sample_insert_reason_t;
+
+typedef struct po33_sample_insert_plan {
+  size_t required_workspace_bytes, required_frame_bytes;
+  size_t sample_bytes, allocation_bytes, selector_offset;
+  uint8_t slot;
+  po33_sample_insert_reason_t reason;
+} po33_sample_insert_plan_t;
+
+/* Insert nonempty encoded samples into an existing empty melodic selector
+ * (slot 0..7). A header-only alias is occupied, not empty. Missing/duplicate
+ * selectors, existing references to the slot and unknown target extensions
+ * are rejected. The new header is (start=0, end=sample_bytes, source=slot).
+ * Allocation rounds sample_bytes+1 up to 4096, with silent guard and padding.
+ * Packets stop at each allocation-block boundary; the first block also carries
+ * the nine-byte header. Other packet payloads/order are preserved.
+ *
+ * Both functions require one complete frame with no trailing bytes. Samples
+ * may overlap frame. All outputs, plan and workspace must be mutually disjoint
+ * and disjoint from borrowed input. Invalid aliases return INVALID_ARG without
+ * output guarantees. Otherwise plan failures clear sizes, set selector_offset
+ * to SIZE_MAX and slot to UINT8_MAX; reason describes target rejections.
+ * Empty/oversized samples or invalid/missing slot return RANGE; occupied,
+ * duplicate, referenced or extended targets return PARSE. Malformed framing
+ * or records return FRAME. Null required pointers return INVALID_ARG.
+ * Rebuild revalidates the plan, returns INVALID_ARG on mismatch, and needs the
+ * reported staging/output sizes (BUFFER_TOO_SMALL otherwise). For valid,
+ * nonalias outputs every failure leaves out untouched and sets *written=0.
+ * Workspace contents are unspecified. No heap, capacity-limit or drum-slice
+ * semantics. One PO-33 insertion has exact readback and audible cue evidence. */
+po_status_t po33_sample_insert_plan(const uint8_t *frame, size_t frame_len, uint8_t slot,
+                                    const uint8_t *samples, size_t sample_bytes,
+                                    po33_sample_insert_plan_t *plan);
+po_status_t po33_sample_insert_rebuild(const uint8_t *frame, size_t frame_len, uint8_t slot,
+                                       const uint8_t *samples, size_t sample_bytes,
+                                       const po33_sample_insert_plan_t *plan, uint8_t *workspace,
+                                       size_t workspace_bytes, uint8_t *out, size_t capacity,
+                                       size_t *written);
+
 /* Split/combine control_raw: low note/key nibble, high timing nibble.
  * Encode requires both fields in 0..15; invalid input leaves output untouched.
  * Input/output must not overlap. */

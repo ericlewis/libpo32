@@ -1300,6 +1300,194 @@ po_status_t po33_sample_edit_rebuild(const uint8_t *frame, size_t frame_len, siz
                                     workspace, workspace_bytes, out, capacity, written, 1);
 }
 
+typedef struct po33_insert_scan {
+  uint8_t slot;
+  unsigned seen;
+  int active, occupied, extension, referenced;
+  size_t offset;
+} po33_insert_scan_t;
+
+static po_status_t insert_check_reference(const po33_topology_observed_record_t *record,
+                                          void *user) {
+  po33_insert_scan_t *scan = user;
+  if (record->header.source_selector == scan->slot)
+    scan->referenced = 1;
+  return PO_OK;
+}
+
+static int insert_scan_packet(const po_packet_t *packet, void *user) {
+  po33_insert_scan_t *scan = user;
+  if (packet->tag_code == PO33_TAG_SOUND_SELECT) {
+    scan->active = packet->payload[0] == scan->slot;
+    if (scan->active) {
+      if (scan->seen < 2u)
+        ++scan->seen;
+      scan->offset = packet->offset;
+    }
+  } else if (scan->active && packet->tag_code != PO33_TAG_END) {
+    if (packet->tag_code == PO33_TAG_SOUND_DATA)
+      scan->occupied = 1;
+    else
+      scan->extension = 1;
+  }
+  return 0;
+}
+
+po_status_t po33_sample_insert_plan(const uint8_t *frame, size_t frame_len, uint8_t slot,
+                                    const uint8_t *samples, size_t sample_bytes,
+                                    po33_sample_insert_plan_t *plan) {
+  po33_insert_scan_t scan = {.slot = slot};
+  po33_decode_result_t result;
+  po_status_t status;
+  size_t blocks;
+  if (plan == NULL ||
+      (frame != NULL && po33_ranges_overlap(plan, sizeof(*plan), frame, frame_len)) ||
+      (samples != NULL && po33_ranges_overlap(plan, sizeof(*plan), samples, sample_bytes)))
+    return PO_ERR_INVALID_ARG;
+  *plan = (po33_sample_insert_plan_t){.selector_offset = SIZE_MAX, .slot = UINT8_MAX};
+  if (frame == NULL || samples == NULL)
+    return PO_ERR_INVALID_ARG;
+  if (slot >= 8u) {
+    plan->reason = PO33_SAMPLE_INSERT_REASON_SLOT_OUT_OF_RANGE;
+    return PO_ERR_RANGE;
+  }
+  if (sample_bytes == 0u || sample_bytes > UINT32_MAX ||
+      sample_bytes > SIZE_MAX - PO33_POOL_ALLOCATION_BLOCK_BYTES)
+    return PO_ERR_RANGE;
+  status = topology_parse_exact_records(frame, frame_len, insert_check_reference, &scan);
+  if (status != PO_OK)
+    return status;
+  status = po33_frame_parse(frame, frame_len, insert_scan_packet, &scan, &result);
+  if (status != PO_OK || !result.done || result.frame_bytes != frame_len)
+    return PO_ERR_FRAME;
+  if (scan.seen == 0u) {
+    plan->reason = PO33_SAMPLE_INSERT_REASON_MISSING_SELECTOR;
+    return PO_ERR_RANGE;
+  }
+  if (scan.seen > 1u)
+    plan->reason = PO33_SAMPLE_INSERT_REASON_DUPLICATE_SELECTOR;
+  else if (scan.occupied)
+    plan->reason = PO33_SAMPLE_INSERT_REASON_OCCUPIED;
+  else if (scan.extension)
+    plan->reason = PO33_SAMPLE_INSERT_REASON_UNKNOWN_EXTENSION;
+  else if (scan.referenced)
+    plan->reason = PO33_SAMPLE_INSERT_REASON_REFERENCED;
+  if (plan->reason != PO33_SAMPLE_INSERT_REASON_NONE)
+    return PO_ERR_PARSE;
+  blocks = (sample_bytes + PO33_POOL_ALLOCATION_BLOCK_BYTES) / PO33_POOL_ALLOCATION_BLOCK_BYTES;
+  if (frame_len > SIZE_MAX - PO33_SOUND_HEADER_BYTES ||
+      blocks > (SIZE_MAX - frame_len - PO33_SOUND_HEADER_BYTES) /
+                   (PO33_POOL_ALLOCATION_BLOCK_BYTES + 17u * PO_WIRE_OVERHEAD_BYTES))
+    return PO_ERR_RANGE;
+  plan->required_frame_bytes =
+      frame_len + PO33_SOUND_HEADER_BYTES +
+      blocks * (PO33_POOL_ALLOCATION_BLOCK_BYTES + 17u * PO_WIRE_OVERHEAD_BYTES);
+  plan->required_workspace_bytes = plan->required_frame_bytes;
+  plan->sample_bytes = sample_bytes;
+  plan->allocation_bytes = blocks * PO33_POOL_ALLOCATION_BLOCK_BYTES;
+  plan->selector_offset = scan.offset;
+  plan->slot = slot;
+  return PO_OK;
+}
+
+typedef struct po33_insert_rebuild {
+  po33_builder_t *builder;
+  const po33_sample_insert_plan_t *plan;
+  const uint8_t *samples;
+  po_status_t status;
+  int inserted;
+} po33_insert_rebuild_t;
+
+static int insert_rebuild_packet(const po_packet_t *packet, void *user) {
+  po33_insert_rebuild_t *r = user;
+  const po33_sample_insert_plan_t *p = r->plan;
+  if (packet->tag_code == PO33_TAG_BEGIN || packet->tag_code == PO33_TAG_END)
+    return 0;
+  r->status = po33_builder_append_packet(r->builder, packet->tag_code, packet->payload,
+                                         packet->payload_len, NULL);
+  if (r->status != PO_OK)
+    return 1;
+  if (packet->offset == p->selector_offset) {
+    uint8_t header[PO33_SOUND_HEADER_BYTES], data[PO_MAX_PAYLOAD];
+    po33_sound_header_t value = {0u, (uint32_t)p->sample_bytes, p->slot};
+    size_t position = 0u;
+    r->status = po33_sound_header_encode(&value, header, sizeof(header));
+    if (r->status != PO_OK)
+      return 1;
+    for (size_t block = 0u; block < p->allocation_bytes;
+         block += PO33_POOL_ALLOCATION_BLOCK_BYTES) {
+      size_t end = PO33_SOUND_HEADER_BYTES + block + PO33_POOL_ALLOCATION_BLOCK_BYTES;
+      while (position < end) {
+        size_t count = end - position;
+        if (count > sizeof(data))
+          count = sizeof(data);
+        for (size_t i = 0u; i < count; ++i) {
+          size_t index = position + i;
+          data[i] = index < PO33_SOUND_HEADER_BYTES
+                        ? header[index]
+                        : (index - PO33_SOUND_HEADER_BYTES < p->sample_bytes
+                               ? r->samples[index - PO33_SOUND_HEADER_BYTES]
+                               : 0u);
+        }
+        r->status = po33_builder_append_packet(r->builder, PO33_TAG_SOUND_DATA, data, count, NULL);
+        if (r->status != PO_OK)
+          return 1;
+        position += count;
+      }
+    }
+    r->inserted = 1;
+  }
+  return 0;
+}
+
+po_status_t po33_sample_insert_rebuild(const uint8_t *frame, size_t frame_len, uint8_t slot,
+                                       const uint8_t *samples, size_t sample_bytes,
+                                       const po33_sample_insert_plan_t *plan, uint8_t *workspace,
+                                       size_t workspace_bytes, uint8_t *out, size_t capacity,
+                                       size_t *written) {
+  po33_sample_insert_plan_t expected = {0};
+  po33_builder_t builder;
+  po33_decode_result_t parsed;
+  po33_insert_rebuild_t rebuild;
+  size_t length;
+  po_status_t status;
+  int aliases =
+      edit_rebuild_has_invalid_aliases(frame, frame_len, samples, sample_bytes, plan, sizeof(*plan),
+                                       workspace, workspace_bytes, out, capacity, written);
+  if (written != NULL && !aliases)
+    *written = 0u;
+  if (plan == NULL || workspace == NULL || out == NULL || written == NULL || aliases)
+    return PO_ERR_INVALID_ARG;
+  status = po33_sample_insert_plan(frame, frame_len, slot, samples, sample_bytes, &expected);
+  if (status != PO_OK || plan->required_workspace_bytes != expected.required_workspace_bytes ||
+      plan->required_frame_bytes != expected.required_frame_bytes ||
+      plan->sample_bytes != expected.sample_bytes ||
+      plan->allocation_bytes != expected.allocation_bytes ||
+      plan->selector_offset != expected.selector_offset || plan->slot != expected.slot ||
+      plan->reason != expected.reason)
+    return PO_ERR_INVALID_ARG;
+  if (workspace_bytes < expected.required_workspace_bytes ||
+      capacity < expected.required_frame_bytes)
+    return PO_ERR_BUFFER_TOO_SMALL;
+  status = po33_builder_init(&builder, workspace, workspace_bytes);
+  if (status != PO_OK)
+    return status;
+  rebuild = (po33_insert_rebuild_t){
+      .builder = &builder, .plan = &expected, .samples = samples, .status = PO_OK};
+  status = po33_frame_parse(frame, frame_len, insert_rebuild_packet, &rebuild, &parsed);
+  if (rebuild.status != PO_OK)
+    return rebuild.status;
+  if (status != PO_OK || !parsed.done || parsed.stopped || !rebuild.inserted ||
+      parsed.frame_bytes != frame_len)
+    return PO_ERR_FRAME;
+  status = po33_builder_finish(&builder, &length);
+  if (status != PO_OK || length != expected.required_frame_bytes)
+    return status == PO_OK ? PO_ERR_FRAME : status;
+  pool_edit_copy_bytes(out, workspace, length);
+  *written = length;
+  return PO_OK;
+}
+
 typedef struct po33_range_source {
   uint8_t selector;
   size_t allocation_bytes;
