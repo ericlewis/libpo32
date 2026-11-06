@@ -599,6 +599,31 @@ static void test_frame_reports(void) {
   po_frame_report_destroy(&report);
 }
 
+static void test_frame_report_many_unknown_tags(void) {
+  const size_t tag_count = 512u;
+  const size_t capacity = PO33_PREAMBLE_BYTES + 5u + tag_count * 5u + 5u;
+  po33_builder_t builder;
+  po_frame_report_t report = {0};
+  uint8_t *frame = (uint8_t *)malloc(capacity);
+  size_t length = 0u;
+
+  assert(frame != NULL);
+  assert(po33_builder_init(&builder, frame, capacity) == PO_OK);
+  for (size_t index = 0u; index < tag_count; ++index)
+    assert(po33_builder_append_packet(&builder, (uint16_t)(0x4000u + index), NULL, 0u, NULL) ==
+           PO_OK);
+  assert(po33_builder_finish(&builder, &length) == PO_OK);
+  assert(po_frame_report_collect(PO_FRAME_FAMILY_PO33, frame, length, &report));
+  assert(report.unknown_tag_count == tag_count && report.unknown_packet_count == tag_count &&
+         report.unknown_payload_bytes == 0u);
+  for (size_t index = 0u; index < tag_count; ++index)
+    assert(report.unknown_tags[index].tag_code == (uint16_t)(0x4000u + index) &&
+           report.unknown_tags[index].packet_count == 1u &&
+           report.unknown_tags[index].payload_bytes == 0u);
+  po_frame_report_destroy(&report);
+  free(frame);
+}
+
 static void doctor_load_file(const char *path, uint8_t **out, size_t *out_size) {
   FILE *file;
   long end;
@@ -823,6 +848,7 @@ int main(void) {
   test_writer_failures();
   test_writer_validation();
   test_frame_reports();
+  test_frame_report_many_unknown_tags();
   test_capture_doctor();
   puts("Shared capture I/O and WAV failure tests passed");
   return 0;

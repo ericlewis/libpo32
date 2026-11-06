@@ -7,9 +7,15 @@
 #include <stdlib.h>
 #include <string.h>
 
+typedef struct po_frame_unknown_accumulator {
+  size_t packet_count;
+  size_t payload_bytes;
+} po_frame_unknown_accumulator_t;
+
 typedef struct po_frame_collector {
   po_frame_family_t family;
   po_frame_report_t *report;
+  po_frame_unknown_accumulator_t *unknown_by_tag;
   int failed;
 } po_frame_collector_t;
 
@@ -60,36 +66,25 @@ static int po_frame_report_add_selector(po_frame_report_t *report, po_frame_sele
   return 1;
 }
 
-static int po_frame_report_add_unknown(po_frame_report_t *report, const po_packet_t *packet) {
-  po_frame_unknown_tag_t *tags;
-  size_t index;
+static int po_frame_report_add_unknown(po_frame_collector_t *collector, const po_packet_t *packet) {
+  po_frame_report_t *report = collector->report;
+  po_frame_unknown_accumulator_t *tag;
   if (report->unknown_packet_count == SIZE_MAX ||
       report->unknown_payload_bytes > SIZE_MAX - packet->payload_len)
     return 0;
-  for (index = 0; index < report->unknown_tag_count; ++index) {
-    po_frame_unknown_tag_t *tag = report->unknown_tags + index;
-    if (tag->tag_code != packet->tag_code)
-      continue;
-    if (tag->packet_count == SIZE_MAX || tag->payload_bytes > SIZE_MAX - packet->payload_len)
+  if (collector->unknown_by_tag == NULL) {
+    collector->unknown_by_tag = (po_frame_unknown_accumulator_t *)calloc(
+        (size_t)UINT16_MAX + 1u, sizeof(*collector->unknown_by_tag));
+    if (collector->unknown_by_tag == NULL)
       return 0;
-    ++tag->packet_count;
-    tag->payload_bytes += packet->payload_len;
-    ++report->unknown_packet_count;
-    report->unknown_payload_bytes += packet->payload_len;
-    return 1;
   }
-  if (report->unknown_tag_count == SIZE_MAX / sizeof(*tags))
+  tag = collector->unknown_by_tag + packet->tag_code;
+  if (tag->packet_count == SIZE_MAX || tag->payload_bytes > SIZE_MAX - packet->payload_len)
     return 0;
-  tags = (po_frame_unknown_tag_t *)realloc(report->unknown_tags, (report->unknown_tag_count + 1u) *
-                                                                     sizeof(*report->unknown_tags));
-  if (tags == NULL)
-    return 0;
-  report->unknown_tags = tags;
-  tags += report->unknown_tag_count;
-  tags->tag_code = packet->tag_code;
-  tags->packet_count = 1;
-  tags->payload_bytes = packet->payload_len;
-  ++report->unknown_tag_count;
+  if (tag->packet_count == 0u)
+    ++report->unknown_tag_count;
+  ++tag->packet_count;
+  tag->payload_bytes += packet->payload_len;
   ++report->unknown_packet_count;
   report->unknown_payload_bytes += packet->payload_len;
   return 1;
@@ -109,7 +104,7 @@ static int po_frame_report_collect_packet(const po_packet_t *packet, void *user)
       break;
     default:
       if (!po_frame_report_is_known_po33_tag(packet->tag_code))
-        ok = po_frame_report_add_unknown(report, packet);
+        ok = po_frame_report_add_unknown(collector, packet);
       break;
     }
   } else {
@@ -127,7 +122,7 @@ static int po_frame_report_collect_packet(const po_packet_t *packet, void *user)
       break;
     default:
       if (!po_frame_report_is_known_po35_tag(packet->tag_code))
-        ok = po_frame_report_add_unknown(report, packet);
+        ok = po_frame_report_add_unknown(collector, packet);
       break;
     }
   }
@@ -138,10 +133,28 @@ static int po_frame_report_collect_packet(const po_packet_t *packet, void *user)
   return 0;
 }
 
-static int po_frame_report_compare_unknown_tags(const void *left, const void *right) {
-  const po_frame_unknown_tag_t *a = (const po_frame_unknown_tag_t *)left;
-  const po_frame_unknown_tag_t *b = (const po_frame_unknown_tag_t *)right;
-  return (a->tag_code > b->tag_code) - (a->tag_code < b->tag_code);
+static int po_frame_report_finalize_unknown_tags(po_frame_collector_t *collector) {
+  po_frame_report_t *report = collector->report;
+  size_t index = 0u;
+  if (report->unknown_tag_count == 0u)
+    return 1;
+  if (report->unknown_tag_count > SIZE_MAX / sizeof(*report->unknown_tags))
+    return 0;
+  report->unknown_tags =
+      (po_frame_unknown_tag_t *)malloc(report->unknown_tag_count * sizeof(*report->unknown_tags));
+  if (report->unknown_tags == NULL)
+    return 0;
+  for (uint32_t tag_code = 0u; tag_code <= UINT16_MAX; ++tag_code) {
+    const po_frame_unknown_accumulator_t *tag = collector->unknown_by_tag + tag_code;
+    if (tag->packet_count == 0u)
+      continue;
+    report->unknown_tags[index++] = (po_frame_unknown_tag_t){
+        .tag_code = (uint16_t)tag_code,
+        .packet_count = tag->packet_count,
+        .payload_bytes = tag->payload_bytes,
+    };
+  }
+  return index == report->unknown_tag_count;
 }
 
 void po_frame_report_destroy(po_frame_report_t *report) {
@@ -160,9 +173,10 @@ int po_frame_report_collect(po_frame_family_t family, const uint8_t *frame, size
     return 0;
   report.family = family;
   report.input_bytes = frame_len;
-  collector.family = family;
-  collector.report = &report;
-  collector.failed = 0;
+  collector = (po_frame_collector_t){
+      .family = family,
+      .report = &report,
+  };
   if (family == PO_FRAME_FAMILY_PO33) {
     po33_decode_result_t result;
     report.parser_status =
@@ -183,6 +197,7 @@ int po_frame_report_collect(po_frame_family_t family, const uint8_t *frame, size
     report.stopped = result.stopped;
   }
   if (collector.failed) {
+    free(collector.unknown_by_tag);
     po_frame_report_destroy(&report);
     return 0;
   }
@@ -190,9 +205,12 @@ int po_frame_report_collect(po_frame_family_t family, const uint8_t *frame, size
     report.unparsed_bytes = frame_len - report.consumed_bytes;
   if (report.complete)
     report.trailing_bytes = report.unparsed_bytes;
-  if (report.unknown_tag_count > 1)
-    qsort(report.unknown_tags, report.unknown_tag_count, sizeof(*report.unknown_tags),
-          po_frame_report_compare_unknown_tags);
+  if (!po_frame_report_finalize_unknown_tags(&collector)) {
+    free(collector.unknown_by_tag);
+    po_frame_report_destroy(&report);
+    return 0;
+  }
+  free(collector.unknown_by_tag);
   *out = report;
   return 1;
 }
