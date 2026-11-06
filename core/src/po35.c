@@ -283,18 +283,20 @@ static int speech_edit_known_group_interruption(uint16_t tag_code) {
 
 static int speech_edit_scan_packet(const po_packet_t *packet, void *user) {
   po35_speech_edit_scan_t *scan = (po35_speech_edit_scan_t *)user;
+  if (scan->status != PO_OK)
+    return 0;
   switch (packet->tag_code) {
   case PO35_TAG_SPEECH_HEADER: {
     po35_speech_header_t header;
     if (scan->active_slot >= 0) {
       speech_edit_scan_reject_active(scan, PO35_SPEECH_EDIT_REASON_INCOMPLETE_GROUP);
-      return 1;
+      return 0;
     }
     if (po35_speech_header_decode(packet->payload, packet->payload_len, &header) != PO_OK ||
         header.slot >= PO35_SPEECH_SLOT_COUNT ||
         (scan->seen_slots & (uint16_t)(1u << header.slot))) {
       speech_edit_scan_fail(scan, PO_ERR_PARSE);
-      return 1;
+      return 0;
     }
     scan->seen_slots |= (uint16_t)(1u << header.slot);
     scan->active_slot = header.slot;
@@ -306,14 +308,14 @@ static int speech_edit_scan_packet(const po_packet_t *packet, void *user) {
     if (scan->active_slot < 0 || packet->payload_len == 0u ||
         packet->payload_len > scan->active_expected - scan->active_received) {
       speech_edit_scan_reject_active(scan, PO35_SPEECH_EDIT_REASON_INCOMPLETE_GROUP);
-      return 1;
+      return 0;
     }
     scan->active_received += packet->payload_len;
     if (scan->edit_index_by_slot[scan->active_slot] != SIZE_MAX) {
       size_t packet_bytes = packet->payload_len + PO_WIRE_OVERHEAD_BYTES;
       if (scan->removed_data_packet_bytes > SIZE_MAX - packet_bytes) {
         speech_edit_scan_fail(scan, PO_ERR_RANGE);
-        return 1;
+        return 0;
       }
       scan->removed_data_packet_bytes += packet_bytes;
     }
@@ -322,20 +324,20 @@ static int speech_edit_scan_packet(const po_packet_t *packet, void *user) {
     if (scan->active_slot < 0 || packet->payload_len != 0u ||
         scan->active_received != scan->active_expected) {
       speech_edit_scan_reject_active(scan, PO35_SPEECH_EDIT_REASON_INCOMPLETE_GROUP);
-      return 1;
+      return 0;
     }
     scan->active_slot = -1;
     return 0;
   default:
     if (scan->active_slot >= 0) {
+      if (speech_edit_known_group_interruption(packet->tag_code)) {
+        speech_edit_scan_reject_active(scan, PO35_SPEECH_EDIT_REASON_INCOMPLETE_GROUP);
+        return 0;
+      }
       if (scan->edit_index_by_slot[scan->active_slot] != SIZE_MAX) {
         speech_edit_scan_reject_active(scan,
                                        PO35_SPEECH_EDIT_REASON_UNKNOWN_SELECTED_GROUP_EXTENSION);
-        return 1;
-      }
-      if (speech_edit_known_group_interruption(packet->tag_code)) {
-        speech_edit_scan_fail(scan, PO_ERR_PARSE);
-        return 1;
+        return 0;
       }
     }
     return 0;
@@ -409,6 +411,10 @@ po_status_t po35_speech_edit_plan(const uint8_t *frame, size_t frame_len,
   }
 
   status = po35_frame_parse(frame, frame_len, speech_edit_scan_packet, &scan, &result);
+  if (status != PO_OK || !result.done || result.stopped || result.frame_bytes != frame_len) {
+    speech_edit_plan_clear(plan);
+    return PO_ERR_FRAME;
+  }
   if (scan.status != PO_OK) {
     if (scan.reason != PO35_SPEECH_EDIT_REASON_NONE)
       speech_edit_plan_reject(plan, scan.failed_edit_index, scan.failed_slot, scan.reason);
@@ -416,8 +422,6 @@ po_status_t po35_speech_edit_plan(const uint8_t *frame, size_t frame_len,
       speech_edit_plan_clear(plan);
     return scan.status;
   }
-  if (status != PO_OK || !result.done || result.stopped || result.frame_bytes != frame_len)
-    return PO_ERR_FRAME;
   if (scan.active_slot >= 0) {
     speech_edit_scan_reject_active(&scan, PO35_SPEECH_EDIT_REASON_INCOMPLETE_GROUP);
     if (scan.reason != PO35_SPEECH_EDIT_REASON_NONE)
@@ -488,18 +492,16 @@ static int speech_edit_rebuild_has_invalid_aliases(
   };
   size_t edit_bytes;
 
-  if (frame == NULL || plan == NULL || workspace == NULL || out_frame == NULL ||
-      out_frame_bytes == NULL || (edit_count != 0u && edits == NULL))
-    return 1;
   if (edits != NULL && edit_count > SIZE_MAX / sizeof(*edits))
     return 1;
-  edit_bytes = edit_count * sizeof(*edits);
+  edit_bytes = edits == NULL ? 0u : edit_count * sizeof(*edits);
   for (size_t i = 0; i < sizeof(storage) / sizeof(storage[0]); ++i) {
     for (size_t j = 0; j < i; ++j)
       if (speech_edit_ranges_overlap(storage[i].data, storage[i].bytes, storage[j].data,
                                      storage[j].bytes))
         return 1;
-    if (speech_edit_ranges_overlap(storage[i].data, storage[i].bytes, frame, frame_len) ||
+    if ((frame != NULL &&
+         speech_edit_ranges_overlap(storage[i].data, storage[i].bytes, frame, frame_len)) ||
         speech_edit_ranges_overlap(storage[i].data, storage[i].bytes, edits, edit_bytes))
       return 1;
     for (size_t j = 0; j < edit_count; ++j)
@@ -586,11 +588,15 @@ po_status_t po35_speech_edit_rebuild(const uint8_t *frame, size_t frame_len,
   po_status_t status;
   size_t frame_bytes;
 
+  if (plan == NULL || workspace == NULL || out_frame == NULL || out_frame_bytes == NULL)
+    return PO_ERR_INVALID_ARG;
   if (speech_edit_rebuild_has_invalid_aliases(frame, frame_len, edits, edit_count, plan, workspace,
                                               workspace_bytes, out_frame, out_capacity,
                                               out_frame_bytes))
     return PO_ERR_INVALID_ARG;
   *out_frame_bytes = 0u;
+  if (frame == NULL || (edit_count != 0u && edits == NULL))
+    return PO_ERR_INVALID_ARG;
 
   status = po35_speech_edit_plan(frame, frame_len, edits, edit_count, &expected);
   if (status != PO_OK || !speech_edit_plan_matches(plan, &expected))

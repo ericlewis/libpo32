@@ -214,13 +214,15 @@ po_status_t po35_speech_record_encode(const po35_speech_record_t *record, uint8_
  * For a non-NULL, nonoverlapping plan output, every other failure returns the
  * no-plan state described above.
  *
- * rebuild consumes a successful matching plan and revalidates its inputs. A
- * stale, mismatched or failed plan is PO_ERR_INVALID_ARG. A successful plan
- * requires a staging workspace at least plan.required_frame_bytes long; the
- * workspace and output frame are both required. PO_ERR_BUFFER_TOO_SMALL reports
- * either insufficient workspace or output capacity. For valid, nonoverlapping
- * output arguments, every failure leaves out_frame untouched and sets
- * *out_frame_bytes to zero. */
+ * rebuild consumes a successful plan and revalidates its inputs. The plan must
+ * match the fresh structural measurement for the current frame and edits;
+ * content is not snapshotted, so same-shaped current metadata or records may
+ * differ from planning. A failed or structurally mismatched plan is
+ * PO_ERR_INVALID_ARG. A successful plan requires a staging workspace at least
+ * plan.required_frame_bytes long; the workspace and output frame are both
+ * required. PO_ERR_BUFFER_TOO_SMALL reports either insufficient workspace or
+ * output capacity. For valid, nonoverlapping output arguments, every failure
+ * leaves out_frame untouched and sets *out_frame_bytes to zero. */
 po_status_t po35_speech_edit_plan(const uint8_t *frame, size_t frame_len,
                                   const po35_speech_edit_t *edits, size_t edit_count,
                                   po35_speech_edit_plan_t *plan);
