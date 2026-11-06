@@ -167,8 +167,9 @@ is named `libpo`; documented compatibility identifiers retain `libpo32`.
 ## Validation boundaries
 
 Builds, byte-preserving roundtrips and numerical checks do not establish device
-acceptance. Existing physical evidence covers specific PO-33 transfers and
-parameter comparisons; it does not validate every generated transfer, PO-133,
+acceptance. Existing physical evidence covers specific PO-33 transfers,
+parameter comparisons and [sample replacement with one-block pool growth](formats/PO33.md#sample-replacement-hardware-validation);
+it does not validate every generated transfer, maximum capacity, PO-133,
 or the PO-35/137 family. Unmapped controls remain raw. Speech analysis and
 reconstruction are approximate; neither reproduces the original Bitspeek or
 PO-35 implementation. See [Backup formats](PO_FORMATS.md) for the tested scope.

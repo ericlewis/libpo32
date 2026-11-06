@@ -109,8 +109,10 @@ The PO-33/35 structural codecs preserve record bytes. The
 [PO-32 typed limits](formats/PO32.md) require raw packets for exact preservation
 in some cases. Observed field
 roles do not establish complete numeric laws. Selected rebuilt PO-33 backups
-and a PCM sample replacement have user-confirmed device acceptance, and
-selected test banks have byte-identical device readbacks. Those observations
-do not validate every input, larger allocation, PO-133 hardware, or generated
-PO-35/137 speech. Software roundtrips and physical acceptance remain separate
-evidence.
+and PCM sample replacements have user-confirmed device acceptance, and
+selected test banks have byte-identical device readbacks. The integrated editor's
+[tested replacements](formats/PO33.md#sample-replacement-hardware-validation)
+include growth from 45,056 to 49,152 sample bytes. Those observations do not
+validate every input, other growth sizes, maximum capacity, PO-133 hardware,
+or generated PO-35/137 speech. Software roundtrips and physical acceptance
+remain separate evidence.
