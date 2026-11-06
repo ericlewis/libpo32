@@ -217,6 +217,15 @@ static void make_planner_fixture(unsigned int flags, size_t target_allocation) {
              planner_fixture.references, planner_fixture.reference_count) == PO_OK);
 }
 
+static void assert_pool_replacement_plan_neutral(const po33_pool_replacement_plan_t *plan) {
+  assert(plan->target_pool_index == SIZE_MAX && plan->requested_sample_bytes == 0u &&
+         plan->existing_allocation_bytes == 0u && plan->required_allocation_bytes == 0u &&
+         plan->required_growth_bytes == 0u && plan->reference_count == 0u &&
+         plan->affected_sound_record_count == 0u && !plan->existing_allocation_fits &&
+         !plan->growth_required && !plan->growth_structurally_eligible &&
+         plan->reason == PO33_POOL_REPLACEMENT_REASON_NONE);
+}
+
 static void test_pool_replacement_planning(void) {
   po33_pool_replacement_plan_t plan;
   po33_pool_t malformed_pools[4];
@@ -271,6 +280,19 @@ static void test_pool_replacement_planning(void) {
                                     &overlapping_pools.plan) == PO_ERR_INVALID_ARG);
   assert(memcmp(&overlapping_pools, &overlapping_pools_before, sizeof(overlapping_pools)) == 0);
   assert(memcmp(planner_fixture.records, records_before, sizeof(records_before)) == 0);
+
+  memset(&plan, 0xa5, sizeof(plan));
+  assert(po33_pool_replacement_plan(planner_fixture.records,
+                                    SIZE_MAX / sizeof(planner_fixture.records[0]) + 1u,
+                                    planner_fixture.pools, planner_fixture.pool_count, 0u,
+                                    PO33_POOL_ALLOCATION_BLOCK_BYTES, &plan) == PO_ERR_INVALID_ARG);
+  assert_pool_replacement_plan_neutral(&plan);
+  memset(&plan, 0xa5, sizeof(plan));
+  assert(po33_pool_replacement_plan(planner_fixture.records, planner_fixture.record_count,
+                                    planner_fixture.pools,
+                                    SIZE_MAX / sizeof(planner_fixture.pools[0]) + 1u, 0u,
+                                    PO33_POOL_ALLOCATION_BLOCK_BYTES, &plan) == PO_ERR_INVALID_ARG);
+  assert_pool_replacement_plan_neutral(&plan);
 
   assert(po33_pool_replacement_plan(planner_fixture.records, planner_fixture.record_count,
                                     planner_fixture.pools, planner_fixture.pool_count, 0u,

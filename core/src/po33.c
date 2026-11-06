@@ -536,8 +536,11 @@ po_status_t po33_pool_replacement_plan(const po33_sound_record_t *sound_records,
     goto finish;
   }
   if (sound_record_count > SIZE_MAX / sizeof(*sound_records) ||
-      pool_count > SIZE_MAX / sizeof(*pools) ||
-      pool_replacement_ranges_overlap(plan, sizeof(*plan), sound_records,
+      pool_count > SIZE_MAX / sizeof(*pools)) {
+    status = PO_ERR_INVALID_ARG;
+    goto finish;
+  }
+  if (pool_replacement_ranges_overlap(plan, sizeof(*plan), sound_records,
                                       sound_record_count * sizeof(*sound_records)) ||
       pool_replacement_ranges_overlap(plan, sizeof(*plan), pools, pool_count * sizeof(*pools)))
     return PO_ERR_INVALID_ARG;
