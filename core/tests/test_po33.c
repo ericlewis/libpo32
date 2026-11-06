@@ -47,6 +47,12 @@ typedef po_status_t (*po33_pool_topology_requirements_fn_t)(const uint8_t *frame
                                                             size_t *sound_record_count,
                                                             size_t *pool_count,
                                                             size_t *reference_count);
+typedef po_status_t (*po33_pool_topology_build_fn_t)(const uint8_t *frame, size_t frame_len,
+                                                     po33_sound_record_t *sound_records,
+                                                     size_t sound_record_capacity,
+                                                     po33_pool_t *pools, size_t pool_capacity,
+                                                     po33_pool_reference_t *references,
+                                                     size_t reference_capacity);
 static void test_pool_topology_api_surface(void) {
   const po33_sound_record_t record = {
       .selector = 7u,
@@ -92,6 +98,281 @@ static void test_pool_topology_api_surface(void) {
    * requiring a topology parser at link or run time. */
   assert(sizeof((po33_pool_topology_requirements_fn_t){po33_pool_topology_requirements}) ==
          sizeof(po33_pool_topology_requirements_fn_t));
+  assert(sizeof((po33_pool_topology_build_fn_t){po33_pool_topology_build}) ==
+         sizeof(po33_pool_topology_build_fn_t));
+}
+
+typedef struct topology_fixture {
+  uint8_t frame[PO33_PREAMBLE_BYTES + 512u];
+  size_t length;
+  size_t split_selection_offset;
+  size_t split_data_offset;
+  size_t split_last_data_offset;
+  size_t extension_data_offset;
+  size_t extension_last_data_offset;
+} topology_fixture_t;
+
+static void write32(uint8_t *out, uint32_t value) {
+  for (unsigned int i = 0; i < 4; ++i)
+    out[i] = (uint8_t)(value >> (8u * i));
+}
+
+static void topology_header(uint8_t out[PO33_SOUND_HEADER_BYTES], uint32_t start, uint32_t end,
+                            uint8_t source) {
+  write32(out, start);
+  write32(out + 4, end);
+  out[8] = source;
+}
+
+static void topology_append(po33_builder_t *builder, uint16_t tag, const uint8_t *payload,
+                            size_t payload_len, size_t *packet_offset) {
+  assert(po33_builder_append_packet(builder, tag, payload, payload_len, packet_offset) == PO_OK);
+}
+
+static void make_topology_fixture(topology_fixture_t *fixture) {
+  po33_builder_t builder;
+  uint8_t data[PO33_SOUND_HEADER_BYTES + 2u], selector;
+  const uint8_t extension[] = {0x5a, 0x51, 0x50};
+
+  assert(po33_builder_init(&builder, fixture->frame, sizeof(fixture->frame)) == PO_OK);
+
+  selector = 7u;
+  topology_append(&builder, PO33_TAG_SOUND_SELECT, &selector, 1u, &fixture->split_selection_offset);
+  topology_header(data, UINT32_C(0x10203040), UINT32_C(0x50607080), 7u);
+  data[9] = 0x91u;
+  data[10] = 0x92u;
+  topology_append(&builder, PO33_TAG_SOUND_DATA, data, 4u, &fixture->split_data_offset);
+  topology_append(&builder, PO33_TAG_SOUND_DATA, data + 4u, 7u, &fixture->split_last_data_offset);
+
+  selector = 8u;
+  topology_append(&builder, PO33_TAG_SOUND_SELECT, &selector, 1u, NULL);
+  topology_header(data, 11u, 22u, 7u);
+  topology_append(&builder, PO33_TAG_SOUND_DATA, data, PO33_SOUND_HEADER_BYTES, NULL);
+
+  selector = 9u;
+  topology_append(&builder, PO33_TAG_SOUND_SELECT, &selector, 1u, NULL);
+  topology_header(data, 33u, 44u, 9u);
+  data[9] = 0x93u;
+  topology_append(&builder, PO33_TAG_SOUND_DATA, data, 10u, NULL);
+
+  /* Adjacent raw selectors retain distinct owner pools; no drum mapping is inferred. */
+  selector = 10u;
+  topology_append(&builder, PO33_TAG_SOUND_SELECT, &selector, 1u, NULL);
+  topology_header(data, 55u, 66u, 10u);
+  data[9] = 0x94u;
+  data[10] = 0x95u;
+  topology_append(&builder, PO33_TAG_SOUND_DATA, data, 3u, &fixture->extension_data_offset);
+  topology_append(&builder, 0x4321u, extension, sizeof(extension), NULL);
+  topology_append(&builder, PO33_TAG_SOUND_DATA, data + 3u, 8u,
+                  &fixture->extension_last_data_offset);
+
+  selector = 9u;
+  topology_append(&builder, PO33_TAG_SOUND_SELECT, &selector, 1u, NULL);
+  topology_header(data, 77u, 88u, 10u);
+  topology_append(&builder, PO33_TAG_SOUND_DATA, data, PO33_SOUND_HEADER_BYTES, NULL);
+
+  selector = 12u;
+  topology_append(&builder, PO33_TAG_SOUND_SELECT, &selector, 1u, NULL);
+  topology_header(data, 99u, 111u, 12u);
+  data[9] = 0x96u;
+  topology_append(&builder, PO33_TAG_SOUND_DATA, data, 10u, NULL);
+
+  selector = 12u;
+  topology_append(&builder, PO33_TAG_SOUND_SELECT, &selector, 1u, NULL);
+  topology_header(data, 112u, 123u, 12u);
+  data[9] = 0x97u;
+  topology_append(&builder, PO33_TAG_SOUND_DATA, data, 10u, NULL);
+
+  selector = 13u;
+  topology_append(&builder, PO33_TAG_SOUND_SELECT, &selector, 1u, NULL);
+  topology_header(data, 124u, 135u, 12u);
+  topology_append(&builder, PO33_TAG_SOUND_DATA, data, PO33_SOUND_HEADER_BYTES, NULL);
+
+  selector = 14u;
+  topology_append(&builder, PO33_TAG_SOUND_SELECT, &selector, 1u, NULL);
+  topology_header(data, 136u, 147u, 99u);
+  topology_append(&builder, PO33_TAG_SOUND_DATA, data, PO33_SOUND_HEADER_BYTES, NULL);
+
+  assert(po33_builder_finish(&builder, &fixture->length) == PO_OK);
+}
+
+static int count_packet(const po_packet_t *packet, void *user) {
+  size_t *count = (size_t *)user;
+  (void)packet;
+  ++*count;
+  return 0;
+}
+
+static void test_pool_topology(void) {
+  topology_fixture_t fixture;
+  po33_sound_record_t records[10], records_before[10];
+  po33_pool_t pools[6], pools_before[6];
+  po33_pool_reference_t references[6], references_before[6];
+  uint8_t saved[PO33_PREAMBLE_BYTES + 512u];
+  po33_decode_result_t before, after;
+  size_t records_required = 0u, pools_required = 0u, references_required = 0u;
+  size_t before_packets = 0u, after_packets = 0u;
+
+  make_topology_fixture(&fixture);
+  memcpy(saved, fixture.frame, fixture.length);
+  assert(po33_frame_parse(fixture.frame, fixture.length, count_packet, &before_packets, &before) ==
+         PO_OK);
+  assert(before.done);
+  assert(po33_pool_topology_requirements(fixture.frame, fixture.length, &records_required,
+                                         &pools_required, &references_required) == PO_OK);
+  assert(records_required == 9u && pools_required == 5u && references_required == 5u);
+
+  memset(records, 0xa5, sizeof(records));
+  memset(pools, 0xa5, sizeof(pools));
+  memset(references, 0xa5, sizeof(references));
+  memcpy(records_before, records, sizeof(records));
+  memcpy(pools_before, pools, sizeof(pools));
+  memcpy(references_before, references, sizeof(references));
+
+  assert(po33_pool_topology_build(fixture.frame, fixture.length, NULL, 0u, pools, pools_required,
+                                  references, references_required) == PO_ERR_INVALID_ARG);
+  assert(memcmp(records, records_before, sizeof(records)) == 0);
+  assert(memcmp(pools, pools_before, sizeof(pools)) == 0);
+  assert(memcmp(references, references_before, sizeof(references)) == 0);
+  assert(po33_pool_topology_build(fixture.frame, fixture.length, records, records_required - 1u,
+                                  pools, pools_required, references,
+                                  references_required) == PO_ERR_BUFFER_TOO_SMALL);
+  assert(po33_pool_topology_build(fixture.frame, fixture.length, records, records_required, pools,
+                                  pools_required - 1u, references,
+                                  references_required) == PO_ERR_BUFFER_TOO_SMALL);
+  assert(po33_pool_topology_build(fixture.frame, fixture.length, records, records_required, pools,
+                                  pools_required, references,
+                                  references_required - 1u) == PO_ERR_BUFFER_TOO_SMALL);
+  assert(memcmp(records, records_before, sizeof(records)) == 0);
+  assert(memcmp(pools, pools_before, sizeof(pools)) == 0);
+  assert(memcmp(references, references_before, sizeof(references)) == 0);
+
+  assert(po33_pool_topology_build(fixture.frame, fixture.length, records,
+                                  sizeof(records) / sizeof(*records), pools,
+                                  sizeof(pools) / sizeof(*pools), references,
+                                  sizeof(references) / sizeof(*references)) == PO_OK);
+  assert(memcmp(records + records_required, records_before + records_required,
+                sizeof(records) - records_required * sizeof(*records)) == 0);
+  assert(memcmp(pools + pools_required, pools_before + pools_required,
+                sizeof(pools) - pools_required * sizeof(*pools)) == 0);
+  assert(memcmp(references + references_required, references_before + references_required,
+                sizeof(references) - references_required * sizeof(*references)) == 0);
+
+  assert(records[0].selector == 7u && records[0].range_start_raw == UINT32_C(0x10203040) &&
+         records[0].range_end_raw == UINT32_C(0x50607080) && records[0].source_selector == 7u);
+  assert(records[0].selection_span.offset == fixture.split_selection_offset &&
+         records[0].selection_span.length == 6u &&
+         records[0].data_span.offset == fixture.split_data_offset &&
+         records[0].data_span.length ==
+             fixture.split_last_data_offset + 12u - fixture.split_data_offset &&
+         records[0].owned_pool_index == 0u && records[0].referenced_pool_index == 0u &&
+         records[0].flags == 0u);
+  assert(records[1].flags == PO33_SOUND_RECORD_FLAG_HEADER_ONLY &&
+         records[1].owned_pool_index == SIZE_MAX && records[1].referenced_pool_index == 0u);
+  assert(records[2].flags == PO33_SOUND_RECORD_FLAG_DUPLICATE_SELECTOR &&
+         records[2].owned_pool_index == 1u && records[2].referenced_pool_index == 1u);
+  assert(records[3].owned_pool_index == 2u && records[3].referenced_pool_index == 2u &&
+         records[3].flags == PO33_SOUND_RECORD_FLAG_UNKNOWN_EXTENSION &&
+         records[3].data_span.offset == fixture.extension_data_offset &&
+         records[3].data_span.length ==
+             fixture.extension_last_data_offset + 13u - fixture.extension_data_offset);
+  assert(records[4].flags ==
+             (PO33_SOUND_RECORD_FLAG_HEADER_ONLY | PO33_SOUND_RECORD_FLAG_DUPLICATE_SELECTOR) &&
+         records[4].referenced_pool_index == 2u);
+  assert(records[5].flags == (PO33_SOUND_RECORD_FLAG_DUPLICATE_SELECTOR |
+                              PO33_SOUND_RECORD_FLAG_SOURCE_AMBIGUOUS) &&
+         records[5].owned_pool_index == 3u && records[5].referenced_pool_index == SIZE_MAX);
+  assert(records[6].flags == (PO33_SOUND_RECORD_FLAG_DUPLICATE_SELECTOR |
+                              PO33_SOUND_RECORD_FLAG_SOURCE_AMBIGUOUS) &&
+         records[6].owned_pool_index == 4u && records[6].referenced_pool_index == SIZE_MAX);
+  assert(records[7].flags ==
+             (PO33_SOUND_RECORD_FLAG_HEADER_ONLY | PO33_SOUND_RECORD_FLAG_SOURCE_AMBIGUOUS) &&
+         records[7].referenced_pool_index == SIZE_MAX);
+  assert(records[8].flags ==
+             (PO33_SOUND_RECORD_FLAG_HEADER_ONLY | PO33_SOUND_RECORD_FLAG_SOURCE_UNRESOLVED) &&
+         records[8].referenced_pool_index == SIZE_MAX);
+
+  assert(pools[0].owner_record_index == 0u && pools[0].data_bytes == 11u);
+  assert(pools[1].owner_record_index == 2u && pools[1].data_bytes == 10u);
+  assert(pools[2].owner_record_index == 3u && pools[2].data_bytes == 11u);
+  assert(pools[3].owner_record_index == 5u && pools[3].data_bytes == 10u);
+  assert(pools[4].owner_record_index == 6u && pools[4].data_bytes == 10u);
+  assert(references[0].pool_index == 0u && references[0].sound_record_index == 0u);
+  assert(references[1].pool_index == 0u && references[1].sound_record_index == 1u);
+  assert(references[2].pool_index == 1u && references[2].sound_record_index == 2u);
+  assert(references[3].pool_index == 2u && references[3].sound_record_index == 3u);
+  assert(references[4].pool_index == 2u && references[4].sound_record_index == 4u);
+
+  assert(memcmp(saved, fixture.frame, fixture.length) == 0);
+  assert(po33_frame_parse(fixture.frame, fixture.length, count_packet, &after_packets, &after) ==
+         PO_OK);
+  assert(after.done && after_packets == before_packets && after.frame_bytes == before.frame_bytes &&
+         after.final_state == before.final_state);
+}
+
+static void test_pool_topology_failures(void) {
+  uint8_t empty[PO33_PREAMBLE_BYTES + 16u];
+  uint8_t malformed[PO33_PREAMBLE_BYTES + 64u] = {0};
+  po33_builder_t builder;
+  po33_sound_record_t records[1], records_before[1];
+  po33_pool_t pools[1], pools_before[1];
+  po33_pool_reference_t references[1], references_before[1];
+  uint8_t selector = 7u, partial_header[PO33_SOUND_HEADER_BYTES - 1u] = {0};
+  size_t length, records_required = 31u, pools_required = 32u, references_required = 33u;
+
+  assert(po33_pool_topology_requirements(NULL, 0u, &records_required, &pools_required,
+                                         &references_required) == PO_ERR_INVALID_ARG);
+  assert(records_required == 31u && pools_required == 32u && references_required == 33u);
+  assert(po33_pool_topology_requirements(malformed, 0u, NULL, &pools_required,
+                                         &references_required) == PO_ERR_INVALID_ARG);
+  assert(pools_required == 32u && references_required == 33u);
+
+  assert(po33_builder_init(&builder, empty, sizeof(empty)) == PO_OK);
+  assert(po33_builder_finish(&builder, &length) == PO_OK);
+  assert(po33_pool_topology_requirements(empty, length, &records_required, &pools_required,
+                                         &references_required) == PO_OK);
+  assert(records_required == 0u && pools_required == 0u && references_required == 0u);
+  assert(po33_pool_topology_build(empty, length, NULL, 0u, NULL, 0u, NULL, 0u) == PO_OK);
+
+  records_required = 31u;
+  pools_required = 32u;
+  references_required = 33u;
+  assert(po33_builder_init(&builder, malformed, sizeof(malformed)) == PO_OK);
+  topology_append(&builder, PO33_TAG_SOUND_SELECT, &selector, 1u, NULL);
+  topology_append(&builder, PO33_TAG_SOUND_DATA, partial_header, sizeof(partial_header), NULL);
+  assert(po33_builder_finish(&builder, &length) == PO_OK);
+  assert(po33_pool_topology_requirements(malformed, length, &records_required, &pools_required,
+                                         &references_required) == PO_ERR_FRAME);
+  assert(records_required == 31u && pools_required == 32u && references_required == 33u);
+  assert(po33_builder_init(&builder, malformed, sizeof(malformed)) == PO_OK);
+  topology_append(&builder, PO33_TAG_SOUND_DATA, partial_header, sizeof(partial_header), NULL);
+  assert(po33_builder_finish(&builder, &length) == PO_OK);
+  assert(po33_pool_topology_requirements(malformed, length, &records_required, &pools_required,
+                                         &references_required) == PO_ERR_FRAME);
+  assert(records_required == 31u && pools_required == 32u && references_required == 33u);
+  assert(po33_builder_init(&builder, malformed, sizeof(malformed)) == PO_OK);
+  topology_append(&builder, PO33_TAG_SOUND_SELECT, NULL, 0u, NULL);
+  assert(po33_builder_finish(&builder, &length) == PO_OK);
+  assert(po33_pool_topology_requirements(malformed, length, &records_required, &pools_required,
+                                         &references_required) == PO_ERR_FRAME);
+  assert(records_required == 31u && pools_required == 32u && references_required == 33u);
+
+  assert(po33_builder_init(&builder, malformed, sizeof(malformed)) == PO_OK);
+  topology_append(&builder, PO33_TAG_SOUND_SELECT, &selector, 1u, NULL);
+  topology_append(&builder, PO33_TAG_SOUND_DATA, partial_header, sizeof(partial_header), NULL);
+  assert(po33_builder_finish(&builder, &length) == PO_OK);
+
+  memset(records, 0xa5, sizeof(records));
+  memset(pools, 0xa5, sizeof(pools));
+  memset(references, 0xa5, sizeof(references));
+  memcpy(records_before, records, sizeof(records));
+  memcpy(pools_before, pools, sizeof(pools));
+  memcpy(references_before, references, sizeof(references));
+  assert(po33_pool_topology_build(malformed, length, records, 1u, pools, 1u, references, 1u) ==
+         PO_ERR_FRAME);
+  assert(memcmp(records, records_before, sizeof(records)) == 0);
+  assert(memcmp(pools, pools_before, sizeof(pools)) == 0);
+  assert(memcmp(references, references_before, sizeof(references)) == 0);
 }
 static void test_frames(void) {
   po33_decode_result_t result;
@@ -161,6 +442,8 @@ static void test_samples(void) {
 }
 int main(void) {
   test_pool_topology_api_surface();
+  test_pool_topology();
+  test_pool_topology_failures();
   test_frames();
   test_packing();
   test_samples();
