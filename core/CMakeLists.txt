@@ -87,6 +87,10 @@ add_library(po_stereo_wav STATIC examples/po_stereo_wav.c)
 target_link_libraries(po_stereo_wav PUBLIC po32)
 target_include_directories(po_stereo_wav PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/examples)
 
+add_library(po_frame_report STATIC examples/po_frame_report.c)
+target_link_libraries(po_frame_report PUBLIC po32)
+target_include_directories(po_frame_report PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/examples)
+
 add_executable(po33_encode_capture examples/po33_encode_capture.c)
 target_link_libraries(po33_encode_capture PRIVATE po_capture po_stereo_wav)
 
@@ -165,7 +169,7 @@ add_test(NAME po33_host_coverage_tests COMMAND po33_host_coverage_tests
 set_tests_properties(po33_host_coverage_tests PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
 
 add_executable(po_capture_io_tests tests/test_capture_io.c)
-target_link_libraries(po_capture_io_tests PRIVATE po_capture po_stereo_wav)
+target_link_libraries(po_capture_io_tests PRIVATE po_capture po_stereo_wav po_frame_report)
 add_test(NAME po_capture_io_tests COMMAND po_capture_io_tests)
 
 add_executable(po32_core_internal_tests tests/test_core_internal.c)
