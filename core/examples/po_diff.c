@@ -64,31 +64,6 @@ typedef struct po_diff_payload {
   int identical;
 } po_diff_payload_t;
 
-static const char *po_diff_family_name(po_frame_family_t family) {
-  switch (family) {
-  case PO_FRAME_FAMILY_PO33:
-    return "po33";
-  case PO_FRAME_FAMILY_PO35:
-    return "po35";
-  default:
-    return NULL;
-  }
-}
-
-static int po_diff_parse_family(const char *name, po_frame_family_t *family) {
-  if (name == NULL || family == NULL)
-    return 0;
-  if (strcmp(name, "po33") == 0) {
-    *family = PO_FRAME_FAMILY_PO33;
-    return 1;
-  }
-  if (strcmp(name, "po35") == 0) {
-    *family = PO_FRAME_FAMILY_PO35;
-    return 1;
-  }
-  return 0;
-}
-
 static void po_diff_frame_destroy(po_diff_frame_t *frame) {
   if (frame == NULL)
     return;
@@ -546,12 +521,12 @@ static int po_diff_write_report(FILE *stream, po_frame_family_t family,
   int packets_same;
   int records_same;
 
-  if (stream == NULL || before == NULL || after == NULL || po_diff_family_name(family) == NULL)
+  if (stream == NULL || before == NULL || after == NULL || po_frame_family_name(family) == NULL)
     return 0;
   po_diff_compare_bytes(before, after, &bytes);
   packets_same = po_diff_packet_topology_equal(before, after, &packet_first);
   records_same = po_diff_record_topology_equal(before, after, &record_first);
-  if (!po_diff_writef(stream, "family=%s\n", po_diff_family_name(family)))
+  if (!po_diff_writef(stream, "family=%s\n", po_frame_family_name(family)))
     return 0;
   if (bytes.identical) {
     if (!po_diff_writef(stream, "bytes identical count=%zu\n", before->byte_count))
@@ -636,7 +611,7 @@ int main(int argc, char **argv) {
   po_diff_frame_t after = {0};
   int rc = 1;
 
-  if (argc != 5 || strcmp(argv[1], "--family") != 0 || !po_diff_parse_family(argv[2], &family)) {
+  if (argc != 5 || strcmp(argv[1], "--family") != 0 || !po_frame_parse_family(argv[2], &family)) {
     fprintf(stderr, "Usage: %s --family po33|po35 before.bin after.bin\n", argv[0]);
     return 2;
   }
@@ -645,7 +620,7 @@ int main(int argc, char **argv) {
     goto cleanup;
   }
   if (!po_diff_collect_packets(family, before.bytes, before.byte_count, &before.packets)) {
-    fprintf(stderr, "Before input is not one complete %s frame: %s\n", po_diff_family_name(family),
+    fprintf(stderr, "Before input is not one complete %s frame: %s\n", po_frame_family_name(family),
             argv[3]);
     goto cleanup;
   }
@@ -658,7 +633,7 @@ int main(int argc, char **argv) {
     goto cleanup;
   }
   if (!po_diff_collect_packets(family, after.bytes, after.byte_count, &after.packets)) {
-    fprintf(stderr, "After input is not one complete %s frame: %s\n", po_diff_family_name(family),
+    fprintf(stderr, "After input is not one complete %s frame: %s\n", po_frame_family_name(family),
             argv[4]);
     goto cleanup;
   }
