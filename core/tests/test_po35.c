@@ -342,12 +342,17 @@ static void test_speech_edit_plan_measurement(void) {
 }
 
 static void test_speech_edit_plan_descriptor_failures(void) {
+  static uint8_t too_many_records[((size_t)UINT16_MAX + 1u) * PO35_SPEECH_RECORD_BYTES];
   uint8_t source[PO35_PREAMBLE_BYTES + 128];
   uint8_t records[PO35_SPEECH_RECORD_BYTES] = {0};
   union {
     uint8_t frame[PO35_PREAMBLE_BYTES + 128];
     po35_speech_edit_plan_t plan;
   } alias;
+  union {
+    uint8_t records[PO35_SPEECH_RECORD_BYTES];
+    po35_speech_edit_plan_t plan;
+  } plan_record_alias;
   po35_builder_t builder;
   po35_speech_edit_plan_t plan;
   po35_speech_edit_t edit = {2u, 80u, records, sizeof(records)};
@@ -380,6 +385,19 @@ static void test_speech_edit_plan_descriptor_failures(void) {
   assert_speech_plan_neutral(&plan);
   assert(po35_speech_edit_plan(source, source_len, &edit, 1u, NULL) == PO_ERR_INVALID_ARG);
 
+  memset(&plan_record_alias, 0xa5, sizeof(plan_record_alias));
+  edit.records = plan_record_alias.records;
+  edit.record_bytes = PO35_SPEECH_RECORD_BYTES - 1u;
+  assert(po35_speech_edit_plan(source, source_len, &edit, 1u, &plan_record_alias.plan) ==
+         PO_ERR_INVALID_ARG);
+  edit.records = records;
+  edit.record_bytes = sizeof(records);
+
+  memset(&plan, 0xa5, sizeof(plan));
+  assert(po35_speech_edit_plan(source, source_len, &edit, SIZE_MAX / sizeof(edit) + 1u, &plan) ==
+         PO_ERR_RANGE);
+  assert_speech_plan_neutral(&plan);
+
   assert(po35_speech_edit_plan(source, source_len, duplicate, 2u, &plan) == PO_ERR_RANGE);
   assert_speech_plan_failure(&plan, 1u, 2u, PO35_SPEECH_EDIT_REASON_DUPLICATE_SLOT);
   edit.slot = PO35_SPEECH_SLOT_COUNT;
@@ -390,9 +408,11 @@ static void test_speech_edit_plan_descriptor_failures(void) {
   edit.record_bytes = sizeof(records) - 1u;
   assert(po35_speech_edit_plan(source, source_len, &edit, 1u, &plan) == PO_ERR_RANGE);
   assert_speech_plan_failure(&plan, 0u, 2u, PO35_SPEECH_EDIT_REASON_INVALID_RECORD_SIZE);
+  edit.records = too_many_records;
   edit.record_bytes = ((size_t)UINT16_MAX + 1u) * PO35_SPEECH_RECORD_BYTES;
   assert(po35_speech_edit_plan(source, source_len, &edit, 1u, &plan) == PO_ERR_RANGE);
   assert_speech_plan_failure(&plan, 0u, 2u, PO35_SPEECH_EDIT_REASON_INVALID_RECORD_COUNT);
+  edit.records = records;
   edit.record_bytes = sizeof(records);
   edit.records = NULL;
   assert(po35_speech_edit_plan(source, source_len, &edit, 1u, &plan) == PO_ERR_INVALID_ARG);
