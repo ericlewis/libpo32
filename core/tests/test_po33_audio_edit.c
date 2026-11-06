@@ -106,7 +106,12 @@ static void append(po33_builder_t *builder, unsigned tag, const uint8_t *bytes, 
   po_status_t status = po33_builder_append_packet(builder, (uint16_t)tag, bytes, size, NULL);
   assert(status == PO_OK);
 }
-static void make_fixture(size_t samples, int extension, int duplicate) {
+enum audio_edit_fixture_flags {
+  AUDIO_EDIT_TARGET_EXTENSION = 1,
+  AUDIO_EDIT_OTHER_EXTENSION = 2,
+  AUDIO_EDIT_OMITTED_SELECTOR = 4
+};
+static void make_fixture(size_t samples, unsigned flags, int duplicate) {
   po33_builder_t builder;
   uint8_t data[255], selector = 2;
   po_status_t status = po33_builder_init(&builder, fixture, sizeof(fixture));
@@ -117,7 +122,7 @@ static void make_fixture(size_t samples, int extension, int duplicate) {
   append(&builder, 0x1234, data, 5);
   append(&builder, PO33_TAG_PATTERN_SELECT, &selector, 1);
   append(&builder, PO33_TAG_PATTERN_DATA, data, 255);
-  if (extension & 4) {
+  if (flags & AUDIO_EDIT_OMITTED_SELECTOR) {
     selector = 99;
     append(&builder, PO33_TAG_SOUND_SELECT, &selector, 1);
   }
@@ -131,7 +136,7 @@ static void make_fixture(size_t samples, int extension, int duplicate) {
       data[j] = pos + j < 9 ? header[pos + j] : (uint8_t)((pos + j) % 128);
     append(&builder, PO33_TAG_SOUND_DATA, data, size);
     pos += size;
-    if ((extension & 1) && pos == 255)
+    if ((flags & AUDIO_EDIT_TARGET_EXTENSION) && pos == 255)
       append(&builder, 0x4321, data, 3);
   }
   selector = duplicate ? 7 : 8;
@@ -139,7 +144,7 @@ static void make_fixture(size_t samples, int extension, int duplicate) {
   append(&builder, PO33_TAG_SOUND_DATA, header, sizeof(header));
   selector = 0;
   append(&builder, PO33_TAG_SOUND_SELECT, &selector, 1);
-  if (extension & 2)
+  if (flags & AUDIO_EDIT_OTHER_EXTENSION)
     append(&builder, 0x4321, data, 3);
   for (size_t pos = 0; pos < 4105;) {
     size_t size = 4105 - pos;
@@ -308,7 +313,7 @@ static void test_rejections(void) {
   save_wav(wav_path, 5000, 1, 23438, 16, 0, 0, .25f);
   make_fixture(4095, 0, 0);
   run(6, argv, 0);
-  make_fixture(4096, 1, 0);
+  make_fixture(4096, AUDIO_EDIT_TARGET_EXTENSION, 0);
   run(6, argv, 0);
   make_fixture(4096, 0, 1);
   run(6, argv, 0);
@@ -359,14 +364,14 @@ static void test_multiple_and_existing_output(void) {
 static void test_transaction_boundaries(void) {
   char *argv[] = {"encode", input_path, output_path, "--sample", "7",
                   wav_path, "--sample", "0",         other_path};
-  make_fixture(4096, 4, 0); /* omitted selectors do not consume topology indices */
+  make_fixture(4096, AUDIO_EDIT_OMITTED_SELECTOR, 0);
   save_wav(wav_path, 5000, 1, 23438, 16, 0, 0, .25f);
   run(6, argv, 1);
   verify_preservation(8192, 1);
 
   /* The first in-memory transaction succeeds, then an unknown extension in
    * the second target rejects a fitting edit before any output is created. */
-  make_fixture(4096, 2, 0);
+  make_fixture(4096, AUDIO_EDIT_OTHER_EXTENSION, 0);
   save_wav(other_path, 100, 1, 23438, 16, 0, 0, -.25f);
   run(9, argv, 0);
 }
