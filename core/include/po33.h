@@ -138,7 +138,8 @@ typedef enum po33_pool_replacement_reason {
   PO33_POOL_REPLACEMENT_REASON_AMBIGUOUS_GROUP_BOUNDARY = 6,
   PO33_POOL_REPLACEMENT_REASON_EXISTING_ALLOCATION_UNALIGNED = 7,
   PO33_POOL_REPLACEMENT_REASON_REQUIRED_ALLOCATION_OVERFLOW = 8,
-  PO33_POOL_REPLACEMENT_REASON_COUNT_OVERFLOW = 9
+  PO33_POOL_REPLACEMENT_REASON_COUNT_OVERFLOW = 9,
+  PO33_POOL_REPLACEMENT_REASON_NOT_EXCLUSIVE = 10
 } po33_pool_replacement_reason_t;
 
 /* A read-only replacement readiness plan for one owned pool. requested,
@@ -351,6 +352,28 @@ po_status_t po33_pool_edit_rebuild(const uint8_t *frame, size_t frame_len,
                                    size_t sample_bytes, const po33_pool_edit_plan_t *plan,
                                    uint8_t *workspace, size_t workspace_bytes, uint8_t *out_frame,
                                    size_t out_capacity, size_t *out_frame_bytes);
+
+/* Replace nonempty encoded samples and fit the owner's raw range to 0..N,
+ * where N is sample_bytes. Allocation includes a generated silent guard at N.
+ * This policy covers the input under either endpoint convention; exact audible
+ * duration and device capacity remain unverified. N must fit uint32_t and N+1
+ * must fit size_t. Convert PCM with po33_samples_encode_f32 before calling.
+ *
+ * Uses the pool-edit plan type and the same ownership, alias and failure
+ * contracts. requested_sample_bytes counts input; required_allocation_bytes
+ * also covers the guard. Allocation is retained or grows in whole blocks.
+ * The target must reference its own pool exclusively, else PARSE/NOT_EXCLUSIVE.
+ * Other headers, source selector, patterns and settings are preserved. Use the
+ * matching sample-edit rebuild. PO-33 readback and cue playback cover one
+ * fitting and one growing replacement; other device limits remain unverified. */
+po_status_t po33_sample_edit_plan(const uint8_t *frame, size_t frame_len,
+                                  size_t target_sound_record_index, const uint8_t *samples,
+                                  size_t sample_bytes, po33_pool_edit_plan_t *plan);
+po_status_t po33_sample_edit_rebuild(const uint8_t *frame, size_t frame_len,
+                                     size_t target_sound_record_index, const uint8_t *samples,
+                                     size_t sample_bytes, const po33_pool_edit_plan_t *plan,
+                                     uint8_t *workspace, size_t workspace_bytes, uint8_t *out_frame,
+                                     size_t out_capacity, size_t *out_frame_bytes);
 
 /* Edit only the first eight header bytes of one existing sound record; the
  * source selector, sample bytes, other aliases and unrelated packets remain
