@@ -236,6 +236,54 @@ typedef struct po33_sample_insert_plan {
   po33_sample_insert_reason_t reason;
 } po33_sample_insert_plan_t;
 
+typedef enum po33_sample_detach_reason {
+  PO33_SAMPLE_DETACH_REASON_NONE = 0,
+  PO33_SAMPLE_DETACH_REASON_SLOT_OUT_OF_RANGE,
+  PO33_SAMPLE_DETACH_REASON_MISSING_TARGET,
+  PO33_SAMPLE_DETACH_REASON_DUPLICATE_TARGET,
+  PO33_SAMPLE_DETACH_REASON_NOT_ALIAS,
+  PO33_SAMPLE_DETACH_REASON_UNKNOWN_EXTENSION,
+  PO33_SAMPLE_DETACH_REASON_SOURCE_UNRESOLVED,
+  PO33_SAMPLE_DETACH_REASON_SOURCE_AMBIGUOUS,
+  PO33_SAMPLE_DETACH_REASON_REFERENCED_TARGET
+} po33_sample_detach_reason_t;
+
+typedef struct po33_sample_detach_plan {
+  size_t required_workspace_bytes, required_frame_bytes, intermediate_frame_bytes;
+  size_t sample_bytes, allocation_bytes;
+  po33_frame_span_t target_data_span;
+  uint8_t slot, source_selector;
+  po33_sample_detach_reason_t reason;
+} po33_sample_detach_plan_t;
+
+/* Replace a header-only melodic alias (slot 0..7) with its own new pool.
+ * Nonempty encoded samples are required; this does not copy the old audio.
+ * The old source must resolve uniquely. Existing references to the target
+ * slot, duplicate selectors and unknown target extensions are rejected.
+ * Original source audio and every unrelated packet payload remain unchanged.
+ * New range, guard, allocation and packet layout follow sample insertion.
+ *
+ * Both inputs may overlap each other. All output storage, plan and workspace
+ * must be mutually disjoint and disjoint from input. Alias failures have no
+ * output guarantees. Otherwise planning failures clear sizes/spans, set both
+ * selectors to UINT8_MAX, and report target failures through reason. Invalid
+ * or missing slot/count returns RANGE, unsafe targets PARSE, malformed input
+ * FRAME and null required pointers INVALID_ARG.
+ * Rebuild revalidates the plan; mismatch is INVALID_ARG. For valid nonalias
+ * outputs failures preserve out and clear *written. Short storage returns
+ * BUFFER_TOO_SMALL. Workspace holds an intermediate frame plus insertion
+ * staging; callers must provide required_workspace_bytes, not just frame size.
+ * One copied-melodic-sound replacement has PO-33 readback/playback evidence.
+ * No heap, source-pool relocation, drum detachment or device capacity claim. */
+po_status_t po33_sample_detach_plan(const uint8_t *frame, size_t frame_len, uint8_t slot,
+                                    const uint8_t *samples, size_t sample_bytes,
+                                    po33_sample_detach_plan_t *plan);
+po_status_t po33_sample_detach_rebuild(const uint8_t *frame, size_t frame_len, uint8_t slot,
+                                       const uint8_t *samples, size_t sample_bytes,
+                                       const po33_sample_detach_plan_t *plan, uint8_t *workspace,
+                                       size_t workspace_bytes, uint8_t *out, size_t capacity,
+                                       size_t *written);
+
 /* Insert nonempty encoded samples into an existing empty melodic selector
  * (slot 0..7). A header-only alias is occupied, not empty. Missing/duplicate
  * selectors, existing references to the slot and unknown target extensions
