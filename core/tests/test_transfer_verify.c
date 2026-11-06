@@ -68,6 +68,17 @@ static void verify_swap_pcm16_stereo(const char *source, const char *destination
   free(bytes);
 }
 
+static void verify_zero_pcm16_stereo(const char *source, const char *destination) {
+  uint8_t *bytes = NULL;
+  size_t length = 0u;
+  assert(po_frame_read_file(source, &bytes, &length));
+  assert(length >= 44u && memcmp(bytes, "RIFF", 4u) == 0 && memcmp(bytes + 8u, "WAVE", 4u) == 0 &&
+         memcmp(bytes + 36u, "data", 4u) == 0 && (length - 44u) % 4u == 0u);
+  memset(bytes + 44u, 0, length - 44u);
+  verify_save(destination, bytes, length);
+  free(bytes);
+}
+
 static void verify_read_text(const char *path, char *text, size_t capacity) {
   uint8_t *bytes = NULL;
   size_t length = 0u;
@@ -132,6 +143,8 @@ static void test_transfer_verification(void) {
   char *invalid[] = {"po_transfer_verify", "--family", "po33", "invalid.bin", "capture.wav", NULL};
   char *bad_capture[] = {"po_transfer_verify", "--family",        "po33",
                          "reference.bin",      "bad-capture.wav", NULL};
+  char *unrecovered[] = {"po_transfer_verify", "--family",        "po33",
+                         "reference.bin",      "unrecovered.wav", NULL};
   char *normal35[] = {"po_transfer_verify", "--family",      "po35",
                       "reference35.bin",    "capture35.wav", NULL};
 
@@ -141,6 +154,7 @@ static void test_transfer_verification(void) {
   assert(po33_write_transfer_wav("capture.wav", reference, reference_length, 48000));
   assert(po35_write_transfer_wav("capture35.wav", reference35, reference35_length, 48000));
   verify_swap_pcm16_stereo("capture.wav", "swapped.wav");
+  verify_zero_pcm16_stereo("capture.wav", "unrecovered.wav");
   verify_save("invalid.bin", reference, reference_length - 1u);
   verify_save("bad-capture.wav", (const uint8_t *)"not a wav", 9u);
 
@@ -179,6 +193,14 @@ static void test_transfer_verification(void) {
   assert(verify_run_cli(5, bad_capture, stdout_text, sizeof(stdout_text), stderr_text,
                         sizeof(stderr_text)) == 1);
   assert(stdout_text[0] == '\0' && strstr(stderr_text, "Cannot read capture WAV") != NULL);
+
+  assert(verify_run_cli(5, unrecovered, stdout_text, sizeof(stdout_text), stderr_text,
+                        sizeof(stderr_text)) == 1);
+  assert(
+      stderr_text[0] == '\0' &&
+      strstr(stdout_text, "channel_order=normal transport=not-recovered parser=not-run") != NULL &&
+      strstr(stdout_text, "channel_order=swapped transport=not-recovered parser=not-run") != NULL &&
+      strstr(stdout_text, "verification=not-exact matches=0") != NULL);
 }
 
 static void test_frame_file_reader(void) {

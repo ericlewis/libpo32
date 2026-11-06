@@ -251,7 +251,7 @@ int po_frame_report_collect(po_frame_family_t family, const uint8_t *frame, size
   return 1;
 }
 
-static const char *po_frame_report_family_name(po_frame_family_t family) {
+const char *po_frame_family_name(po_frame_family_t family) {
   switch (family) {
   case PO_FRAME_FAMILY_PO33:
     return "po33";
@@ -262,7 +262,21 @@ static const char *po_frame_report_family_name(po_frame_family_t family) {
   }
 }
 
-static const char *po_frame_report_status_name(po_status_t status) {
+int po_frame_parse_family(const char *name, po_frame_family_t *family) {
+  if (name == NULL || family == NULL)
+    return 0;
+  if (strcmp(name, "po33") == 0) {
+    *family = PO_FRAME_FAMILY_PO33;
+    return 1;
+  }
+  if (strcmp(name, "po35") == 0) {
+    *family = PO_FRAME_FAMILY_PO35;
+    return 1;
+  }
+  return 0;
+}
+
+const char *po_frame_status_name(po_status_t status) {
   switch (status) {
   case PO_OK:
     return "ok";
@@ -279,6 +293,15 @@ static const char *po_frame_report_status_name(po_status_t status) {
   default:
     return "unknown";
   }
+}
+
+int po_frame_report_has_complete_frame(const po_frame_report_t *report) {
+  return report != NULL && report->parser_status == PO_OK && report->complete && !report->stopped;
+}
+
+int po_frame_report_is_exact_frame(const po_frame_report_t *report) {
+  return po_frame_report_has_complete_frame(report) &&
+         report->consumed_bytes == report->input_bytes;
 }
 
 static int po_frame_report_writef(FILE *stream, const char *format, ...) {
@@ -351,17 +374,17 @@ int po_frame_report_write_json(FILE *stream, const po_frame_report_t *report) {
   const char *family;
   if (stream == NULL || report == NULL ||
       (report->unknown_tag_count != 0 && report->unknown_tags == NULL) ||
-      (family = po_frame_report_family_name(report->family)) == NULL)
+      (family = po_frame_family_name(report->family)) == NULL)
     return 0;
   if (!po_frame_report_writef(
           stream,
           "{\"family\":\"%s\",\"parser_status\":\"%s\",\"complete\":%s,\"stopped\":%s,"
           "\"packet_count\":%zu,\"input_bytes\":%zu,\"consumed_bytes\":%zu,\"trailing_bytes\":%zu,"
           "\"unparsed_bytes\":%zu,\"final_state\":\"0x%04x\",\"selectors\":{\"patterns\":",
-          family, po_frame_report_status_name(report->parser_status),
-          report->complete ? "true" : "false", report->stopped ? "true" : "false",
-          report->packet_count, report->input_bytes, report->consumed_bytes, report->trailing_bytes,
-          report->unparsed_bytes, (unsigned)report->final_state) ||
+          family, po_frame_status_name(report->parser_status), report->complete ? "true" : "false",
+          report->stopped ? "true" : "false", report->packet_count, report->input_bytes,
+          report->consumed_bytes, report->trailing_bytes, report->unparsed_bytes,
+          (unsigned)report->final_state) ||
       !po_frame_report_write_selector_json(stream, report->selectors + PO_FRAME_SELECTOR_PATTERN) ||
       !po_frame_report_writef(stream, ",\"sounds\":") ||
       !po_frame_report_write_selector_json(stream, report->selectors + PO_FRAME_SELECTOR_SOUND) ||
@@ -385,16 +408,16 @@ int po_frame_report_write_text(FILE *stream, const po_frame_report_t *report) {
   const char *family;
   if (stream == NULL || report == NULL ||
       (report->unknown_tag_count != 0 && report->unknown_tags == NULL) ||
-      (family = po_frame_report_family_name(report->family)) == NULL)
+      (family = po_frame_family_name(report->family)) == NULL)
     return 0;
   if (!po_frame_report_writef(
           stream,
           "%s parser=%s complete=%s stopped=%s packets=%zu input=%zu consumed=%zu trailing=%zu "
           "unparsed=%zu state=0x%04x selectors=patterns[",
-          family, po_frame_report_status_name(report->parser_status),
-          report->complete ? "yes" : "no", report->stopped ? "yes" : "no", report->packet_count,
-          report->input_bytes, report->consumed_bytes, report->trailing_bytes,
-          report->unparsed_bytes, (unsigned)report->final_state) ||
+          family, po_frame_status_name(report->parser_status), report->complete ? "yes" : "no",
+          report->stopped ? "yes" : "no", report->packet_count, report->input_bytes,
+          report->consumed_bytes, report->trailing_bytes, report->unparsed_bytes,
+          (unsigned)report->final_state) ||
       !po_frame_report_write_selector_text(stream, report->selectors + PO_FRAME_SELECTOR_PATTERN) ||
       !po_frame_report_writef(stream, "];sounds[") ||
       !po_frame_report_write_selector_text(stream, report->selectors + PO_FRAME_SELECTOR_SOUND) ||

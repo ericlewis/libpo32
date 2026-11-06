@@ -22,31 +22,6 @@ static const po_stereo_channel_order_t po_transfer_verify_orders[PO_TRANSFER_VER
     PO_STEREO_CHANNEL_SWAPPED,
 };
 
-static const char *po_transfer_verify_family_name(po_frame_family_t family) {
-  switch (family) {
-  case PO_FRAME_FAMILY_PO33:
-    return "po33";
-  case PO_FRAME_FAMILY_PO35:
-    return "po35";
-  default:
-    return NULL;
-  }
-}
-
-static int po_transfer_verify_parse_family(const char *name, po_frame_family_t *family) {
-  if (name == NULL || family == NULL)
-    return 0;
-  if (strcmp(name, "po33") == 0) {
-    *family = PO_FRAME_FAMILY_PO33;
-    return 1;
-  }
-  if (strcmp(name, "po35") == 0) {
-    *family = PO_FRAME_FAMILY_PO35;
-    return 1;
-  }
-  return 0;
-}
-
 static const char *po_transfer_verify_order_name(po_stereo_channel_order_t order) {
   switch (order) {
   case PO_STEREO_CHANNEL_NORMAL:
@@ -58,41 +33,13 @@ static const char *po_transfer_verify_order_name(po_stereo_channel_order_t order
   }
 }
 
-static const char *po_transfer_verify_status_name(po_status_t status) {
-  switch (status) {
-  case PO_OK:
-    return "ok";
-  case PO_ERR_INVALID_ARG:
-    return "invalid-argument";
-  case PO_ERR_RANGE:
-    return "range";
-  case PO_ERR_BUFFER_TOO_SMALL:
-    return "buffer-too-small";
-  case PO_ERR_FRAME:
-    return "frame";
-  case PO_ERR_PARSE:
-    return "parse";
-  default:
-    return "unknown";
-  }
-}
-
-static int po_transfer_verify_reference_complete(const po_frame_report_t *report) {
-  return report != NULL && report->parser_status == PO_OK && report->complete && !report->stopped &&
-         report->consumed_bytes == report->input_bytes;
-}
-
-static int po_transfer_verify_candidate_complete(const po_frame_report_t *report) {
-  return report != NULL && report->parser_status == PO_OK && report->complete && !report->stopped;
-}
-
 static const char *po_transfer_verify_parser_name(const po_transfer_verify_candidate_t *candidate) {
   if (!candidate->recovered)
     return "not-run";
-  if (po_transfer_verify_candidate_complete(&candidate->report))
+  if (po_frame_report_has_complete_frame(&candidate->report))
     return "complete";
   if (candidate->report.parser_status != PO_OK)
-    return po_transfer_verify_status_name(candidate->report.parser_status);
+    return po_frame_status_name(candidate->report.parser_status);
   if (candidate->report.stopped)
     return "stopped";
   if (candidate->report.complete)
@@ -123,7 +70,7 @@ static int po_transfer_verify_collect_candidate(const po_capture_t *capture,
     po_transfer_verify_candidate_destroy(out);
     return 0;
   }
-  out->exact = po_transfer_verify_candidate_complete(&out->report) &&
+  out->exact = po_frame_report_has_complete_frame(&out->report) &&
                out->report.consumed_bytes == reference_bytes &&
                memcmp(out->wire, reference, reference_bytes) == 0;
   return 1;
@@ -133,7 +80,7 @@ static int po_transfer_verify_write_report(FILE *stream, po_frame_family_t famil
                                            size_t reference_bytes,
                                            const po_transfer_verify_candidate_t *candidates,
                                            size_t candidate_count, size_t exact_count) {
-  const char *family_name = po_transfer_verify_family_name(family);
+  const char *family_name = po_frame_family_name(family);
   if (stream == NULL || family_name == NULL || candidates == NULL ||
       fprintf(stream, "family=%s reference_bytes=%zu\n", family_name, reference_bytes) < 0)
     return 0;
@@ -164,8 +111,7 @@ int main(int argc, char **argv) {
   size_t exact_count = 0u;
   int rc = 1;
 
-  if (argc != 5 || strcmp(argv[1], "--family") != 0 ||
-      !po_transfer_verify_parse_family(argv[2], &family)) {
+  if (argc != 5 || strcmp(argv[1], "--family") != 0 || !po_frame_parse_family(argv[2], &family)) {
     fprintf(stderr, "Usage: %s --family po33|po35 reference.bin capture.wav\n", argv[0]);
     return 2;
   }
@@ -177,9 +123,9 @@ int main(int argc, char **argv) {
     fprintf(stderr, "Cannot inspect reference frame: %s\n", argv[3]);
     goto cleanup;
   }
-  if (!po_transfer_verify_reference_complete(&reference_report)) {
-    fprintf(stderr, "Reference is not one complete %s frame: %s\n",
-            po_transfer_verify_family_name(family), argv[3]);
+  if (!po_frame_report_is_exact_frame(&reference_report)) {
+    fprintf(stderr, "Reference is not one complete %s frame: %s\n", po_frame_family_name(family),
+            argv[3]);
     goto cleanup;
   }
   if (!po_capture_read(argv[4], &capture)) {

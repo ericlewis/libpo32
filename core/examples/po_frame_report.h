@@ -56,6 +56,11 @@ typedef struct po_frame_report {
   size_t unknown_payload_bytes;
 } po_frame_report_t;
 
+/* Hosted naming and parsing helpers for explicitly selected model families. */
+const char *po_frame_family_name(po_frame_family_t family);
+int po_frame_parse_family(const char *name, po_frame_family_t *family);
+const char *po_frame_status_name(po_status_t status);
+
 /* Load one raw byte file into hosted caller-owned storage. Output pointers are
  * required and are cleared on failure; caller frees bytes after success. */
 int po_frame_read_file(const char *path, uint8_t **out_bytes, size_t *out_length);
@@ -66,6 +71,11 @@ int po_frame_read_file(const char *path, uint8_t **out_bytes, size_t *out_length
  * invalid family/output lifecycle or hosted allocation failure. */
 int po_frame_report_collect(po_frame_family_t family, const uint8_t *frame, size_t frame_len,
                             po_frame_report_t *out);
+
+/* A complete parsed frame may have receiver bytes after its tail. An exact
+ * frame also requires the parser to consume all input bytes. */
+int po_frame_report_has_complete_frame(const po_frame_report_t *report);
+int po_frame_report_is_exact_frame(const po_frame_report_t *report);
 
 /* Frees hosted summary memory and resets report to its empty state. */
 void po_frame_report_destroy(po_frame_report_t *report);
