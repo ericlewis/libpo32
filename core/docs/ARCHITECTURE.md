@@ -5,6 +5,24 @@ layers own allocation, files, UI, devices and OS integration. Model-specific
 APIs keep the substantially different sound representations explicit; shared
 private code handles the common wire and numerical operations.
 
+## From recording to records
+
+A typical backup workflow crosses four boundaries:
+
+1. The host records or reads modem audio and supplies PCM samples to libpo.
+2. A family modem recovers wire bytes. PO-32 has a streaming receiver;
+   PO-33/133 and PO-35/137 use the shared offline stereo receiver.
+3. The family parser validates and delivers packets. A callback can receive
+   valid packets before a later error, so check the parser's completion result.
+   Logical records such as patterns and sample pools can span multiple packets.
+4. The application interprets or edits supported data, rebuilds a frame and
+   uses the modem transmitter to produce audio. The host saves or plays it.
+
+The core does not load WAV files or communicate with a device. The hosted
+[examples](../examples/README.md) provide file-based workflows; applications
+provide their own recording, playback and storage. Retain raw records when an
+edit does not have enough information to safely interpret their contents.
+
 ## Freestanding contract
 
 The core uses C99 and standard freestanding headers. It performs no heap

@@ -1,7 +1,8 @@
 # Protocol Notes
 
 This is a focused reference for the PO-32 transfer format implemented by
-`libpo32`.
+libpo. For the stereo-family transport and record layouts, see the
+[backup format reference](PO_FORMATS.md).
 
 ## Frame Layout
 
@@ -114,7 +115,7 @@ their original selector/accent bits were nonzero. This limits byte preservation;
 it does not establish a playback change. The typed state also holds only 16
 chain entries, fewer than the valid 22-entry chain in official Basic Beats 1.
 Keep raw packet payloads for exact backup preservation. See
-[Backup formats](PO_FORMATS.md) for measured coverage and the canonical field map.
+[PO-32 preservation limits](formats/PO32.md) for measured coverage and field limits.
 
 For normal pattern construction, prefer the `po32_pattern_*` helpers in
 [`../include/po32.h`](../include/po32.h) rather than writing `steps[]`,
@@ -176,4 +177,4 @@ bytes, not body bytes.
 
 The deep patch and synth parameter notes live separately in:
 
-- [`./PATCH_PARAMETERS.md`](./PATCH_PARAMETERS.md)
+- [`./PATCH_PARAMETERS.md`](PATCH_PARAMETERS.md)

@@ -92,7 +92,7 @@ Raw pattern edits are also supported:
 ```
 
 These are structural record edits, not a complete musical-note editor. See
-[PO-33/133 editing](core/examples/README.md#po-33--po-133-template-editing) for
+[PO-33/133 editing](core/docs/guides/PO33.md#po-33--po-133-template-editing) for
 byte edits, shared pools and conversion details.
 
 ### PO-35 / PO-137 speech
@@ -112,7 +112,7 @@ replacement; the tool also supports 20, 40 and 60 fps. Unselected speech, drum
 patches, patterns, settings and opaque sample metadata are retained.
 
 Previews are approximate and normalized per slot. They do not reproduce every
-device voice or effect. See [speech replacement](core/examples/README.md#po-35--po-137-speech-replacement)
+device voice or effect. See [speech replacement](core/docs/guides/PO35.md#po-35--po-137-speech-replacement)
 for duration limits, normalization and model details.
 
 For either family's replacement audio, stereo WAVs require `--channel left`,
