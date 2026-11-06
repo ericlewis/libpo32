@@ -4,6 +4,7 @@
 #undef NDEBUG
 #endif
 #include "po_capture.h"
+#include "po_frame_report.h"
 #include "po_stereo_wav.h"
 #include "po33.h"
 #include "po35.h"
@@ -437,6 +438,154 @@ static void test_writer_validation(void) {
     free(wire);
   }
 }
+static size_t make_report_frame33(uint8_t *frame, size_t capacity) {
+  const uint8_t settings[] = {0x10, 0x20};
+  const uint8_t pattern[] = {0x30, 0x40};
+  const uint8_t sound[] = {0x50, 0x60, 0x70};
+  const uint8_t unknown_a[] = {0x80, 0x90};
+  const uint8_t unknown_b[] = {0xa0};
+  const uint8_t unknown_c[] = {0xb0, 0xc0};
+  po33_builder_t builder;
+  uint8_t pattern_selector = 2, sound_selector = 7;
+  size_t length = 0;
+  assert(po33_builder_init(&builder, frame, capacity) == PO_OK);
+  assert(po33_builder_append_packet(&builder, PO33_TAG_SETTINGS, settings, sizeof(settings),
+                                    NULL) == PO_OK);
+  assert(po33_builder_append_packet(&builder, PO33_TAG_PATTERN_SELECT, &pattern_selector,
+                                    sizeof(pattern_selector), NULL) == PO_OK);
+  assert(po33_builder_append_packet(&builder, PO33_TAG_PATTERN_DATA, pattern, sizeof(pattern),
+                                    NULL) == PO_OK);
+  assert(po33_builder_append_packet(&builder, PO33_TAG_SOUND_SELECT, &sound_selector,
+                                    sizeof(sound_selector), NULL) == PO_OK);
+  assert(po33_builder_append_packet(&builder, PO33_TAG_SOUND_DATA, sound, sizeof(sound), NULL) ==
+         PO_OK);
+  assert(po33_builder_append_packet(&builder, 0x1234, unknown_a, sizeof(unknown_a), NULL) == PO_OK);
+  assert(po33_builder_append_packet(&builder, 0x1234, unknown_b, sizeof(unknown_b), NULL) == PO_OK);
+  assert(po33_builder_append_packet(&builder, 0x0001, unknown_c, sizeof(unknown_c), NULL) == PO_OK);
+  assert(po33_builder_finish(&builder, &length) == PO_OK);
+  return length;
+}
+static size_t make_report_frame35(uint8_t *frame, size_t capacity) {
+  const uint8_t pattern[] = {4};
+  const uint8_t speech_header[PO35_SPEECH_HEADER_BYTES] = {3, 0, 0, 80, 140, 1, 2, 3, 4};
+  const uint8_t speech_data[] = {0x10, 0x20, 0x30, 0x40};
+  const uint8_t unknown[] = {0x50, 0x60};
+  po35_builder_t builder;
+  size_t length = 0;
+  assert(po35_builder_init(&builder, frame, capacity) == PO_OK);
+  assert(po35_builder_append_packet(&builder, PO35_TAG_PATTERN_EMPTY, pattern, sizeof(pattern),
+                                    NULL) == PO_OK);
+  assert(po35_builder_append_packet(&builder, PO35_TAG_SPEECH_HEADER, speech_header,
+                                    sizeof(speech_header), NULL) == PO_OK);
+  assert(po35_builder_append_packet(&builder, PO35_TAG_SPEECH_DATA, speech_data,
+                                    sizeof(speech_data), NULL) == PO_OK);
+  assert(po35_builder_append_packet(&builder, PO35_TAG_SPEECH_END, NULL, 0, NULL) == PO_OK);
+  assert(po35_builder_append_packet(&builder, 0xabcd, unknown, sizeof(unknown), NULL) == PO_OK);
+  assert(po35_builder_finish(&builder, &length) == PO_OK);
+  return length;
+}
+static void report_string(const po_frame_report_t *report, int json, char *out, size_t capacity) {
+  FILE *fp = tmpfile();
+  long position;
+  size_t length;
+  assert(fp && capacity);
+  assert(json ? po_frame_report_write_json(fp, report) : po_frame_report_write_text(fp, report));
+  assert(fflush(fp) == 0);
+  assert(fseek(fp, 0, SEEK_END) == 0);
+  position = ftell(fp);
+  assert(position >= 0);
+  length = (size_t)position;
+  assert(length < capacity && fseek(fp, 0, SEEK_SET) == 0);
+  assert(fread(out, 1, length, fp) == length);
+  out[length] = '\0';
+  assert(fclose(fp) == 0);
+}
+static void test_frame_reports(void) {
+  uint8_t frame[8192];
+  char json[2048], text[2048];
+  po_frame_report_t report = {0};
+  size_t length = make_report_frame33(frame, sizeof(frame));
+  assert(po_frame_report_collect(PO_FRAME_FAMILY_PO33, frame, length, &report));
+  assert(report.family == PO_FRAME_FAMILY_PO33 && report.parser_status == PO_OK &&
+         report.complete && !report.stopped && report.input_bytes == length &&
+         report.consumed_bytes == length && !report.trailing_bytes && !report.unparsed_bytes &&
+         report.packet_count == 10);
+  assert(report.selectors[PO_FRAME_SELECTOR_PATTERN].occurrences[2] == 1 &&
+         report.selectors[PO_FRAME_SELECTOR_SOUND].occurrences[7] == 1 &&
+         report.selectors[PO_FRAME_SELECTOR_SPEECH].occurrences[3] == 0);
+  assert(report.unknown_packet_count == 3 && report.unknown_payload_bytes == 5 &&
+         report.unknown_tag_count == 2 && report.unknown_tags[0].tag_code == 0x0001 &&
+         report.unknown_tags[0].packet_count == 1 && report.unknown_tags[0].payload_bytes == 2 &&
+         report.unknown_tags[1].tag_code == 0x1234 && report.unknown_tags[1].packet_count == 2 &&
+         report.unknown_tags[1].payload_bytes == 3);
+  report_string(&report, 1, json, sizeof(json));
+  report_string(&report, 0, text, sizeof(text));
+  assert(!strcmp(
+      json,
+      "{\"family\":\"po33\",\"parser_status\":\"ok\",\"complete\":true,\"stopped\":false,"
+      "\"packet_count\":10,\"input_bytes\":4160,\"consumed_bytes\":4160,\"trailing_bytes\":0,"
+      "\"unparsed_bytes\":0,\"final_state\":\"0x0000\",\"selectors\":{\"patterns\":[{\"value\":2,"
+      "\"occurrences\":1}],\"sounds\":[{\"value\":7,\"occurrences\":1}],\"speech\":[]},"
+      "\"invalid_selectors\":{\"patterns\":0,\"sounds\":0,\"speech\":0},\"unknown_packets\":{"
+      "\"count\":3,\"payload_bytes\":5,\"tags\":[{\"tag\":\"0x0001\",\"packets\":1,"
+      "\"payload_bytes\":2},{\"tag\":\"0x1234\",\"packets\":2,\"payload_bytes\":3}]}}\n"));
+  assert(!strcmp(
+      text, "po33 parser=ok complete=yes stopped=no packets=10 input=4160 consumed=4160 trailing=0 "
+            "unparsed=0 state=0x0000 selectors=patterns[2x1];sounds[7x1];speech[-];invalid=0/0/0 "
+            "unknown=packets:3,bytes:5,tags[0x0001x1/2,0x1234x2/3]\n"));
+  po_frame_report_destroy(&report);
+
+  frame[length] = 0xde;
+  frame[length + 1] = 0xad;
+  frame[length + 2] = 0xbe;
+  assert(po_frame_report_collect(PO_FRAME_FAMILY_PO33, frame, length + 3, &report));
+  assert(report.complete && report.consumed_bytes == length && report.trailing_bytes == 3 &&
+         report.unparsed_bytes == 3);
+  po_frame_report_destroy(&report);
+
+  frame[length - 1] ^= 1;
+  assert(po_frame_report_collect(PO_FRAME_FAMILY_PO33, frame, length, &report));
+  assert(report.parser_status == PO_ERR_FRAME && !report.complete && !report.trailing_bytes &&
+         report.unparsed_bytes == 5 && report.packet_count == 9);
+  po_frame_report_destroy(&report);
+
+  length = make_report_frame35(frame, sizeof(frame));
+  assert(po_frame_report_collect(PO_FRAME_FAMILY_PO35, frame, length, &report));
+  assert(report.family == PO_FRAME_FAMILY_PO35 && report.parser_status == PO_OK &&
+         report.complete && report.packet_count == 5 &&
+         report.selectors[PO_FRAME_SELECTOR_PATTERN].occurrences[4] == 1 &&
+         report.selectors[PO_FRAME_SELECTOR_SPEECH].occurrences[3] == 1 &&
+         report.unknown_tag_count == 1 && report.unknown_tags[0].tag_code == 0xabcd);
+  report_string(&report, 1, json, sizeof(json));
+  report_string(&report, 0, text, sizeof(text));
+  assert(!strcmp(
+      json,
+      "{\"family\":\"po35\",\"parser_status\":\"ok\",\"complete\":true,\"stopped\":false,"
+      "\"packet_count\":5,\"input_bytes\":4142,\"consumed_bytes\":4142,\"trailing_bytes\":0,"
+      "\"unparsed_bytes\":0,\"final_state\":\"0xcc30\",\"selectors\":{\"patterns\":[{\"value\":4,"
+      "\"occurrences\":1}],\"sounds\":[],\"speech\":[{\"value\":3,\"occurrences\":1}]},"
+      "\"invalid_selectors\":{\"patterns\":0,\"sounds\":0,\"speech\":0},\"unknown_packets\":{"
+      "\"count\":1,\"payload_bytes\":2,\"tags\":[{\"tag\":\"0xabcd\",\"packets\":1,"
+      "\"payload_bytes\":2}]}}\n"));
+  assert(!strcmp(
+      text, "po35 parser=ok complete=yes stopped=no packets=5 input=4142 consumed=4142 trailing=0 "
+            "unparsed=0 state=0xcc30 selectors=patterns[4x1];sounds[-];speech[3x1];invalid=0/0/0 "
+            "unknown=packets:1,bytes:2,tags[0xabcdx1/2]\n"));
+  po_frame_report_destroy(&report);
+
+  frame[length] = 0xca;
+  frame[length + 1] = 0xfe;
+  assert(po_frame_report_collect(PO_FRAME_FAMILY_PO35, frame, length + 2, &report));
+  assert(report.complete && report.consumed_bytes == length && report.trailing_bytes == 2 &&
+         report.unparsed_bytes == 2);
+  po_frame_report_destroy(&report);
+
+  frame[length - 1] ^= 1;
+  assert(po_frame_report_collect(PO_FRAME_FAMILY_PO35, frame, length, &report));
+  assert(report.parser_status == PO_ERR_FRAME && !report.complete && !report.trailing_bytes &&
+         report.unparsed_bytes == 5 && report.packet_count == 5);
+  po_frame_report_destroy(&report);
+}
 int main(void) {
   char directory[128];
   int made = 0, status;
@@ -453,6 +602,7 @@ int main(void) {
   test_roundtrip_and_decode_errors();
   test_writer_failures();
   test_writer_validation();
+  test_frame_reports();
   puts("Shared capture I/O and WAV failure tests passed");
   return 0;
 }
