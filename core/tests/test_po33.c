@@ -43,6 +43,56 @@ static int collect(const po32_packet_t *p, void *user) {
   }
   return ++received == stop_after;
 }
+typedef po_status_t (*po33_pool_topology_requirements_fn_t)(const uint8_t *frame, size_t frame_len,
+                                                            size_t *sound_record_count,
+                                                            size_t *pool_count,
+                                                            size_t *reference_count);
+static void test_pool_topology_api_surface(void) {
+  const po33_sound_record_t record = {
+      .selector = 7u,
+      .range_start_raw = UINT32_C(0x10203040),
+      .range_end_raw = UINT32_C(0x50607080),
+      .source_selector = 3u,
+      .flags = PO33_SOUND_RECORD_FLAG_HEADER_ONLY | PO33_SOUND_RECORD_FLAG_SOURCE_UNRESOLVED,
+      .selection_span = {PO33_PREAMBLE_BYTES + 5u, 6u},
+      .data_span = {PO33_PREAMBLE_BYTES + 11u, 14u},
+      .owned_pool_index = SIZE_MAX,
+      .referenced_pool_index = SIZE_MAX,
+  };
+  const po33_pool_t pool = {
+      .owner_record_index = 0u,
+      .data_span = {PO33_PREAMBLE_BYTES + 11u, 4110u},
+      .data_bytes = 4105u,
+  };
+  const po33_pool_reference_t reference = {
+      .pool_index = 0u,
+      .sound_record_index = 1u,
+  };
+  const unsigned int flags =
+      PO33_SOUND_RECORD_FLAG_HEADER_ONLY | PO33_SOUND_RECORD_FLAG_DUPLICATE_SELECTOR |
+      PO33_SOUND_RECORD_FLAG_UNKNOWN_EXTENSION | PO33_SOUND_RECORD_FLAG_SOURCE_UNRESOLVED |
+      PO33_SOUND_RECORD_FLAG_SOURCE_AMBIGUOUS;
+
+  assert(offsetof(po33_frame_span_t, offset) == 0u);
+  assert(offsetof(po33_sound_record_t, selector) == 0u);
+  assert(offsetof(po33_sound_record_t, selection_span) < offsetof(po33_sound_record_t, data_span));
+  assert(offsetof(po33_sound_record_t, data_span) <
+         offsetof(po33_sound_record_t, owned_pool_index));
+  assert(offsetof(po33_sound_record_t, owned_pool_index) <
+         offsetof(po33_sound_record_t, referenced_pool_index));
+  assert(flags == 0x1fu);
+  assert(record.selection_span.offset == PO33_PREAMBLE_BYTES + 5u);
+  assert(record.data_span.length == 14u);
+  assert(record.owned_pool_index == SIZE_MAX && record.referenced_pool_index == SIZE_MAX);
+  assert(pool.owner_record_index == 0u && pool.data_bytes == 4105u);
+  assert(reference.pool_index == 0u && reference.sound_record_index == 1u);
+
+  /* sizeof does not evaluate this fixed-size compound literal. Its initializer
+   * verifies the public function-pointer signature without invoking or
+   * requiring a topology parser at link or run time. */
+  assert(sizeof((po33_pool_topology_requirements_fn_t){po33_pool_topology_requirements}) ==
+         sizeof(po33_pool_topology_requirements_fn_t));
+}
 static void test_frames(void) {
   po33_decode_result_t result;
   /* First packet independently recovered from the official recording. */
@@ -110,6 +160,7 @@ static void test_samples(void) {
   }
 }
 int main(void) {
+  test_pool_topology_api_surface();
   test_frames();
   test_packing();
   test_samples();

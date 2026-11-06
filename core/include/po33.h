@@ -72,6 +72,55 @@ typedef struct po33_sound_header {
   uint8_t source_selector;
 } po33_sound_header_t;
 
+/* A byte span in a complete PO-33 source frame. Offsets include the preamble.
+ * A zero-length span has offset zero. A span reports wire bytes only; it does
+ * not imply that the enclosed SOUND_DATA payloads are contiguous. */
+typedef struct po33_frame_span {
+  size_t offset;
+  size_t length;
+} po33_frame_span_t;
+
+/* Topology flags describe retained ambiguity; they do not assign playback or
+ * allocation semantics to the raw range values. */
+#define PO33_SOUND_RECORD_FLAG_HEADER_ONLY        0x01u
+#define PO33_SOUND_RECORD_FLAG_DUPLICATE_SELECTOR 0x02u
+#define PO33_SOUND_RECORD_FLAG_UNKNOWN_EXTENSION  0x04u
+#define PO33_SOUND_RECORD_FLAG_SOURCE_UNRESOLVED  0x08u
+#define PO33_SOUND_RECORD_FLAG_SOURCE_AMBIGUOUS   0x10u
+
+/* One SOUND_SELECT record and its following SOUND_DATA region. selection_span
+ * covers its selector packet. data_span covers the raw packet region from the
+ * first SOUND_DATA packet through the last, including packet framing and any
+ * intervening unknown extension packets. range_* and source_selector are the
+ * decoded nine-byte sound header, not inferred playback coordinates. Either
+ * pool index is SIZE_MAX when its relationship is unavailable or ambiguous. */
+typedef struct po33_sound_record {
+  uint8_t selector;
+  uint32_t range_start_raw, range_end_raw;
+  uint8_t source_selector;
+  unsigned int flags;
+  po33_frame_span_t selection_span;
+  po33_frame_span_t data_span;
+  size_t owned_pool_index;
+  size_t referenced_pool_index;
+} po33_sound_record_t;
+
+/* A pool is an owned SOUND_DATA record with bytes beyond its nine-byte header.
+ * data_bytes counts only SOUND_DATA payload bytes, including that header;
+ * data_span is a raw wire span and may include packet framing. */
+typedef struct po33_pool {
+  size_t owner_record_index;
+  po33_frame_span_t data_span;
+  size_t data_bytes;
+} po33_pool_t;
+
+/* A resolved source-selector relationship. The referenced sound record owns
+ * the pool; the referenced pool is not necessarily the record's own pool. */
+typedef struct po33_pool_reference {
+  size_t pool_index;
+  size_t sound_record_index;
+} po33_pool_reference_t;
+
 /* Split/combine control_raw: low note/key nibble, high timing nibble.
  * Encode requires both fields in 0..15; invalid input leaves output untouched.
  * Input/output must not overlap. */
@@ -129,6 +178,16 @@ po_status_t po33_pack_symbols(const uint8_t *phases, size_t symbol_count, unsign
  */
 po_status_t po33_frame_parse(const uint8_t *frame, size_t frame_len, po_packet_callback_t callback,
                              void *user, po33_decode_result_t *result);
+
+/* Inspect a complete, CRC-valid frame and return exact element counts for
+ * caller-owned sound-record, pool and reverse-reference arrays. Every result
+ * pointer is required. Structurally malformed source records return
+ * PO_ERR_FRAME; size overflow returns PO_ERR_RANGE. Duplicate selectors and
+ * unknown extensions remain successful topology facts, represented by record
+ * flags. On failure, all count outputs are unchanged. */
+po_status_t po33_pool_topology_requirements(const uint8_t *frame, size_t frame_len,
+                                            size_t *sound_record_count, size_t *pool_count,
+                                            size_t *reference_count);
 
 /* Expand one signed-order mu-law sample byte to linear PCM16. Parse framing
  * and the sound header first; pool padding can be decoded, while applying
