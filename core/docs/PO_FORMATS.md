@@ -58,6 +58,12 @@ settings, not one interchangeable file layout:
 | Pattern identity | Inside the pattern payload | Separate selector packet | Inside the pattern payload |
 | Settings | 35 bytes plus chain entries | Fixed 510-byte record | 156 bytes plus chain entries |
 
+PO-32 state (`505A`) and PO-35 settings (`84D8`) each contain sixteen two-byte
+drum-control pairs. Their first bytes have different stored roles: a raw flag
+in PO-32 and pitch control in PO-35. The observed `80 80` pairs in one PO-32
+pack and `80 01` pairs in a PO-35 reference also differ. The shared PO-32 drum
+patch codec does not make these settings records interchangeable.
+
 The incrementing PO-33/35 preamble is transport synchronization data. A regular
 grid in a dump of those bytes is not by itself an LED or pattern bitmap.
 
