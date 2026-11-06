@@ -100,6 +100,9 @@ target_link_libraries(po_diff PRIVATE po_frame_report)
 add_executable(po_capture_doctor examples/po_capture_doctor.c)
 target_link_libraries(po_capture_doctor PRIVATE po_capture po_frame_report)
 
+add_executable(po33_pool_manifest examples/po33_pool_manifest.c)
+target_link_libraries(po33_pool_manifest PRIVATE po_frame_report)
+
 add_executable(po35_transfer_manifest examples/po35_transfer_manifest.c)
 target_link_libraries(po35_transfer_manifest PRIVATE po_frame_report)
 
@@ -186,6 +189,11 @@ set_tests_properties(po33_host_coverage_tests PROPERTIES WORKING_DIRECTORY "${CM
 add_executable(po_capture_io_tests tests/test_capture_io.c)
 target_link_libraries(po_capture_io_tests PRIVATE po_capture po_stereo_wav po_frame_report)
 add_test(NAME po_capture_io_tests COMMAND po_capture_io_tests)
+
+add_executable(po33_pool_manifest_tests tests/test_po33_pool_manifest.c)
+target_link_libraries(po33_pool_manifest_tests PRIVATE po_frame_report)
+add_test(NAME po33_pool_manifest_tests COMMAND po33_pool_manifest_tests)
+set_tests_properties(po33_pool_manifest_tests PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
 
 add_executable(po35_transfer_manifest_tests tests/test_po35_transfer_manifest.c)
 target_link_libraries(po35_transfer_manifest_tests PRIVATE po_frame_report)
