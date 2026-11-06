@@ -7,7 +7,7 @@ needs. Start with [installation](#install-and-link) and
 | API | Reference |
 | --- | --- |
 | PO-32 packets, mono modem and drum synthesis | [PO-32 C API](api/PO32.md) |
-| PO-33/133 records and PCM sample conversion | [PO-33 C API](api/PO33.md) |
+| PO-33/133 records, PCM sample conversion and pool edits | [PO-33 C API](api/PO33.md) |
 | PO-35/137 records, speech analysis and rendering | [PO-35 C API](api/PO35.md) |
 | PO-33/35 frame parsing, builders and stereo modem | [Shared stereo APIs](api/STEREO.md) |
 
@@ -52,7 +52,7 @@ Shared statuses and raw packets are in `po_common.h`. The `po_status_t`,
 | --- | --- |
 | [`po32.h`](../include/po32.h) | PO-32 packets, builders, mono modem and lossless control-byte views |
 | [`po32_synth.h`](../include/po32_synth.h) | Drum synthesis |
-| [`po33.h`](../include/po33.h) | PO-33/133 framing, samples, logical records, control-nibble and per-step FX views |
+| [`po33.h`](../include/po33.h) | PO-33/133 framing, samples, logical records, pool topology/edit transactions, control-nibble and per-step FX views |
 | [`po35.h`](../include/po35.h) | PO-35/137 framing, speech/settings/pattern records and indexed-table views |
 | [`po35_analysis.h`](../include/po35_analysis.h) | One-shot PCM-to-speech analysis with caller-owned workspace |
 | [`po35_synth.h`](../include/po35_synth.h) | Borrowed-record speech voices and one-shot rendering |

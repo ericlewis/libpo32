@@ -168,6 +168,23 @@ typedef struct po33_pool_replacement_plan {
   po33_pool_replacement_reason_t reason;
 } po33_pool_replacement_plan_t;
 
+/* A read-only transaction plan for one existing owned pool. On success,
+ * capacities are exact, target_sound_record_index and target_data_span locate
+ * the selected logical record, target_selector is its stored selector and
+ * replacement has reason NONE. On any failure, capacities are zero,
+ * target_sound_record_index is SIZE_MAX, target_data_span is zero and
+ * target_selector is UINT8_MAX. replacement follows the failure-state rules
+ * of po33_pool_replacement_plan(), including target-specific reasons and
+ * resolved-impact counts when they are available. */
+typedef struct po33_pool_edit_plan {
+  size_t required_workspace_bytes;
+  size_t required_frame_bytes;
+  size_t target_sound_record_index;
+  po33_frame_span_t target_data_span;
+  po33_pool_replacement_plan_t replacement;
+  uint8_t target_selector;
+} po33_pool_edit_plan_t;
+
 /* Split/combine control_raw: low note/key nibble, high timing nibble.
  * Encode requires both fields in 0..15; invalid input leaves output untouched.
  * Input/output must not overlap. */
@@ -276,6 +293,38 @@ po_status_t po33_pool_replacement_plan(const po33_sound_record_t *sound_records,
                                        size_t pool_count, size_t target_sound_record_index,
                                        size_t requested_sample_bytes,
                                        po33_pool_replacement_plan_t *plan);
+
+/* Transactional replacement of one existing owned sample pool. samples names
+ * already encoded signed-order mu-law sample bytes; it may be NULL only when
+ * sample_bytes is zero. The target is a topology sound-record index, not a raw
+ * selector. A plan accepts exactly one complete source frame and reports the
+ * existing allocation, resolved impact, safe growth decision and exact staging
+ * sizes. It preserves the nine-byte header and does not apply trims/slices or
+ * establish device capacity. Shorter bodies are zero-filled to the retained
+ * allocation; eligible growth rounds to PO33_POOL_ALLOCATION_BLOCK_BYTES.
+ *
+ * The source frame and samples are borrowed and may overlap each other. plan
+ * must be disjoint from both borrowed inputs. Invalid plan aliases are
+ * PO_ERR_INVALID_ARG and leave plan unspecified. Otherwise, every failure
+ * clears the top-level plan fields; replacement carries any target-specific
+ * diagnostic described by po33_pool_edit_plan_t.
+ *
+ * rebuild consumes a successful plan and remeasures the current frame/edit
+ * shape. Same-shaped current header metadata or sample bytes may differ from
+ * planning; a failed or structurally mismatched plan is PO_ERR_INVALID_ARG.
+ * workspace, out_frame, out_frame_bytes and plan must be pairwise disjoint and
+ * disjoint from both borrowed inputs. A successful rebuild stages the complete
+ * frame in workspace before copying it to out_frame. For valid, nonalias output
+ * arguments, every failure leaves out_frame untouched and sets
+ * *out_frame_bytes to zero. */
+po_status_t po33_pool_edit_plan(const uint8_t *frame, size_t frame_len,
+                                size_t target_sound_record_index, const uint8_t *samples,
+                                size_t sample_bytes, po33_pool_edit_plan_t *plan);
+po_status_t po33_pool_edit_rebuild(const uint8_t *frame, size_t frame_len,
+                                   size_t target_sound_record_index, const uint8_t *samples,
+                                   size_t sample_bytes, const po33_pool_edit_plan_t *plan,
+                                   uint8_t *workspace, size_t workspace_bytes, uint8_t *out_frame,
+                                   size_t out_capacity, size_t *out_frame_bytes);
 
 /* Expand one signed-order mu-law sample byte to linear PCM16. Parse framing
  * and the sound header first; pool padding can be decoded, while applying
