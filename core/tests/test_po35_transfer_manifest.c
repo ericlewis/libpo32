@@ -55,6 +55,17 @@ static void manifest_append_pattern(po35_builder_t *builder, uint8_t index, uint
   manifest_append(builder, PO35_TAG_PATTERN, payload, sizeof(payload));
 }
 
+static void manifest_append_two_speech_event_pattern(po35_builder_t *builder, uint8_t index,
+                                                     uint8_t first_event, uint8_t second_event) {
+  po35_pattern_t pattern = {0};
+  uint8_t payload[PO35_PATTERN_BYTES];
+  pattern.pattern_index = index;
+  pattern.speech_events[0] = first_event;
+  pattern.speech_events[1] = second_event;
+  assert(po35_pattern_encode(&pattern, payload, sizeof(payload)) == PO_OK);
+  manifest_append(builder, PO35_TAG_PATTERN, payload, sizeof(payload));
+}
+
 static void manifest_append_empty_pattern(po35_builder_t *builder, uint8_t index) {
   manifest_append(builder, PO35_TAG_PATTERN_EMPTY, &index, 1u);
 }
@@ -192,6 +203,30 @@ static void test_manifest(void) {
     manifest_append_pattern(&builder, 2u, 0x31u);
     assert(po35_speech_header_encode(&header, payload, sizeof(payload)) == PO_OK);
     manifest_append(&builder, PO35_TAG_SPEECH_HEADER, payload, sizeof(payload));
+  }
+  assert(po35_builder_finish(&builder, &length) == PO_OK);
+  manifest_save("frame.bin", frame, length);
+  assert(manifest_run_cli(2, argv, stdout_text, sizeof(stdout_text), stderr_text,
+                          sizeof(stderr_text)) == 0);
+  assert(strstr(stdout_text, "chain_pattern_set=match") != NULL &&
+         strstr(stdout_text, "speech_header_event_set=not-evaluable") != NULL &&
+         strstr(stdout_text, "shape=unclassified") != NULL);
+
+  assert(po35_builder_init(&builder, frame, sizeof(frame)) == PO_OK);
+  {
+    const uint8_t chain[] = {2u};
+    po35_speech_header_t first_header = {.slot = 3u};
+    po35_speech_header_t second_header = {.slot = 4u};
+    uint8_t first_payload[PO35_SPEECH_HEADER_BYTES];
+    uint8_t second_payload[PO35_SPEECH_HEADER_BYTES];
+    manifest_append_settings(&builder, chain, sizeof(chain));
+    manifest_append_two_speech_event_pattern(&builder, 2u, 0x31u, 0x41u);
+    assert(po35_speech_header_encode(&first_header, first_payload, sizeof(first_payload)) == PO_OK);
+    assert(po35_speech_header_encode(&second_header, second_payload, sizeof(second_payload)) ==
+           PO_OK);
+    manifest_append(&builder, PO35_TAG_SPEECH_HEADER, first_payload, sizeof(first_payload));
+    manifest_append(&builder, PO35_TAG_SPEECH_HEADER, second_payload, sizeof(second_payload));
+    manifest_append(&builder, PO35_TAG_SPEECH_END, NULL, 0u);
   }
   assert(po35_builder_finish(&builder, &length) == PO_OK);
   manifest_save("frame.bin", frame, length);
