@@ -504,12 +504,24 @@ static int speech_edit_rebuild_has_invalid_aliases(
          speech_edit_ranges_overlap(storage[i].data, storage[i].bytes, frame, frame_len)) ||
         speech_edit_ranges_overlap(storage[i].data, storage[i].bytes, edits, edit_bytes))
       return 1;
-    for (size_t j = 0; j < edit_count; ++j)
-      if (speech_edit_ranges_overlap(storage[i].data, storage[i].bytes, edits[j].records,
-                                     edits[j].record_bytes))
-        return 1;
+    if (edits != NULL)
+      for (size_t j = 0; j < edit_count; ++j)
+        if (speech_edit_ranges_overlap(storage[i].data, storage[i].bytes, edits[j].records,
+                                       edits[j].record_bytes))
+          return 1;
   }
   return 0;
+}
+
+static int speech_edit_rebuild_can_clear_output_length(
+    const uint8_t *frame, size_t frame_len, const po35_speech_edit_t *edits, size_t edit_count,
+    const po35_speech_edit_plan_t *plan, uint8_t *workspace, size_t workspace_bytes,
+    uint8_t *out_frame, size_t out_capacity, size_t *out_frame_bytes) {
+  if (out_frame_bytes == NULL)
+    return 0;
+  return !speech_edit_rebuild_has_invalid_aliases(frame, frame_len, edits, edit_count, plan,
+                                                  workspace, workspace_bytes, out_frame,
+                                                  out_capacity, out_frame_bytes);
 }
 
 static po_status_t speech_edit_rebuild_append_records(po35_speech_edit_rebuild_t *rebuild,
@@ -588,13 +600,16 @@ po_status_t po35_speech_edit_rebuild(const uint8_t *frame, size_t frame_len,
   po_status_t status;
   size_t frame_bytes;
 
+  if (speech_edit_rebuild_can_clear_output_length(frame, frame_len, edits, edit_count, plan,
+                                                  workspace, workspace_bytes, out_frame,
+                                                  out_capacity, out_frame_bytes))
+    *out_frame_bytes = 0u;
   if (plan == NULL || workspace == NULL || out_frame == NULL || out_frame_bytes == NULL)
     return PO_ERR_INVALID_ARG;
   if (speech_edit_rebuild_has_invalid_aliases(frame, frame_len, edits, edit_count, plan, workspace,
                                               workspace_bytes, out_frame, out_capacity,
                                               out_frame_bytes))
     return PO_ERR_INVALID_ARG;
-  *out_frame_bytes = 0u;
   if (frame == NULL || (edit_count != 0u && edits == NULL))
     return PO_ERR_INVALID_ARG;
 
