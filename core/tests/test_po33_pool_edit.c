@@ -550,6 +550,26 @@ static void test_pool_edit_rebuild(void) {
                                 plan.required_workspace_bytes, (uint8_t *)&plan, sizeof(plan),
                                 &output_bytes) == PO_ERR_INVALID_ARG);
   {
+    uint8_t frame_before[sizeof(fixture.frame)];
+    memcpy(frame_before, fixture.frame, sizeof(frame_before));
+    assert(po33_pool_edit_rebuild(fixture.frame, fixture.length, 0u, samples, 3u, &plan,
+                                  fixture.frame, sizeof(fixture.frame), output, sizeof(output),
+                                  &output_bytes) == PO_ERR_INVALID_ARG);
+    assert(memcmp(frame_before, fixture.frame, sizeof(frame_before)) == 0);
+    assert(po33_pool_edit_rebuild(fixture.frame, fixture.length, 0u, samples, 3u, &plan, workspace,
+                                  plan.required_workspace_bytes, fixture.frame,
+                                  sizeof(fixture.frame), &output_bytes) == PO_ERR_INVALID_ARG);
+    assert(memcmp(frame_before, fixture.frame, sizeof(frame_before)) == 0);
+  }
+  {
+    uint8_t samples_before[sizeof(samples)];
+    memcpy(samples_before, samples, sizeof(samples_before));
+    assert(po33_pool_edit_rebuild(fixture.frame, fixture.length, 0u, samples, 3u, &plan, workspace,
+                                  plan.required_workspace_bytes, samples, sizeof(samples),
+                                  &output_bytes) == PO_ERR_INVALID_ARG);
+    assert(memcmp(samples_before, samples, sizeof(samples_before)) == 0);
+  }
+  {
     union {
       uint8_t bytes[30000];
       size_t length;
@@ -558,6 +578,19 @@ static void test_pool_edit_rebuild(void) {
                                   plan.required_workspace_bytes, output_or_length.bytes,
                                   sizeof(output_or_length.bytes),
                                   &output_or_length.length) == PO_ERR_INVALID_ARG);
+  }
+  {
+    union {
+      uint8_t bytes[30000];
+      size_t length;
+    } frame_or_length;
+    uint8_t frame_before[sizeof(frame_or_length.bytes)];
+    memcpy(frame_or_length.bytes, fixture.frame, sizeof(frame_or_length.bytes));
+    memcpy(frame_before, frame_or_length.bytes, sizeof(frame_before));
+    assert(po33_pool_edit_rebuild(frame_or_length.bytes, fixture.length, 0u, samples, 3u, &plan,
+                                  workspace, plan.required_workspace_bytes, output, sizeof(output),
+                                  &frame_or_length.length) == PO_ERR_INVALID_ARG);
+    assert(memcmp(frame_before, frame_or_length.bytes, sizeof(frame_before)) == 0);
   }
 }
 
