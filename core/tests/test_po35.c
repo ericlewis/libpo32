@@ -227,23 +227,256 @@ static void test_speech_edit_api_surface(void) {
   assert(PO35_SPEECH_EDIT_REASON_INCOMPLETE_GROUP == 6);
   assert(PO35_SPEECH_EDIT_REASON_UNKNOWN_SELECTED_GROUP_EXTENSION == 7);
 
-  /* These unevaluated calls type-check the complete error-contract inputs
-   * without resolving Task 1's declaration-only symbols. Task 2 turns them
-   * into executed assertions: null pointers, duplicate slots, partial or
-   * oversized record bodies, an out-of-range slot, short output, and untouched
-   * output on failure. */
-  (void)sizeof(po35_speech_edit_plan(NULL, 0u, NULL, 0u, &plan));
-  (void)sizeof(po35_speech_edit_plan(source, sizeof(source), NULL, 1u, &plan));
-  (void)sizeof(po35_speech_edit_plan(source, sizeof(source), &edit, 1u, NULL));
-  (void)sizeof(po35_speech_edit_plan(source, sizeof(source), duplicate_slots, 2u, &plan));
-  (void)sizeof(po35_speech_edit_plan(source, sizeof(source), &partial_record, 1u, &plan));
-  (void)sizeof(po35_speech_edit_plan(source, sizeof(source), &too_many_records, 1u, &plan));
-  (void)sizeof(po35_speech_edit_plan(source, sizeof(source), &bad_slot, 1u, &plan));
+  /* The planner has executable coverage below. Rebuild remains declaration-only
+   * in Task 2, so retain unevaluated type checks for its complete ABI. */
   (void)sizeof(po35_speech_edit_rebuild(source, sizeof(source), &edit, 1u, &plan, workspace,
                                         sizeof(workspace), output, sizeof(output) - 1u,
                                         &out_frame_bytes));
   (void)sizeof(
       po35_speech_edit_rebuild(source, sizeof(source), &edit, 1u, NULL, NULL, 0u, NULL, 0u, NULL));
+}
+
+static void speech_plan_append(po35_builder_t *builder, uint16_t tag, const uint8_t *payload,
+                               size_t payload_len) {
+  assert(po35_builder_append_packet(builder, tag, payload, payload_len, NULL) == PO_OK);
+}
+
+static void speech_plan_append_header(po35_builder_t *builder, uint8_t slot, size_t record_count) {
+  uint8_t header[PO35_SPEECH_HEADER_BYTES] = {slot, 0, 0, 60, 140, 1, 2, 3, 4};
+  assert(record_count <= UINT16_MAX);
+  header[1] = (uint8_t)(record_count >> 8);
+  header[2] = (uint8_t)record_count;
+  speech_plan_append(builder, PO35_TAG_SPEECH_HEADER, header, sizeof(header));
+}
+
+static void speech_plan_append_group(po35_builder_t *builder, uint8_t slot, size_t record_count,
+                                     const uint8_t *records, const size_t *segments,
+                                     size_t segment_count, int opaque_extension) {
+  static const uint8_t extension[] = {3, 1, 4, 1, 5};
+  size_t offset = 0;
+  speech_plan_append_header(builder, slot, record_count);
+  for (size_t i = 0; i < segment_count; ++i) {
+    assert(segments[i] != 0u);
+    assert(segments[i] <= record_count * PO35_SPEECH_RECORD_BYTES - offset);
+    speech_plan_append(builder, PO35_TAG_SPEECH_DATA, records + offset, segments[i]);
+    offset += segments[i];
+  }
+  assert(offset == record_count * PO35_SPEECH_RECORD_BYTES);
+  if (opaque_extension)
+    speech_plan_append(builder, 0x5678u, extension, sizeof(extension));
+  speech_plan_append(builder, PO35_TAG_SPEECH_END, NULL, 0u);
+}
+
+static void speech_plan_finish(po35_builder_t *builder, size_t *frame_len) {
+  assert(po35_builder_finish(builder, frame_len) == PO_OK);
+}
+
+static void assert_speech_plan_neutral(const po35_speech_edit_plan_t *plan) {
+  assert(plan->required_workspace_bytes == 0u);
+  assert(plan->required_frame_bytes == 0u);
+  assert(plan->affected_slot_count == 0u);
+  assert(plan->failed_edit_index == SIZE_MAX);
+  assert(plan->selected_slot_mask == 0u);
+  assert(plan->failed_slot == UINT8_MAX);
+  assert(plan->reason == PO35_SPEECH_EDIT_REASON_NONE);
+}
+
+static void assert_speech_plan_failure(const po35_speech_edit_plan_t *plan, size_t edit_index,
+                                       uint8_t slot, po35_speech_edit_reason_t reason) {
+  assert(plan->required_workspace_bytes == 0u);
+  assert(plan->required_frame_bytes == 0u);
+  assert(plan->affected_slot_count == 0u);
+  assert(plan->failed_edit_index == edit_index);
+  assert(plan->selected_slot_mask == 0u);
+  assert(plan->failed_slot == slot);
+  assert(plan->reason == reason);
+}
+
+static void test_speech_edit_plan_measurement(void) {
+  uint8_t source[PO35_PREAMBLE_BYTES + 2048];
+  uint8_t source_records[4 * PO35_SPEECH_RECORD_BYTES];
+  uint8_t replacement_records[6 * PO35_SPEECH_RECORD_BYTES];
+  const size_t first_segments[] = {13u, 31u};
+  const size_t second_segments[] = {44u, 88u, 44u};
+  const size_t third_segments[] = {44u};
+  const po35_speech_edit_t edits[] = {
+      {2u, 80u, replacement_records, sizeof(replacement_records)},
+      {5u, 20u, replacement_records, 2u * PO35_SPEECH_RECORD_BYTES},
+  };
+  po35_builder_t builder;
+  po35_speech_edit_plan_t plan;
+  size_t source_len;
+  for (size_t i = 0; i < sizeof(source_records); ++i)
+    source_records[i] = (uint8_t)(i + 1u);
+  for (size_t i = 0; i < sizeof(replacement_records); ++i)
+    replacement_records[i] = (uint8_t)(0xa0u + i);
+  assert(po35_builder_init(&builder, source, sizeof(source)) == PO_OK);
+  speech_plan_append_group(&builder, 2u, 1u, source_records, first_segments,
+                           sizeof(first_segments) / sizeof(first_segments[0]), 0);
+  speech_plan_append_group(&builder, 5u, 4u, source_records, second_segments,
+                           sizeof(second_segments) / sizeof(second_segments[0]), 0);
+  speech_plan_append_group(&builder, 7u, 1u, source_records, third_segments,
+                           sizeof(third_segments) / sizeof(third_segments[0]), 1);
+  speech_plan_finish(&builder, &source_len);
+
+  memset(&plan, 0xa5, sizeof(plan));
+  assert(po35_speech_edit_plan(source, source_len, edits, sizeof(edits) / sizeof(edits[0]),
+                               &plan) == PO_OK);
+  assert(plan.required_workspace_bytes == 0u);
+  /* Remove split source data (54 + 191 wire bytes), then add 6- and
+   * 2-record replacements (274 + 93 wire bytes). */
+  assert(plan.required_frame_bytes == source_len + 122u);
+  assert(plan.affected_slot_count == 2u);
+  assert(plan.selected_slot_mask == ((uint16_t)(1u << 2) | (uint16_t)(1u << 5)));
+  assert(plan.failed_edit_index == SIZE_MAX);
+  assert(plan.failed_slot == UINT8_MAX);
+  assert(plan.reason == PO35_SPEECH_EDIT_REASON_NONE);
+  assert(po35_speech_edit_plan(source, source_len, NULL, 0u, &plan) == PO_OK);
+  assert(plan.required_workspace_bytes == 0u);
+  assert(plan.required_frame_bytes == source_len);
+  assert(plan.affected_slot_count == 0u);
+  assert(plan.selected_slot_mask == 0u);
+  assert(plan.failed_edit_index == SIZE_MAX);
+  assert(plan.failed_slot == UINT8_MAX);
+  assert(plan.reason == PO35_SPEECH_EDIT_REASON_NONE);
+}
+
+static void test_speech_edit_plan_descriptor_failures(void) {
+  uint8_t source[PO35_PREAMBLE_BYTES + 128];
+  uint8_t records[PO35_SPEECH_RECORD_BYTES] = {0};
+  union {
+    uint8_t frame[PO35_PREAMBLE_BYTES + 128];
+    po35_speech_edit_plan_t plan;
+  } alias;
+  po35_builder_t builder;
+  po35_speech_edit_plan_t plan;
+  po35_speech_edit_t edit = {2u, 80u, records, sizeof(records)};
+  po35_speech_edit_t duplicate[] = {
+      {2u, 80u, records, sizeof(records)},
+      {2u, 40u, records, sizeof(records)},
+  };
+  size_t source_len;
+  assert(po35_builder_init(&builder, source, sizeof(source)) == PO_OK);
+  speech_plan_append_header(&builder, 2u, 0u);
+  speech_plan_append(&builder, PO35_TAG_SPEECH_END, NULL, 0u);
+  speech_plan_finish(&builder, &source_len);
+
+  edit.records = NULL;
+  edit.record_bytes = 0u;
+  assert(po35_speech_edit_plan(source, source_len, &edit, 1u, &plan) == PO_OK);
+  assert(plan.required_workspace_bytes == 0u);
+  assert(plan.required_frame_bytes == source_len);
+  assert(plan.affected_slot_count == 1u);
+  assert(plan.selected_slot_mask == (uint16_t)(1u << 2));
+  assert(plan.reason == PO35_SPEECH_EDIT_REASON_NONE);
+  edit.records = records;
+  edit.record_bytes = sizeof(records);
+
+  memset(&plan, 0xa5, sizeof(plan));
+  assert(po35_speech_edit_plan(NULL, source_len, &edit, 1u, &plan) == PO_ERR_INVALID_ARG);
+  assert_speech_plan_neutral(&plan);
+  memset(&plan, 0xa5, sizeof(plan));
+  assert(po35_speech_edit_plan(source, source_len, NULL, 1u, &plan) == PO_ERR_INVALID_ARG);
+  assert_speech_plan_neutral(&plan);
+  assert(po35_speech_edit_plan(source, source_len, &edit, 1u, NULL) == PO_ERR_INVALID_ARG);
+
+  assert(po35_speech_edit_plan(source, source_len, duplicate, 2u, &plan) == PO_ERR_RANGE);
+  assert_speech_plan_failure(&plan, 1u, 2u, PO35_SPEECH_EDIT_REASON_DUPLICATE_SLOT);
+  edit.slot = PO35_SPEECH_SLOT_COUNT;
+  assert(po35_speech_edit_plan(source, source_len, &edit, 1u, &plan) == PO_ERR_RANGE);
+  assert_speech_plan_failure(&plan, 0u, PO35_SPEECH_SLOT_COUNT,
+                             PO35_SPEECH_EDIT_REASON_SLOT_OUT_OF_RANGE);
+  edit.slot = 2u;
+  edit.record_bytes = sizeof(records) - 1u;
+  assert(po35_speech_edit_plan(source, source_len, &edit, 1u, &plan) == PO_ERR_RANGE);
+  assert_speech_plan_failure(&plan, 0u, 2u, PO35_SPEECH_EDIT_REASON_INVALID_RECORD_SIZE);
+  edit.record_bytes = ((size_t)UINT16_MAX + 1u) * PO35_SPEECH_RECORD_BYTES;
+  assert(po35_speech_edit_plan(source, source_len, &edit, 1u, &plan) == PO_ERR_RANGE);
+  assert_speech_plan_failure(&plan, 0u, 2u, PO35_SPEECH_EDIT_REASON_INVALID_RECORD_COUNT);
+  edit.record_bytes = sizeof(records);
+  edit.records = NULL;
+  assert(po35_speech_edit_plan(source, source_len, &edit, 1u, &plan) == PO_ERR_INVALID_ARG);
+  assert_speech_plan_neutral(&plan);
+
+  edit.records = records;
+  assert(po35_builder_init(&builder, alias.frame, sizeof(alias.frame)) == PO_OK);
+  speech_plan_append_header(&builder, 2u, 0u);
+  speech_plan_append(&builder, PO35_TAG_SPEECH_END, NULL, 0u);
+  speech_plan_finish(&builder, &source_len);
+  assert(po35_speech_edit_plan(alias.frame, source_len, &edit, 1u, &alias.plan) ==
+         PO_ERR_INVALID_ARG);
+}
+
+static void test_speech_edit_plan_group_failures(void) {
+  uint8_t source[PO35_PREAMBLE_BYTES + 512];
+  uint8_t records[PO35_SPEECH_RECORD_BYTES] = {0};
+  const size_t segment[] = {PO35_SPEECH_RECORD_BYTES};
+  const po35_speech_edit_t edit = {2u, 80u, records, sizeof(records)};
+  po35_builder_t builder;
+  po35_speech_edit_plan_t plan;
+  size_t source_len;
+
+  assert(po35_builder_init(&builder, source, sizeof(source)) == PO_OK);
+  speech_plan_append_header(&builder, 3u, 0u);
+  speech_plan_append(&builder, PO35_TAG_SPEECH_END, NULL, 0u);
+  speech_plan_finish(&builder, &source_len);
+  assert(po35_speech_edit_plan(source, source_len, &edit, 1u, &plan) == PO_ERR_PARSE);
+  assert_speech_plan_failure(&plan, 0u, 2u, PO35_SPEECH_EDIT_REASON_ABSENT_SLOT);
+
+  assert(po35_builder_init(&builder, source, sizeof(source)) == PO_OK);
+  speech_plan_append_header(&builder, PO35_SPEECH_SLOT_COUNT, 0u);
+  speech_plan_append(&builder, PO35_TAG_SPEECH_END, NULL, 0u);
+  speech_plan_finish(&builder, &source_len);
+  assert(po35_speech_edit_plan(source, source_len, &edit, 1u, &plan) == PO_ERR_PARSE);
+  assert_speech_plan_neutral(&plan);
+
+  assert(po35_builder_init(&builder, source, sizeof(source)) == PO_OK);
+  speech_plan_append_header(&builder, 2u, 1u);
+  speech_plan_append(&builder, PO35_TAG_SPEECH_END, NULL, 0u);
+  speech_plan_finish(&builder, &source_len);
+  assert(po35_speech_edit_plan(source, source_len, &edit, 1u, &plan) == PO_ERR_PARSE);
+  assert_speech_plan_failure(&plan, 0u, 2u, PO35_SPEECH_EDIT_REASON_INCOMPLETE_GROUP);
+
+  assert(po35_builder_init(&builder, source, sizeof(source)) == PO_OK);
+  speech_plan_append_header(&builder, 2u, 1u);
+  speech_plan_append_header(&builder, 3u, 0u);
+  speech_plan_finish(&builder, &source_len);
+  assert(po35_speech_edit_plan(source, source_len, &edit, 1u, &plan) == PO_ERR_PARSE);
+  assert_speech_plan_failure(&plan, 0u, 2u, PO35_SPEECH_EDIT_REASON_INCOMPLETE_GROUP);
+
+  assert(po35_builder_init(&builder, source, sizeof(source)) == PO_OK);
+  speech_plan_append_header(&builder, 2u, 1u);
+  speech_plan_append(&builder, PO35_TAG_SPEECH_DATA, records, sizeof(records));
+  speech_plan_append(&builder, 0x5678u, records, 1u);
+  speech_plan_append(&builder, PO35_TAG_SPEECH_END, NULL, 0u);
+  speech_plan_finish(&builder, &source_len);
+  assert(po35_speech_edit_plan(source, source_len, &edit, 1u, &plan) == PO_ERR_PARSE);
+  assert_speech_plan_failure(&plan, 0u, 2u,
+                             PO35_SPEECH_EDIT_REASON_UNKNOWN_SELECTED_GROUP_EXTENSION);
+
+  assert(po35_builder_init(&builder, source, sizeof(source)) == PO_OK);
+  speech_plan_append(&builder, PO35_TAG_SPEECH_DATA, records, sizeof(records));
+  speech_plan_finish(&builder, &source_len);
+  assert(po35_speech_edit_plan(source, source_len, &edit, 1u, &plan) == PO_ERR_PARSE);
+  assert_speech_plan_neutral(&plan);
+
+  assert(po35_builder_init(&builder, source, sizeof(source)) == PO_OK);
+  speech_plan_append_group(&builder, 2u, 1u, records, segment, 1u, 0);
+  speech_plan_finish(&builder, &source_len);
+  source[source_len] = 0xa5u;
+  assert(po35_speech_edit_plan(source, source_len + 1u, &edit, 1u, &plan) == PO_ERR_FRAME);
+  assert_speech_plan_neutral(&plan);
+  source[0] ^= 1u;
+  assert(po35_speech_edit_plan(source, source_len, &edit, 1u, &plan) == PO_ERR_FRAME);
+  assert_speech_plan_neutral(&plan);
+  source[0] ^= 1u;
+
+  assert(po35_builder_init(&builder, source, sizeof(source)) == PO_OK);
+  speech_plan_append_group(&builder, 2u, 1u, records, segment, 1u, 0);
+  speech_plan_append_group(&builder, 2u, 1u, records, segment, 1u, 0);
+  speech_plan_finish(&builder, &source_len);
+  assert(po35_speech_edit_plan(source, source_len, &edit, 1u, &plan) == PO_ERR_PARSE);
+  assert_speech_plan_neutral(&plan);
 }
 
 static const uint8_t table_7be7_bytes[][9] = {
@@ -457,6 +690,9 @@ int main(void) {
   test_builder();
   test_speech_codecs();
   test_speech_edit_api_surface();
+  test_speech_edit_plan_measurement();
+  test_speech_edit_plan_descriptor_failures();
+  test_speech_edit_plan_group_failures();
   test_indexed_table_golden_records();
   test_indexed_table_byte_values();
   test_indexed_table_edit_locality();
