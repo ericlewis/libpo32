@@ -149,6 +149,74 @@ static void test_speech_codecs(void) {
   assert(po35_speech_record_encode(&record, output, 43) == PO_ERR_BUFFER_TOO_SMALL);
 }
 
+static void test_speech_root_view(void) {
+  static const struct {
+    int16_t root;
+    uint8_t high, low;
+  } cases[] = {
+      {0, 0x00, 0x00},   {2047, 0x07, 0xff},      {-2036, 0xf8, 0x0c},
+      {-55, 0xff, 0xc9}, {INT16_MIN, 0x80, 0x00}, {INT16_MAX, 0x7f, 0xff},
+  };
+  const uint8_t original[] = {0, 1, 0x87, 80, 120, 18, 0, 0, 42};
+  po35_speech_header_t header, decoded;
+  uint8_t expected[sizeof(original)], encoded[sizeof(original) + 2];
+  int16_t root = 1234;
+  assert(po35_speech_header_decode(original, sizeof(original), &header) == PO_OK);
+  for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+    memcpy(expected, original, sizeof(expected));
+    expected[6] = cases[i].high;
+    expected[7] = cases[i].low;
+    memset(encoded, 0xa5, sizeof(encoded));
+    assert(po35_speech_header_set_root(&header, cases[i].root) == PO_OK);
+    assert(po35_speech_header_encode(&header, encoded, sizeof(encoded)) == PO_OK);
+    assert(memcmp(encoded, expected, sizeof(expected)) == 0);
+    assert(encoded[sizeof(original)] == 0xa5 && encoded[sizeof(original) + 1] == 0xa5);
+    assert(po35_speech_header_decode(expected, sizeof(expected), &decoded) == PO_OK);
+    assert(po35_speech_header_get_root(&decoded, &root) == PO_OK);
+    assert(root == cases[i].root);
+  }
+  root = 1234;
+  assert(po35_speech_header_get_root(NULL, &root) == PO_ERR_INVALID_ARG);
+  assert(root == 1234);
+  assert(po35_speech_header_get_root(&header, NULL) == PO_ERR_INVALID_ARG);
+  assert(po35_speech_header_set_root(NULL, 0) == PO_ERR_INVALID_ARG);
+  assert(po35_speech_header_encode(&header, encoded, sizeof(encoded)) == PO_OK);
+  assert(memcmp(encoded, expected, sizeof(expected)) == 0);
+}
+
+static void test_speech_tone_view(void) {
+  po35_settings_t settings;
+  po35_speech_tone_t tone, decoded, saved;
+  po35_speech_controls_t before;
+  uint8_t input[PO35_SETTINGS_BASE_BYTES + 1], encoded[sizeof(input)], expected[sizeof(input)];
+  size_t length = 0;
+  for (size_t i = 0; i < sizeof(input); ++i)
+    input[i] = (uint8_t)(37u * i + 19u);
+  input[155] = 1;
+  input[156] = 0;
+  assert(po35_settings_decode(input, sizeof(input), &settings) == PO_OK);
+  /* Cover all raw codes, including 00, without clamping to the observed UI. */
+  for (unsigned int code = 0; code <= 255u; ++code) {
+    tone = (po35_speech_tone_t){(uint8_t)code, (uint8_t)(255u - code)};
+    assert(po35_speech_controls_set_tone(&settings.speech[0], &tone) == PO_OK);
+    assert(po35_settings_encode(&settings, encoded, sizeof(encoded), &length) == PO_OK);
+    memcpy(expected, input, sizeof(expected));
+    expected[0] = tone.pitch_raw;
+    expected[1] = tone.formant_raw;
+    assert(length == sizeof(expected) && memcmp(encoded, expected, sizeof(expected)) == 0);
+    assert(po35_speech_controls_get_tone(&settings.speech[0], &decoded) == PO_OK);
+    assert(decoded.pitch_raw == tone.pitch_raw && decoded.formant_raw == tone.formant_raw);
+  }
+  before = settings.speech[0];
+  saved = tone;
+  assert(po35_speech_controls_get_tone(NULL, &tone) == PO_ERR_INVALID_ARG);
+  assert(memcmp(&tone, &saved, sizeof(tone)) == 0);
+  assert(po35_speech_controls_get_tone(&settings.speech[0], NULL) == PO_ERR_INVALID_ARG);
+  assert(po35_speech_controls_set_tone(NULL, &tone) == PO_ERR_INVALID_ARG);
+  assert(po35_speech_controls_set_tone(&settings.speech[0], NULL) == PO_ERR_INVALID_ARG);
+  assert(memcmp(&settings.speech[0], &before, sizeof(before)) == 0);
+}
+
 static void test_speech_edit_api_surface(void) {
   static const uint8_t records[PO35_SPEECH_RECORD_BYTES] = {0};
   const po35_speech_edit_t edit = {
@@ -962,6 +1030,8 @@ int main(void) {
   test_frames();
   test_builder();
   test_speech_codecs();
+  test_speech_root_view();
+  test_speech_tone_view();
   test_speech_edit_api_surface();
   test_speech_edit_plan_measurement();
   test_speech_edit_plan_descriptor_failures();

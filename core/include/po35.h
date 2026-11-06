@@ -88,7 +88,7 @@ typedef struct po35_speech_header {
   uint8_t slot;
   uint16_t record_count;
   uint8_t records_per_second;
-  uint8_t metadata[5]; /* Payload 4..8; tuning/gain/noise interpretations are candidates. */
+  uint8_t metadata[5]; /* Payload 4..8; signed root at 6..7, other roles remain candidates. */
 } po35_speech_header_t;
 
 typedef struct po35_speech_record {
@@ -144,6 +144,13 @@ typedef struct po35_speech_edit_plan {
   po35_speech_edit_reason_t reason;
 } po35_speech_edit_plan_t;
 
+/* Named raw controls for the normal pitch/formant page. Endpoint captures
+ * match -127/01 and +127/FF; intermediate and audible scales are unverified. */
+typedef struct po35_speech_tone {
+  uint8_t pitch_raw;
+  uint8_t formant_raw;
+} po35_speech_tone_t;
+
 typedef struct po35_speech_controls {
   uint8_t parameters[4]; /* Same four-byte order as per-step speech parameters. */
   uint8_t state_raw[4];
@@ -158,7 +165,7 @@ typedef struct po35_settings {
   po35_speech_controls_t speech[PO35_SPEECH_SLOT_COUNT];
   po35_drum_controls_t drums[PO35_DRUM_COUNT];
   uint8_t tempo;
-  /* Payload 153..154; the second byte is a candidate remembered sound ID. */
+  /* Payload 153..154; candidate swing and remembered sound ID, kept raw. */
   uint8_t state_raw[2];
   uint8_t chain_count;
   uint8_t chain[PO35_CHAIN_MAX_COUNT]; /* Zero-based indices; repeats preserved. */
@@ -191,9 +198,25 @@ po_status_t po35_table_1c7f_encode(const po35_table_1c7f_t *value, uint8_t *out,
 po_status_t po35_speech_header_decode(const uint8_t *data, size_t len, po35_speech_header_t *out);
 po_status_t po35_speech_header_encode(const po35_speech_header_t *header, uint8_t *out,
                                       size_t capacity);
+/* Read/write the signed BE16 root-control value at payload 6..7, metadata[2..3].
+ * No octave, semitone or cents conversion is implied. Set preserves all other
+ * header fields and accepts every int16_t value without clamping to observed
+ * device endpoints. Null arguments return PO_ERR_INVALID_ARG without changes.
+ * Input/output storage must not overlap. */
+po_status_t po35_speech_header_get_root(const po35_speech_header_t *header, int16_t *out_root);
+po_status_t po35_speech_header_set_root(po35_speech_header_t *header, int16_t root);
 po_status_t po35_speech_record_decode(const uint8_t *data, size_t len, po35_speech_record_t *out);
 po_status_t po35_speech_record_encode(const po35_speech_record_t *record, uint8_t *out,
                                       size_t capacity);
+
+/* Named view of controls.parameters[0..1]. Every raw byte value is retained.
+ * Set leaves parameters[2..3] and state_raw unchanged. Null arguments return
+ * PO_ERR_INVALID_ARG without changing outputs. Input/output must not overlap.
+ * These helpers do not assign per-step semantics or a display conversion. */
+po_status_t po35_speech_controls_get_tone(const po35_speech_controls_t *controls,
+                                          po35_speech_tone_t *out);
+po_status_t po35_speech_controls_set_tone(po35_speech_controls_t *controls,
+                                          const po35_speech_tone_t *tone);
 
 /* Transactional speech replacement. Both functions borrow frame, edits and
  * every edit's record storage for the call. Those read-only inputs may overlap

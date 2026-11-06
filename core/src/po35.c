@@ -175,6 +175,42 @@ po_status_t po35_speech_header_encode(const po35_speech_header_t *header, uint8_
   return PO_OK;
 }
 
+po_status_t po35_speech_header_get_root(const po35_speech_header_t *header, int16_t *out_root) {
+  uint16_t raw;
+  if (header == NULL || out_root == NULL)
+    return PO_ERR_INVALID_ARG;
+  raw = (uint16_t)(((uint16_t)header->metadata[2] << 8) | header->metadata[3]);
+  *out_root = (int16_t)(raw <= 32767u ? (int32_t)raw : (int32_t)raw - 65536);
+  return PO_OK;
+}
+
+po_status_t po35_speech_header_set_root(po35_speech_header_t *header, int16_t root) {
+  uint16_t raw = (uint16_t)root;
+  if (header == NULL)
+    return PO_ERR_INVALID_ARG;
+  header->metadata[2] = (uint8_t)(raw >> 8);
+  header->metadata[3] = (uint8_t)raw;
+  return PO_OK;
+}
+
+po_status_t po35_speech_controls_get_tone(const po35_speech_controls_t *controls,
+                                          po35_speech_tone_t *out) {
+  if (controls == NULL || out == NULL)
+    return PO_ERR_INVALID_ARG;
+  out->pitch_raw = controls->parameters[0];
+  out->formant_raw = controls->parameters[1];
+  return PO_OK;
+}
+
+po_status_t po35_speech_controls_set_tone(po35_speech_controls_t *controls,
+                                          const po35_speech_tone_t *tone) {
+  if (controls == NULL || tone == NULL)
+    return PO_ERR_INVALID_ARG;
+  controls->parameters[0] = tone->pitch_raw;
+  controls->parameters[1] = tone->formant_raw;
+  return PO_OK;
+}
+
 po_status_t po35_speech_record_decode(const uint8_t *data, size_t len, po35_speech_record_t *out) {
   uint16_t pitch;
   if (data == NULL || out == NULL)
