@@ -870,9 +870,10 @@ static int pool_edit_plan_overlaps_input(const po33_pool_edit_plan_t *plan, cons
          (samples != NULL && po33_ranges_overlap(plan, sizeof(*plan), samples, sample_bytes));
 }
 
-po_status_t po33_pool_edit_plan(const uint8_t *frame, size_t frame_len,
-                                size_t target_sound_record_index, const uint8_t *samples,
-                                size_t sample_bytes, po33_pool_edit_plan_t *plan) {
+static po_status_t pool_edit_plan_internal(const uint8_t *frame, size_t frame_len,
+                                           size_t target_sound_record_index, const uint8_t *samples,
+                                           size_t sample_bytes, int full_range,
+                                           po33_pool_edit_plan_t *plan) {
   po33_pool_edit_measure_t measurement;
   po33_pool_edit_resolution_t resolution;
   po33_pool_replacement_plan_t replacement = {
@@ -881,6 +882,7 @@ po_status_t po33_pool_edit_plan(const uint8_t *frame, size_t frame_len,
   };
   unsigned int target_flags;
   size_t blocks;
+  size_t storage_bytes = sample_bytes;
   po_status_t status;
 
   if (plan == NULL)
@@ -891,6 +893,11 @@ po_status_t po33_pool_edit_plan(const uint8_t *frame, size_t frame_len,
   if (frame == NULL || (sample_bytes != 0u && samples == NULL))
     return PO_ERR_INVALID_ARG;
   replacement.requested_sample_bytes = sample_bytes;
+  if (full_range) {
+    if (sample_bytes == 0u || sample_bytes > UINT32_MAX || sample_bytes == SIZE_MAX)
+      return PO_ERR_RANGE;
+    storage_bytes = sample_bytes + 1u;
+  }
   pool_edit_measure_init(&measurement, target_sound_record_index);
   status = topology_parse_exact_records(frame, frame_len, pool_edit_measure_record, &measurement);
   if (status != PO_OK)
@@ -926,18 +933,18 @@ po_status_t po33_pool_edit_plan(const uint8_t *frame, size_t frame_len,
     goto failure;
   }
   replacement.existing_allocation_bytes = measurement.target.data_bytes - PO33_SOUND_HEADER_BYTES;
-  replacement.existing_allocation_fits = sample_bytes <= replacement.existing_allocation_bytes;
+  replacement.existing_allocation_fits = storage_bytes <= replacement.existing_allocation_bytes;
   replacement.growth_required = !replacement.existing_allocation_fits;
   if (replacement.existing_allocation_fits) {
     replacement.required_allocation_bytes = replacement.existing_allocation_bytes;
   } else {
-    if (sample_bytes > SIZE_MAX - (PO33_POOL_ALLOCATION_BLOCK_BYTES - 1u)) {
+    if (storage_bytes > SIZE_MAX - (PO33_POOL_ALLOCATION_BLOCK_BYTES - 1u)) {
       replacement.reason = PO33_POOL_REPLACEMENT_REASON_REQUIRED_ALLOCATION_OVERFLOW;
       status = PO_ERR_RANGE;
       goto failure;
     }
     replacement.required_allocation_bytes =
-        ((sample_bytes + PO33_POOL_ALLOCATION_BLOCK_BYTES - 1u) /
+        ((storage_bytes + PO33_POOL_ALLOCATION_BLOCK_BYTES - 1u) /
          PO33_POOL_ALLOCATION_BLOCK_BYTES) *
         PO33_POOL_ALLOCATION_BLOCK_BYTES;
     replacement.required_growth_bytes =
@@ -961,6 +968,12 @@ po_status_t po33_pool_edit_plan(const uint8_t *frame, size_t frame_len,
   }
   if (resolution.topology_reason != PO33_POOL_REPLACEMENT_REASON_NONE) {
     replacement.reason = resolution.topology_reason;
+    status = PO_ERR_PARSE;
+    goto failure;
+  }
+  if (full_range && (resolution.reference_count != 1u ||
+                     measurement.target.header.source_selector != measurement.target.selector)) {
+    replacement.reason = PO33_POOL_REPLACEMENT_REASON_NOT_EXCLUSIVE;
     status = PO_ERR_PARSE;
     goto failure;
   }
@@ -1007,6 +1020,7 @@ typedef struct po33_pool_edit_rebuild {
   size_t target_data_end;
   size_t target_logical_bytes;
   int target_finished;
+  int full_range;
   po_status_t status;
 } po33_pool_edit_rebuild_t;
 
@@ -1148,7 +1162,10 @@ static int pool_edit_rebuild_packet(const po_packet_t *packet, void *user) {
     }
     for (size_t index = 0u; index < packet->payload_len; ++index) {
       size_t logical_index = rebuild->target_logical_bytes + index;
-      if (logical_index < PO33_SOUND_HEADER_BYTES)
+      if (rebuild->full_range && logical_index < 8u) {
+        uint32_t value = logical_index < 4u ? 0u : (uint32_t)rebuild->sample_bytes;
+        payload[index] = (uint8_t)(value >> (8u * (logical_index % 4u)));
+      } else if (logical_index < PO33_SOUND_HEADER_BYTES)
         payload[index] = packet->payload[index];
       else {
         size_t sample_index = logical_index - PO33_SOUND_HEADER_BYTES;
@@ -1173,11 +1190,13 @@ static int pool_edit_rebuild_packet(const po_packet_t *packet, void *user) {
   return 0;
 }
 
-po_status_t po33_pool_edit_rebuild(const uint8_t *frame, size_t frame_len,
-                                   size_t target_sound_record_index, const uint8_t *samples,
-                                   size_t sample_bytes, const po33_pool_edit_plan_t *plan,
-                                   uint8_t *workspace, size_t workspace_bytes, uint8_t *out_frame,
-                                   size_t out_capacity, size_t *out_frame_bytes) {
+static po_status_t pool_edit_rebuild_internal(const uint8_t *frame, size_t frame_len,
+                                              size_t target_sound_record_index,
+                                              const uint8_t *samples, size_t sample_bytes,
+                                              const po33_pool_edit_plan_t *plan, uint8_t *workspace,
+                                              size_t workspace_bytes, uint8_t *out_frame,
+                                              size_t out_capacity, size_t *out_frame_bytes,
+                                              int full_range) {
   po33_pool_edit_plan_t expected = {0};
   po33_pool_edit_rebuild_t rebuild;
   po33_decode_result_t result;
@@ -1197,8 +1216,8 @@ po_status_t po33_pool_edit_rebuild(const uint8_t *frame, size_t frame_len,
     return PO_ERR_INVALID_ARG;
   if (frame == NULL || (sample_bytes != 0u && samples == NULL))
     return PO_ERR_INVALID_ARG;
-  status = po33_pool_edit_plan(frame, frame_len, target_sound_record_index, samples, sample_bytes,
-                               &expected);
+  status = pool_edit_plan_internal(frame, frame_len, target_sound_record_index, samples,
+                                   sample_bytes, full_range, &expected);
   if (status != PO_OK || !pool_edit_plan_matches(plan, &expected))
     return PO_ERR_INVALID_ARG;
   if (workspace_bytes < expected.required_workspace_bytes ||
@@ -1214,6 +1233,7 @@ po_status_t po33_pool_edit_rebuild(const uint8_t *frame, size_t frame_len,
       .plan = &expected,
       .samples = samples,
       .sample_bytes = sample_bytes,
+      .full_range = full_range,
       .target_data_end = expected.target_data_span.offset + expected.target_data_span.length,
       .status = PO_OK,
   };
@@ -1233,6 +1253,35 @@ po_status_t po33_pool_edit_rebuild(const uint8_t *frame, size_t frame_len,
   pool_edit_copy_bytes(out_frame, workspace, frame_bytes);
   *out_frame_bytes = frame_bytes;
   return PO_OK;
+}
+
+po_status_t po33_pool_edit_plan(const uint8_t *frame, size_t frame_len, size_t target,
+                                const uint8_t *samples, size_t bytes, po33_pool_edit_plan_t *plan) {
+  return pool_edit_plan_internal(frame, frame_len, target, samples, bytes, 0, plan);
+}
+
+po_status_t po33_sample_edit_plan(const uint8_t *frame, size_t frame_len, size_t target,
+                                  const uint8_t *samples, size_t bytes,
+                                  po33_pool_edit_plan_t *plan) {
+  return pool_edit_plan_internal(frame, frame_len, target, samples, bytes, 1, plan);
+}
+
+po_status_t po33_pool_edit_rebuild(const uint8_t *frame, size_t frame_len, size_t target,
+                                   const uint8_t *samples, size_t bytes,
+                                   const po33_pool_edit_plan_t *plan, uint8_t *workspace,
+                                   size_t workspace_bytes, uint8_t *out, size_t capacity,
+                                   size_t *written) {
+  return pool_edit_rebuild_internal(frame, frame_len, target, samples, bytes, plan, workspace,
+                                    workspace_bytes, out, capacity, written, 0);
+}
+
+po_status_t po33_sample_edit_rebuild(const uint8_t *frame, size_t frame_len, size_t target,
+                                     const uint8_t *samples, size_t bytes,
+                                     const po33_pool_edit_plan_t *plan, uint8_t *workspace,
+                                     size_t workspace_bytes, uint8_t *out, size_t capacity,
+                                     size_t *written) {
+  return pool_edit_rebuild_internal(frame, frame_len, target, samples, bytes, plan, workspace,
+                                    workspace_bytes, out, capacity, written, 1);
 }
 
 typedef struct po33_range_source {
