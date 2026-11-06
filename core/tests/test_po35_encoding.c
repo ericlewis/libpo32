@@ -427,6 +427,18 @@ static void test_unchanged_and_repeated_edits(void) {
   status = remove("output.wav");
   assert(status == 0);
 
+  /* No-edit mode preserves a wire-valid capture even when a speech group is
+   * incomplete. The transactional edit API intentionally rejects that source. */
+  make_fixture(1, 16);
+  write_file("input.bin", fixture, fixture_size);
+  status = po35_encode_main(3, argv);
+  assert(status == 0);
+  wire = load_transfer("output.wav", &bytes, &after);
+  assert(bytes == fixture_size && !memcmp(wire, fixture, bytes));
+  free(wire);
+  status = remove("output.wav");
+  assert(status == 0);
+
   make_fixture(1, 2);
   write_file("input.bin", fixture, fixture_size);
   write_audio("audio.wav", 48000, 1200, 1, 32, 0, 0, 0);
