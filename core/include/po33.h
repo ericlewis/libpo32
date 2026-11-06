@@ -148,9 +148,10 @@ typedef enum po33_pool_replacement_reason {
  * plus every other resolved reference. growth_structurally_eligible reports
  * whether this topology could append whole blocks, even when growth is not
  * needed for the current request.
- * On a rejected plan, available facts remain populated and reason explains the
- * first unsafe condition; target_pool_index is SIZE_MAX when no owned target is
- * available. */
+ * When an owned target pool is resolved, a rejected plan still carries its
+ * complete resolved-reference and affected-record counts; reason explains the
+ * first unsafe condition. target_pool_index is SIZE_MAX when no owned target
+ * is available. */
 typedef struct po33_pool_replacement_plan {
   size_t target_pool_index;
   size_t requested_sample_bytes;
@@ -237,7 +238,9 @@ po_status_t po33_pool_topology_requirements(const uint8_t *frame, size_t frame_l
  * capacity must cover its queried count; an array may be NULL only with zero
  * queried count and zero capacity. Insufficient storage returns
  * PO_ERR_BUFFER_TOO_SMALL before changing any array. Null required storage
- * returns PO_ERR_INVALID_ARG.
+ * returns PO_ERR_INVALID_ARG. The three output arrays must be mutually
+ * disjoint and disjoint from the source frame; invalid aliases return
+ * PO_ERR_INVALID_ARG before writing.
  * Malformed source frames return PO_ERR_FRAME; unrepresentable counts return
  * PO_ERR_RANGE. On every failure all supplied arrays remain unchanged.
  * Successful calls write exactly the queried elements and leave capacity beyond
@@ -260,7 +263,9 @@ po_status_t po33_pool_topology_build(const uint8_t *frame, size_t frame_len,
  * topology returns PO_ERR_PARSE. An overlapping plan returns PO_ERR_INVALID_ARG
  * before plan state is written; output guarantees do not apply to an invalid
  * alias. For nonoverlapping plan storage, other invalid arguments clear the
- * plan, while plan.reason describes every target-specific rejection.
+ * plan, while plan.reason describes every target-specific rejection. An
+ * unrepresentable input-array count also returns PO_ERR_INVALID_ARG without
+ * writing plan storage, because its full alias extent cannot be represented.
  * PO_OK means the existing allocation fits, or required growth is structurally
  * eligible; it does not establish an output-frame capacity or device support. */
 po_status_t po33_pool_replacement_plan(const po33_sound_record_t *sound_records,

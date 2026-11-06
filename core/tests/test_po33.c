@@ -204,6 +204,15 @@ static int count_packet(const po_packet_t *packet, void *user) {
 }
 
 static void test_pool_topology(void) {
+  union {
+    uint8_t frame[PO33_PREAMBLE_BYTES + 512u];
+    po33_sound_record_t records[10];
+  } frame_or_records;
+  union {
+    po33_sound_record_t records[10];
+    po33_pool_t pools[6];
+    po33_pool_reference_t references[6];
+  } overlapping_outputs, overlapping_outputs_before;
   topology_fixture_t fixture;
   po33_sound_record_t records[10], records_before[10];
   po33_pool_t pools[6], pools_before[6];
@@ -243,6 +252,9 @@ static void test_pool_topology(void) {
   assert(po33_pool_topology_build(fixture.frame, fixture.length, records, records_required, pools,
                                   pools_required, references,
                                   references_required - 1u) == PO_ERR_BUFFER_TOO_SMALL);
+  assert(po33_pool_topology_build(fixture.frame, fixture.length, records,
+                                  SIZE_MAX / sizeof(*records) + 1u, pools, pools_required,
+                                  references, references_required) == PO_ERR_RANGE);
   assert(memcmp(records, records_before, sizeof(records)) == 0);
   assert(memcmp(pools, pools_before, sizeof(pools)) == 0);
   assert(memcmp(references, references_before, sizeof(references)) == 0);
@@ -257,6 +269,20 @@ static void test_pool_topology(void) {
                 sizeof(pools) - pools_required * sizeof(*pools)) == 0);
   assert(memcmp(references + references_required, references_before + references_required,
                 sizeof(references) - references_required * sizeof(*references)) == 0);
+
+  memcpy(frame_or_records.frame, fixture.frame, fixture.length);
+  assert(po33_pool_topology_build(frame_or_records.frame, fixture.length, frame_or_records.records,
+                                  records_required, pools, pools_required, references,
+                                  references_required) == PO_ERR_INVALID_ARG);
+  assert(memcmp(frame_or_records.frame, fixture.frame, fixture.length) == 0);
+
+  memset(&overlapping_outputs, 0xa5, sizeof(overlapping_outputs));
+  memcpy(&overlapping_outputs_before, &overlapping_outputs, sizeof(overlapping_outputs));
+  assert(po33_pool_topology_build(fixture.frame, fixture.length, overlapping_outputs.records,
+                                  records_required, overlapping_outputs.pools, pools_required,
+                                  references, references_required) == PO_ERR_INVALID_ARG);
+  assert(memcmp(&overlapping_outputs, &overlapping_outputs_before, sizeof(overlapping_outputs)) ==
+         0);
 
   assert(records[0].selector == 7u && records[0].range_start_raw == UINT32_C(0x10203040) &&
          records[0].range_end_raw == UINT32_C(0x50607080) && records[0].source_selector == 7u);

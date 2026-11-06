@@ -389,6 +389,36 @@ typedef struct po33_topology_build_pass {
   size_t pool_count;
 } po33_topology_build_pass_t;
 
+static int po33_ranges_overlap(const void *left, size_t left_bytes, const void *right,
+                               size_t right_bytes) {
+  uintptr_t left_start, right_start;
+  if (left_bytes == 0u || right_bytes == 0u)
+    return 0;
+  left_start = (uintptr_t)left;
+  right_start = (uintptr_t)right;
+  if (left_start > UINTPTR_MAX - left_bytes || right_start > UINTPTR_MAX - right_bytes)
+    return 1;
+  return left_start < right_start + right_bytes && right_start < left_start + left_bytes;
+}
+
+static int topology_build_has_invalid_aliases(const uint8_t *frame, size_t frame_len,
+                                              po33_sound_record_t *sound_records,
+                                              size_t sound_record_capacity, po33_pool_t *pools,
+                                              size_t pool_capacity,
+                                              po33_pool_reference_t *references,
+                                              size_t reference_capacity) {
+  size_t sound_record_bytes, pool_bytes, reference_bytes;
+  sound_record_bytes = sound_record_capacity * sizeof(*sound_records);
+  pool_bytes = pool_capacity * sizeof(*pools);
+  reference_bytes = reference_capacity * sizeof(*references);
+  return po33_ranges_overlap(frame, frame_len, sound_records, sound_record_bytes) ||
+         po33_ranges_overlap(frame, frame_len, pools, pool_bytes) ||
+         po33_ranges_overlap(frame, frame_len, references, reference_bytes) ||
+         po33_ranges_overlap(sound_records, sound_record_bytes, pools, pool_bytes) ||
+         po33_ranges_overlap(sound_records, sound_record_bytes, references, reference_bytes) ||
+         po33_ranges_overlap(pools, pool_bytes, references, reference_bytes);
+}
+
 static po_status_t topology_build_record(const po33_topology_observed_record_t *record,
                                          void *user) {
   po33_topology_build_pass_t *pass = (po33_topology_build_pass_t *)user;
@@ -466,6 +496,13 @@ po_status_t po33_pool_topology_build(const uint8_t *frame, size_t frame_len,
   if (frame == NULL || (sound_records == NULL && sound_record_capacity != 0u) ||
       (pools == NULL && pool_capacity != 0u) || (references == NULL && reference_capacity != 0u))
     return PO_ERR_INVALID_ARG;
+  if (sound_record_capacity > SIZE_MAX / sizeof(*sound_records) ||
+      pool_capacity > SIZE_MAX / sizeof(*pools) ||
+      reference_capacity > SIZE_MAX / sizeof(*references))
+    return PO_ERR_RANGE;
+  if (topology_build_has_invalid_aliases(frame, frame_len, sound_records, sound_record_capacity,
+                                         pools, pool_capacity, references, reference_capacity))
+    return PO_ERR_INVALID_ARG;
   status = topology_measure(frame, frame_len, &measurement);
   if (status != PO_OK)
     return status;
@@ -503,18 +540,6 @@ static int pool_replacement_group_boundary_valid(const po33_sound_record_t *reco
   return selection_end <= record->data_span.offset;
 }
 
-static int pool_replacement_ranges_overlap(const void *left, size_t left_bytes, const void *right,
-                                           size_t right_bytes) {
-  uintptr_t left_start, right_start;
-  if (left_bytes == 0u || right_bytes == 0u)
-    return 0;
-  left_start = (uintptr_t)left;
-  right_start = (uintptr_t)right;
-  if (left_start > UINTPTR_MAX - left_bytes || right_start > UINTPTR_MAX - right_bytes)
-    return 1;
-  return left_start < right_start + right_bytes && right_start < left_start + left_bytes;
-}
-
 po_status_t po33_pool_replacement_plan(const po33_sound_record_t *sound_records,
                                        size_t sound_record_count, const po33_pool_t *pools,
                                        size_t pool_count, size_t target_sound_record_index,
@@ -531,19 +556,18 @@ po_status_t po33_pool_replacement_plan(const po33_sound_record_t *sound_records,
 
   if (plan == NULL)
     return PO_ERR_INVALID_ARG;
+  if (sound_record_count > SIZE_MAX / sizeof(*sound_records) ||
+      pool_count > SIZE_MAX / sizeof(*pools))
+    return PO_ERR_INVALID_ARG;
+  if ((sound_records != NULL && po33_ranges_overlap(plan, sizeof(*plan), sound_records,
+                                                    sound_record_count * sizeof(*sound_records))) ||
+      (pools != NULL &&
+       po33_ranges_overlap(plan, sizeof(*plan), pools, pool_count * sizeof(*pools))))
+    return PO_ERR_INVALID_ARG;
   if ((sound_records == NULL && sound_record_count != 0u) || (pools == NULL && pool_count != 0u)) {
     status = PO_ERR_INVALID_ARG;
     goto finish;
   }
-  if (sound_record_count > SIZE_MAX / sizeof(*sound_records) ||
-      pool_count > SIZE_MAX / sizeof(*pools)) {
-    status = PO_ERR_INVALID_ARG;
-    goto finish;
-  }
-  if (pool_replacement_ranges_overlap(plan, sizeof(*plan), sound_records,
-                                      sound_record_count * sizeof(*sound_records)) ||
-      pool_replacement_ranges_overlap(plan, sizeof(*plan), pools, pool_count * sizeof(*pools)))
-    return PO_ERR_INVALID_ARG;
   result.requested_sample_bytes = requested_sample_bytes;
   if (target_sound_record_index >= sound_record_count) {
     result.reason = PO33_POOL_REPLACEMENT_REASON_TARGET_RECORD_OUT_OF_RANGE;
@@ -597,46 +621,53 @@ po_status_t po33_pool_replacement_plan(const po33_sound_record_t *sound_records,
     result.required_growth_bytes =
         result.required_allocation_bytes - result.existing_allocation_bytes;
   }
-  if ((target->flags & PO33_SOUND_RECORD_FLAG_DUPLICATE_SELECTOR) != 0u) {
-    result.reason = PO33_POOL_REPLACEMENT_REASON_DUPLICATE_TARGET_SELECTOR;
-    status = PO_ERR_PARSE;
-    goto finish;
-  }
-  if ((target->flags & PO33_SOUND_RECORD_FLAG_SOURCE_AMBIGUOUS) != 0u) {
-    result.reason = PO33_POOL_REPLACEMENT_REASON_AMBIGUOUS_SELECTOR;
-    status = PO_ERR_PARSE;
-    goto finish;
-  }
-  if ((target->flags & PO33_SOUND_RECORD_FLAG_UNKNOWN_EXTENSION) != 0u) {
-    result.reason = PO33_POOL_REPLACEMENT_REASON_UNKNOWN_TARGET_EXTENSION;
-    status = PO_ERR_PARSE;
-    goto finish;
-  }
-  result.affected_sound_record_count = 1u;
-  for (size_t i = 0; i < sound_record_count; ++i) {
-    const po33_sound_record_t *record = sound_records + i;
-    if (record->source_selector == target->selector &&
-        record->referenced_pool_index != target_pool_index) {
+  {
+    po33_pool_replacement_reason_t topology_reason = PO33_POOL_REPLACEMENT_REASON_NONE;
+    result.affected_sound_record_count = 1u;
+    for (size_t i = 0; i < sound_record_count; ++i) {
+      const po33_sound_record_t *record = sound_records + i;
+      if (record->referenced_pool_index == target_pool_index) {
+        if (result.reference_count == SIZE_MAX ||
+            (i != target_sound_record_index && result.affected_sound_record_count == SIZE_MAX)) {
+          result.reason = PO33_POOL_REPLACEMENT_REASON_COUNT_OVERFLOW;
+          status = PO_ERR_RANGE;
+          goto finish;
+        }
+        ++result.reference_count;
+        if (i != target_sound_record_index)
+          ++result.affected_sound_record_count;
+      }
+      if (topology_reason == PO33_POOL_REPLACEMENT_REASON_NONE &&
+          record->source_selector == target->selector &&
+          record->referenced_pool_index != target_pool_index) {
+        topology_reason = PO33_POOL_REPLACEMENT_REASON_AMBIGUOUS_SELECTOR;
+      }
+      if (topology_reason == PO33_POOL_REPLACEMENT_REASON_NONE &&
+          record->referenced_pool_index == target_pool_index &&
+          (record->source_selector != target->selector ||
+           (record->flags &
+            (PO33_SOUND_RECORD_FLAG_DUPLICATE_SELECTOR | PO33_SOUND_RECORD_FLAG_SOURCE_UNRESOLVED |
+             PO33_SOUND_RECORD_FLAG_SOURCE_AMBIGUOUS)) != 0u)) {
+        topology_reason = PO33_POOL_REPLACEMENT_REASON_AMBIGUOUS_SELECTOR;
+      }
+    }
+    if ((target->flags & PO33_SOUND_RECORD_FLAG_DUPLICATE_SELECTOR) != 0u) {
+      result.reason = PO33_POOL_REPLACEMENT_REASON_DUPLICATE_TARGET_SELECTOR;
+      status = PO_ERR_PARSE;
+      goto finish;
+    }
+    if ((target->flags & PO33_SOUND_RECORD_FLAG_SOURCE_AMBIGUOUS) != 0u) {
       result.reason = PO33_POOL_REPLACEMENT_REASON_AMBIGUOUS_SELECTOR;
       status = PO_ERR_PARSE;
       goto finish;
     }
-    if (record->referenced_pool_index != target_pool_index)
-      continue;
-    if (result.reference_count == SIZE_MAX ||
-        (i != target_sound_record_index && result.affected_sound_record_count == SIZE_MAX)) {
-      result.reason = PO33_POOL_REPLACEMENT_REASON_COUNT_OVERFLOW;
-      status = PO_ERR_RANGE;
+    if ((target->flags & PO33_SOUND_RECORD_FLAG_UNKNOWN_EXTENSION) != 0u) {
+      result.reason = PO33_POOL_REPLACEMENT_REASON_UNKNOWN_TARGET_EXTENSION;
+      status = PO_ERR_PARSE;
       goto finish;
     }
-    ++result.reference_count;
-    if (i != target_sound_record_index)
-      ++result.affected_sound_record_count;
-    if (record->source_selector != target->selector ||
-        (record->flags &
-         (PO33_SOUND_RECORD_FLAG_DUPLICATE_SELECTOR | PO33_SOUND_RECORD_FLAG_SOURCE_UNRESOLVED |
-          PO33_SOUND_RECORD_FLAG_SOURCE_AMBIGUOUS)) != 0u) {
-      result.reason = PO33_POOL_REPLACEMENT_REASON_AMBIGUOUS_SELECTOR;
+    if (topology_reason != PO33_POOL_REPLACEMENT_REASON_NONE) {
+      result.reason = topology_reason;
       status = PO_ERR_PARSE;
       goto finish;
     }
