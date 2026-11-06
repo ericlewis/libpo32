@@ -740,6 +740,126 @@ static po_status_t topology_parse_exact_records(const uint8_t *frame, size_t fra
   return PO_OK;
 }
 
+typedef struct po33_capacity_scan {
+  po33_capacity_report_t report;
+  uint8_t selectors[256], owners[256], references[256];
+  int active, unsafe;
+} po33_capacity_scan_t;
+
+static int capacity_round(size_t bytes, size_t *out) {
+  if (bytes > SIZE_MAX - (PO33_POOL_ALLOCATION_BLOCK_BYTES - 1u))
+    return 0;
+  *out = ((bytes + PO33_POOL_ALLOCATION_BLOCK_BYTES - 1u) / PO33_POOL_ALLOCATION_BLOCK_BYTES) *
+         PO33_POOL_ALLOCATION_BLOCK_BYTES;
+  return 1;
+}
+
+static int capacity_selectors(const po_packet_t *p, void *user) {
+  po33_capacity_scan_t *s = user;
+  if (p->tag_code == PO33_TAG_SOUND_SELECT) {
+    if (p->payload_len != 1u) {
+      s->unsafe = 1;
+      return 0;
+    }
+    s->active = 1;
+    if (s->selectors[p->payload[0]])
+      s->unsafe = 1;
+    s->selectors[p->payload[0]] = 1;
+  } else if (p->tag_code == PO33_TAG_END)
+    s->active = 0;
+  else if (s->active && p->tag_code != PO33_TAG_SOUND_DATA)
+    s->unsafe = 1;
+  return 0;
+}
+
+static po_status_t capacity_pool(const po33_topology_observed_record_t *r, void *user) {
+  po33_capacity_scan_t *s = user;
+  size_t bytes = r->data_bytes - PO33_SOUND_HEADER_BYTES, rounded;
+  if (r->flags & PO33_SOUND_RECORD_FLAG_UNKNOWN_EXTENSION)
+    return PO_ERR_PARSE;
+  if (!bytes) {
+    ++s->report.alias_count;
+    return PO_OK;
+  }
+  if (!capacity_round(bytes, &rounded) || bytes > SIZE_MAX - s->report.serialized_sample_bytes ||
+      rounded > SIZE_MAX - s->report.rounded_sample_bytes)
+    return PO_ERR_RANGE;
+  s->owners[r->selector] = 1;
+  ++s->report.pool_count;
+  s->report.unaligned_pool_count += bytes % PO33_POOL_ALLOCATION_BLOCK_BYTES != 0u;
+  s->report.serialized_sample_bytes += bytes;
+  s->report.rounded_sample_bytes += rounded;
+  return PO_OK;
+}
+
+static po_status_t capacity_reference(const po33_topology_observed_record_t *r, void *user) {
+  po33_capacity_scan_t *s = user;
+  uint8_t source = r->header.source_selector;
+  if (!s->owners[source])
+    return PO_ERR_PARSE;
+  if (s->references[source] < 2u && ++s->references[source] == 2u)
+    ++s->report.shared_pool_count;
+  return PO_OK;
+}
+
+po_status_t po33_capacity_measure(const uint8_t *frame, size_t frame_len,
+                                  po33_capacity_report_t *out) {
+  po33_capacity_scan_t s;
+  po33_decode_result_t parsed;
+  po_status_t status;
+  if (frame == NULL || out == NULL || po33_ranges_overlap(frame, frame_len, out, sizeof(*out)))
+    return PO_ERR_INVALID_ARG;
+  s.report = (po33_capacity_report_t){.frame_bytes = frame_len};
+  s.active = 0;
+  s.unsafe = 0;
+  for (size_t i = 0; i <= UINT8_MAX; ++i) {
+    s.selectors[i] = 0;
+    s.owners[i] = 0;
+    s.references[i] = 0;
+  }
+  status = po33_frame_parse(frame, frame_len, capacity_selectors, &s, &parsed);
+  if (status != PO_OK || !parsed.done || parsed.stopped || parsed.frame_bytes != frame_len)
+    return PO_ERR_FRAME;
+  /* Validate records before classifying duplicate/extended groups. */
+  status = topology_parse_exact_records(frame, frame_len, capacity_pool, &s);
+  if (status != PO_OK)
+    return status;
+  if (s.unsafe)
+    return PO_ERR_PARSE;
+  status = topology_parse_exact_records(frame, frame_len, capacity_reference, &s);
+  if (status != PO_OK)
+    return status;
+  *out = s.report;
+  return PO_OK;
+}
+
+po_status_t po33_capacity_project_pool_change(const po33_capacity_report_t *report,
+                                              size_t old_pool_bytes, size_t new_pool_bytes,
+                                              size_t limit_bytes, po33_capacity_budget_t *out) {
+  po33_capacity_budget_t value = {0};
+  size_t retained;
+  if (report == NULL || out == NULL ||
+      po33_ranges_overlap(report, sizeof(*report), out, sizeof(*out)))
+    return PO_ERR_INVALID_ARG;
+  if (report->rounded_sample_bytes % PO33_POOL_ALLOCATION_BLOCK_BYTES ||
+      !capacity_round(old_pool_bytes, &value.removed_bytes) ||
+      !capacity_round(new_pool_bytes, &value.added_bytes) ||
+      value.removed_bytes > report->rounded_sample_bytes)
+    return PO_ERR_RANGE;
+  retained = report->rounded_sample_bytes - value.removed_bytes;
+  if (value.added_bytes > SIZE_MAX - retained)
+    return PO_ERR_RANGE;
+  value.projected_bytes = retained + value.added_bytes;
+  value.limit_bytes = limit_bytes;
+  value.fits = value.projected_bytes <= limit_bytes;
+  if (value.fits)
+    value.remaining_bytes = limit_bytes - value.projected_bytes;
+  else
+    value.excess_bytes = value.projected_bytes - limit_bytes;
+  *out = value;
+  return PO_OK;
+}
+
 static void pool_edit_measure_init(po33_pool_edit_measure_t *measurement,
                                    size_t target_sound_record_index) {
   measurement->target_sound_record_index = target_sound_record_index;

@@ -1084,6 +1084,91 @@ static void test_sample_detachment(void) {
   }
 }
 
+static void test_capacity_accounting(void) {
+  pool_edit_fixture_t f;
+  po33_capacity_report_t report, before, after;
+  po33_capacity_budget_t budget, saved;
+  po33_sample_detach_plan_t detach;
+  uint8_t samples[1] = {37}, workspace[60000], output[40000];
+  size_t written;
+  detach_fixture(&f, 0);
+  assert(po33_capacity_measure(f.frame, f.length, &report) == PO_OK);
+  assert(report.pool_count == 1 && report.alias_count == 2 && report.shared_pool_count == 1);
+  assert(report.serialized_sample_bytes == 4096 && report.rounded_sample_bytes == 4096);
+  assert(report.unaligned_pool_count == 0 && report.frame_bytes == f.length);
+  assert(po33_sample_detach_plan(f.frame, f.length, 1, samples, 1, &detach) == PO_OK);
+  assert(po33_capacity_project_pool_change(&report, 0, detach.allocation_bytes, 8192, &budget) ==
+         PO_OK);
+  assert(budget.projected_bytes == 8192 && budget.fits && budget.remaining_bytes == 0);
+  assert(po33_sample_detach_rebuild(f.frame, f.length, 1, samples, 1, &detach, workspace,
+                                    sizeof(workspace), output, sizeof(output), &written) == PO_OK);
+  assert(po33_capacity_measure(output, written, &after) == PO_OK);
+  assert(after.rounded_sample_bytes == budget.projected_bytes);
+  assert(after.pool_count == 2 && after.alias_count == 1 && after.shared_pool_count == 1);
+  assert(po33_capacity_project_pool_change(&report, 4096, 8192, 8191, &budget) == PO_OK);
+  assert(!budget.fits && budget.excess_bytes == 1 && budget.remaining_bytes == 0);
+  assert(po33_capacity_project_pool_change(&report, 0, 0, 0, &budget) == PO_OK);
+  assert(!budget.fits && budget.excess_bytes == 4096);
+  assert(po33_capacity_project_pool_change(&report, 4096, 0, 0, &budget) == PO_OK);
+  assert(budget.fits && budget.projected_bytes == 0);
+  saved = budget;
+  assert(po33_capacity_project_pool_change(&report, 8192, 0, 8192, &budget) == PO_ERR_RANGE);
+  assert(!memcmp(&budget, &saved, sizeof(budget)));
+  assert(po33_capacity_project_pool_change(&report, 0, SIZE_MAX, 8192, &budget) == PO_ERR_RANGE);
+  assert(!memcmp(&budget, &saved, sizeof(budget)));
+  assert(po33_capacity_project_pool_change(NULL, 0, 0, 0, &budget) == PO_ERR_INVALID_ARG);
+  assert(po33_capacity_project_pool_change(&report, 0, 0, 0, NULL) == PO_ERR_INVALID_ARG);
+  before = report;
+  assert(po33_capacity_measure(f.frame, f.length - 1, &report) == PO_ERR_FRAME);
+  assert(!memcmp(&report, &before, sizeof(report)));
+  assert(po33_capacity_measure(NULL, f.length, &report) == PO_ERR_INVALID_ARG);
+  assert(po33_capacity_measure(f.frame, f.length, NULL) == PO_ERR_INVALID_ARG);
+  detach_fixture(&f, 1);
+  assert(po33_capacity_measure(f.frame, f.length, &report) == PO_ERR_PARSE);
+  assert(!memcmp(&report, &before, sizeof(report)));
+  detach_fixture(&f, 2);
+  assert(po33_capacity_measure(f.frame, f.length, &report) == PO_ERR_PARSE);
+  detach_fixture(&f, 32);
+  assert(po33_capacity_measure(f.frame, f.length, &report) == PO_ERR_PARSE);
+  {
+    po33_builder_t builder;
+    assert(po33_builder_init(&builder, f.frame, sizeof(f.frame)) == PO_OK);
+    assert(po33_builder_finish(&builder, &f.length) == PO_OK);
+    assert(po33_capacity_measure(f.frame, f.length, &report) == PO_OK);
+    assert(report.pool_count == 0 && report.rounded_sample_bytes == 0);
+    assert(po33_builder_init(&builder, f.frame, sizeof(f.frame)) == PO_OK);
+    pool_edit_append_sound(&builder, 0, 0, 100, 1, 0);
+    pool_edit_append_sound(&builder, 1, 1, 101, 0, 0);
+    assert(po33_builder_finish(&builder, &f.length) == PO_OK);
+    assert(po33_capacity_measure(f.frame, f.length, &report) == PO_OK);
+    assert(report.pool_count == 2 && report.serialized_sample_bytes == 201);
+    assert(report.rounded_sample_bytes == 8192 && report.unaligned_pool_count == 2);
+    assert(po33_capacity_project_pool_change(&report, 100, 4097, 12288, &budget) == PO_OK);
+    assert(budget.removed_bytes == 4096 && budget.added_bytes == 8192 &&
+           budget.projected_bytes == 12288 && budget.fits);
+  }
+  {
+    union {
+      po33_capacity_report_t report;
+      uint8_t frame[30000];
+    } alias;
+    memcpy(alias.frame, f.frame, f.length);
+    assert(po33_capacity_measure(alias.frame, f.length, &alias.report) == PO_ERR_INVALID_ARG);
+    assert(!memcmp(alias.frame, f.frame, f.length));
+  }
+  {
+    union {
+      po33_capacity_report_t report;
+      po33_capacity_budget_t budget;
+    } alias;
+    alias.report = report;
+    assert(po33_capacity_project_pool_change(&alias.report, 0, 0, 0, &alias.budget) ==
+           PO_ERR_INVALID_ARG);
+  }
+  report.rounded_sample_bytes = SIZE_MAX - (SIZE_MAX % 4096u);
+  assert(po33_capacity_project_pool_change(&report, 0, 4096, 0, &budget) == PO_ERR_RANGE);
+}
+
 int main(void) {
   test_api_surface();
   test_pool_edit_planning();
@@ -1094,6 +1179,7 @@ int main(void) {
   test_sample_insertion();
   test_insert_empty_bank_positions();
   test_sample_detachment();
+  test_capacity_accounting();
   puts("PO-33 pool edit plan tests passed");
   return 0;
 }
