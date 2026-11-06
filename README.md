@@ -33,7 +33,9 @@ The demo round-trips a PO-32 transfer and renders a drum hit.
 
 ## Projects using libpo
 
-[Libpo32 for Schwung](https://github.com/mestela/schwung-libpo32) is a drum
-synthesizer for Ableton Move.
+- [Libpo32 for Schwung](https://github.com/mestela/schwung-libpo32) — a drum
+  synthesizer for Ableton Move.
+- [PO-PatchStudio](https://squarewave.studio/po-patchstudio) — a PO-32 sound and
+  pattern editor with acoustic transfer.
 
 [Contributing](CONTRIBUTING.md) · [MIT license](LICENSE)
