@@ -857,6 +857,42 @@ static size_t forensics_frame35(uint8_t *frame, size_t capacity, uint8_t record_
   return length;
 }
 
+static void test_po_diff_record_fallbacks(void) {
+  po_packet_t settings[3] = {{0}};
+  po_packet_t sound[2] = {{0}};
+  po_diff_frame_t settings_frame = {
+      .packets = {.items = settings, .count = sizeof(settings) / sizeof(settings[0])},
+  };
+  po_diff_frame_t sound_frame = {
+      .packets = {.items = sound, .count = sizeof(sound) / sizeof(sound[0])},
+  };
+
+  settings[0].tag_code = PO33_TAG_SETTINGS;
+  settings[0].payload_len = 1u;
+  settings[1].tag_code = PO33_TAG_SETTINGS;
+  settings[1].payload_len = PO_MAX_PAYLOAD;
+  settings[2].tag_code = PO33_TAG_SETTINGS;
+  settings[2].payload_len = PO33_SETTINGS_BYTES - PO_MAX_PAYLOAD;
+  assert(po_diff_build_po33_records(&settings_frame));
+  assert(
+      settings_frame.record_count == 2u && settings_frame.records[0].kind == PO_DIFF_RECORD_RAW &&
+      settings_frame.records[0].packet_start == 0u &&
+      settings_frame.records[0].packet_count == 1u &&
+      settings_frame.records[1].kind == PO_DIFF_RECORD_PO33_SETTINGS &&
+      settings_frame.records[1].packet_start == 1u && settings_frame.records[1].packet_count == 2u);
+  free(settings_frame.records);
+
+  sound[0].tag_code = PO33_TAG_SOUND_SELECT;
+  sound[0].payload_len = 1u;
+  sound[0].payload[0] = 7u;
+  sound[1].tag_code = PO33_TAG_SOUND_DATA;
+  sound[1].payload_len = PO33_SOUND_HEADER_BYTES - 1u;
+  assert(po_diff_build_po33_records(&sound_frame));
+  assert(sound_frame.record_count == 2u && sound_frame.records[0].kind == PO_DIFF_RECORD_RAW &&
+         sound_frame.records[1].kind == PO_DIFF_RECORD_RAW);
+  free(sound_frame.records);
+}
+
 static void test_capture_forensics_cli(void) {
   uint8_t before[8192];
   uint8_t after[8192];
@@ -1015,6 +1051,7 @@ int main(void) {
   test_decode_capture_main_paths();
   test_packet_dump_helpers();
   test_summary_helpers_direct();
+  test_po_diff_record_fallbacks();
   test_capture_forensics_cli();
   return 0;
 }

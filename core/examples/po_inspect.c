@@ -96,7 +96,7 @@ int main(int argc, char **argv) {
             argv[3]);
     goto cleanup;
   }
-  if (!po_frame_report_write_text(stdout, &report)) {
+  if (!po_frame_report_write_text(stdout, &report) || fflush(stdout) != 0) {
     fprintf(stderr, "Cannot write frame report.\n");
     goto cleanup;
   }

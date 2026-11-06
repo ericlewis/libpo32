@@ -299,7 +299,8 @@ int main(int argc, char **argv) {
     }
   }
   if (!(json ? po_capture_doctor_write_json(stdout, &capture, &wav, candidates)
-             : po_capture_doctor_write_text(stdout, &capture, &wav, candidates))) {
+             : po_capture_doctor_write_text(stdout, &capture, &wav, candidates)) ||
+      fflush(stdout) != 0) {
     fprintf(stderr, "Cannot write capture diagnostic.\n");
     goto cleanup;
   }

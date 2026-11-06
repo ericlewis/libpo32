@@ -243,9 +243,20 @@ static int po_diff_build_po33_records(po_diff_frame_t *frame) {
                                    end - index))
           return 0;
       } else {
-        if (!po_diff_record_append(frame, PO_DIFF_RECORD_RAW, packet->tag_code, 0, index, 1u))
-          return 0;
-        end = index + 1u;
+        size_t raw = index;
+        while (raw < end) {
+          if (payload_bytes == PO33_SETTINGS_BYTES) {
+            if (!po_diff_record_append(frame, PO_DIFF_RECORD_PO33_SETTINGS, packet->tag_code, 0,
+                                       raw, end - raw))
+              return 0;
+            break;
+          }
+          if (!po_diff_record_append(frame, PO_DIFF_RECORD_RAW, frame->packets.items[raw].tag_code,
+                                     0, raw, 1u))
+            return 0;
+          payload_bytes -= frame->packets.items[raw].payload_len;
+          ++raw;
+        }
       }
     } else if ((packet->tag_code == PO33_TAG_PATTERN_SELECT ||
                 packet->tag_code == PO33_TAG_SOUND_SELECT) &&
@@ -260,7 +271,7 @@ static int po_diff_build_po33_records(po_diff_frame_t *frame) {
         ++end;
       }
       if ((data_tag == PO33_TAG_PATTERN_DATA && payload_bytes == PO33_PATTERN_BYTES) ||
-          (data_tag == PO33_TAG_SOUND_DATA && end > index + 1u)) {
+          (data_tag == PO33_TAG_SOUND_DATA && payload_bytes >= PO33_SOUND_HEADER_BYTES)) {
         po_diff_record_kind_t kind = data_tag == PO33_TAG_PATTERN_DATA ? PO_DIFF_RECORD_PO33_PATTERN
                                                                        : PO_DIFF_RECORD_PO33_SOUND;
         if (!po_diff_record_append(frame, kind, packet->tag_code, packet->payload[0], index,
@@ -691,7 +702,7 @@ int main(int argc, char **argv) {
     fprintf(stderr, "Cannot analyze after frame records.\n");
     goto cleanup;
   }
-  if (!po_diff_write_report(stdout, family, &before, &after)) {
+  if (!po_diff_write_report(stdout, family, &before, &after) || fflush(stdout) != 0) {
     fprintf(stderr, "Cannot write frame diff.\n");
     goto cleanup;
   }
