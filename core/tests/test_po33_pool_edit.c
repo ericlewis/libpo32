@@ -703,6 +703,31 @@ static void test_sound_ranges(void) {
   assert(plan.reason == PO33_SOUND_RANGE_REASON_SOURCE_AMBIGUOUS);
   {
     po33_builder_t builder;
+    uint8_t selector = 7u, header[9] = {0}, samples[255] = {0};
+    size_t remaining = 4096u;
+    pool_edit_write_u32le(header, 100u);
+    pool_edit_write_u32le(header + 4u, 200u);
+    header[8] = selector;
+    assert(po33_builder_init(&builder, fixture.frame, sizeof(fixture.frame)) == PO_OK);
+    pool_edit_append(&builder, PO33_TAG_SOUND_SELECT, &selector, 1u);
+    pool_edit_append(&builder, PO33_TAG_SOUND_DATA, header, 4u);
+    pool_edit_append(&builder, PO33_TAG_SOUND_DATA, header + 4u, 5u);
+    while (remaining != 0u) {
+      size_t bytes = remaining < sizeof(samples) ? remaining : sizeof(samples);
+      pool_edit_append(&builder, PO33_TAG_SOUND_DATA, samples, bytes);
+      remaining -= bytes;
+    }
+    pool_edit_append_sound(&builder, 8u, 7u, 0u, 1, 0);
+    assert(po33_builder_finish(&builder, &fixture.length) == PO_OK);
+    /* Alias coordinates may extend beyond the owner's trim, within its pool. */
+    assert(po33_sound_range_plan(fixture.frame, fixture.length, 1u, 500u, 3000u, &plan) == PO_OK);
+    assert(po33_sound_range_rebuild(fixture.frame, fixture.length, 1u, 500u, 3000u, &plan,
+                                    workspace, sizeof(workspace), output, sizeof(output),
+                                    &written) == PO_OK);
+    range_assert_preservation(&fixture, output, written, &plan);
+  }
+  {
+    po33_builder_t builder;
     assert(po33_builder_init(&builder, fixture.frame, sizeof(fixture.frame)) == PO_OK);
     pool_edit_append_sound(&builder, 7u, 99u, 4096u, 1, 0);
     assert(po33_builder_finish(&builder, &fixture.length) == PO_OK);
