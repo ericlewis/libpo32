@@ -31,7 +31,9 @@ The demo round-trips a PO-32 transfer and renders a drum hit.
 - [C API guide](core/docs/C_API.md) — install, link and use the library
 - [Documentation index](core/docs/README.md) — architecture, formats and technical references
 
-Used by [Libpo32 for Schwung](https://github.com/mestela/schwung-libpo32),
-a drum synthesizer for Ableton Move.
+## Projects using libpo
+
+[Libpo32 for Schwung](https://github.com/mestela/schwung-libpo32) is a drum
+synthesizer for Ableton Move.
 
 [Contributing](CONTRIBUTING.md) · [MIT license](LICENSE)
