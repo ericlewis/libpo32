@@ -23,6 +23,10 @@ Use the [C API guide](C_API.md) for function contracts and the
 
 ## Current understanding
 
+See the [cross-family analysis](formats/FAMILY_RELATIONSHIPS.md) for measured
+relationships between framing, drum patches, settings and pattern layouts,
+including the new sound-only receiver evidence.
+
 Transport and record layout are better understood than every field's playback
 meaning. Tested banks can be decoded and rebuilt while retaining unknown bytes;
 that does not require assigning those bytes a musical role.
