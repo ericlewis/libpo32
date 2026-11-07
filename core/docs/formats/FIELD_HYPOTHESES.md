@@ -215,6 +215,11 @@ does not validate the exact device gain/noise laws.
 
 ## 7. PO-32: packed FX history, accent state and the misleading `flag` name
 
+The [focused PO-32 FX follow-up](PO32_EFFECTS_STATE.md) checks the older capture
+archive and original Microtonic exporter, deduplicates FX vectors and compares
+absolute and relative reference models. It strengthens the orientation lead
+without assigning effect names or a playback rule.
+
 PO-32's shared 43-byte drum patch is well established; its remaining sequencer
 fields still deserve the same hypothesis-driven treatment. A fresh audit of
 thirteen official download entries, deduplicated to twelve complete frames,
