@@ -7,6 +7,8 @@ The format is based on Keep a Changelog, and the project follows Semantic Versio
 ## [Unreleased]
 
 ### Added
+- Lossless PO-35/137 speech-event views for slot, event, note and gate codes,
+  preserving unnamed values and retained inactive state.
 - Standalone PO-33/133 melodic sound-transfer sizing and construction without
   a source bank, reusing insertion's guard, allocation and packet layout.
 

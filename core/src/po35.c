@@ -211,6 +211,29 @@ po_status_t po35_speech_controls_set_tone(po35_speech_controls_t *controls,
   return PO_OK;
 }
 
+po_status_t po35_speech_event_decode(uint8_t event_raw, uint8_t secondary_raw,
+                                     po35_speech_event_t *out) {
+  if (out == NULL)
+    return PO_ERR_INVALID_ARG;
+  out->slot_raw = (uint8_t)(event_raw >> 4);
+  out->code_raw = (uint8_t)(event_raw & 0x0fu);
+  out->note_raw = (uint8_t)(secondary_raw >> 4);
+  out->gate_raw = (uint8_t)(secondary_raw & 0x0fu);
+  return PO_OK;
+}
+
+po_status_t po35_speech_event_encode(const po35_speech_event_t *event, uint8_t *out_event_raw,
+                                     uint8_t *out_secondary_raw) {
+  if (event == NULL || out_event_raw == NULL || out_secondary_raw == NULL)
+    return PO_ERR_INVALID_ARG;
+  if (event->slot_raw > 15u || event->code_raw > 15u || event->note_raw > 15u ||
+      event->gate_raw > 15u)
+    return PO_ERR_RANGE;
+  *out_event_raw = (uint8_t)((event->slot_raw << 4) | event->code_raw);
+  *out_secondary_raw = (uint8_t)((event->note_raw << 4) | event->gate_raw);
+  return PO_OK;
+}
+
 po_status_t po35_speech_record_decode(const uint8_t *data, size_t len, po35_speech_record_t *out) {
   uint16_t pitch;
   if (data == NULL || out == NULL)

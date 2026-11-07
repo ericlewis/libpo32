@@ -30,6 +30,11 @@ extern "C" {
 #define PO35_SETTINGS_BASE_BYTES 156u
 #define PO35_CHAIN_MAX_COUNT     (PO_MAX_PAYLOAD - PO35_SETTINGS_BASE_BYTES)
 
+/* Known speech event low codes. Other stored codes remain representable. */
+#define PO35_SPEECH_EVENT_NONE     0x0u
+#define PO35_SPEECH_EVENT_ONSET    0x1u
+#define PO35_SPEECH_EVENT_CONTINUE 0xfu
+
 typedef struct po35_decode_result {
   size_t packet_count;
   size_t frame_bytes;
@@ -161,6 +166,17 @@ typedef struct po35_drum_controls {
   uint8_t morph;
 } po35_drum_controls_t;
 
+/* Lossless view of a step's speech event and secondary bytes. Each field is
+ * a stored nibble, 0..15. Slot 15 and unnamed event codes have no assigned
+ * playback meaning. Note codes depend on pattern key/scale; gate codes are
+ * not durations in seconds or a promise of an exact tick conversion. */
+typedef struct po35_speech_event {
+  uint8_t slot_raw; /* Event high nibble; speech slots 0..14 are known. */
+  uint8_t code_raw; /* Event low nibble; see PO35_SPEECH_EVENT_* above. */
+  uint8_t note_raw; /* Secondary high nibble. */
+  uint8_t gate_raw; /* Secondary low nibble. */
+} po35_speech_event_t;
+
 typedef struct po35_settings {
   po35_speech_controls_t speech[PO35_SPEECH_SLOT_COUNT];
   po35_drum_controls_t drums[PO35_DRUM_COUNT];
@@ -173,8 +189,8 @@ typedef struct po35_settings {
 
 typedef struct po35_pattern {
   uint8_t pattern_index;
-  uint8_t speech_events[PO35_PATTERN_STEP_COUNT];
-  uint8_t speech_secondary_raw[PO35_PATTERN_STEP_COUNT];
+  uint8_t speech_events[PO35_PATTERN_STEP_COUNT];        /* Slot high, event code low. */
+  uint8_t speech_secondary_raw[PO35_PATTERN_STEP_COUNT]; /* Note high, gate low. */
   uint8_t speech_parameters[PO35_PATTERN_STEP_COUNT][4];
   uint8_t drum_events[PO35_PATTERN_STEP_COUNT];
   po35_drum_controls_t drums[PO35_PATTERN_STEP_COUNT];
@@ -217,6 +233,23 @@ po_status_t po35_speech_controls_get_tone(const po35_speech_controls_t *controls
                                           po35_speech_tone_t *out);
 po_status_t po35_speech_controls_set_tone(po35_speech_controls_t *controls,
                                           const po35_speech_tone_t *tone);
+
+/* Split/combine one step's speech event and secondary bytes. Decode accepts
+ * every byte pair, including retained state on NONE and unnamed event codes.
+ * Encode accepts every nibble value 0..15; larger fields return PO_ERR_RANGE.
+ * Null pointers return PO_ERR_INVALID_ARG. Failures leave outputs unchanged.
+ * The input object and both encode outputs must be disjoint; the two output
+ * bytes must also be distinct. No allocation or hidden state is used.
+ *
+ * On the tested PO-35, ONSET restarts the source and CONTINUE advances an
+ * ongoing voice, including across a pattern boundary or a note change. A
+ * CONTINUE after the tested shortened gate does not restart the ended note.
+ * These are byte views, not sequence validation or playback simulation. They
+ * do not update parameter/FX state or the stored pattern mask. */
+po_status_t po35_speech_event_decode(uint8_t event_raw, uint8_t secondary_raw,
+                                     po35_speech_event_t *out);
+po_status_t po35_speech_event_encode(const po35_speech_event_t *event, uint8_t *out_event_raw,
+                                     uint8_t *out_secondary_raw);
 
 /* Transactional speech replacement. Both functions borrow frame, edits and
  * every edit's record storage for the call. Those read-only inputs may overlap
