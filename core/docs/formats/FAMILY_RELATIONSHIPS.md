@@ -148,6 +148,11 @@ all **16,384 cells** examined here. This is consistent with the existing
 Its low/high control nibbles and packed global FX must not be substituted for
 PO-32 triggers or PO-35 speech events solely because all are step controls.
 
+PO-35 [speech-event playback](PO35_SPEECH_EVENTS.md) identifies onset versus
+continuation and places note/gate codes in the secondary byte's high/low
+nibbles. That ordering does not transfer to PO-33's low-note/high-timing byte,
+nor does the speech continuation code establish a drum multiplier meaning.
+
 ## 5. Equal header lengths hide different sound models
 
 Both sampler and speech headers are nine bytes, but their fields are different:
