@@ -134,6 +134,10 @@ when preservation is required. The PO-35 raw pattern codec already retains
 these bytes. A separate existing isolated PO-35 comparison also shows secondary
 step state surviving after its active event moves elsewhere.
 
+The subsequent [PO-35/137 drum-event audit](PO35_DRUM_EVENTS.md) covers the
+larger retained corpus and finds a reference-related mask relationship that
+does not carry over to PO-32, despite the matching 48-byte drum-lane shape.
+
 PO-33 stores parameters for all sixteen sounds at every step rather than one
 selected instrument per lane. Bit 5 of the first parameter byte was zero in
 all **16,384 cells** examined here. This is consistent with the existing
