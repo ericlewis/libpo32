@@ -5,8 +5,9 @@
 The strongest working interpretation is a **four-bit drum selector in the high
 nibble and an event/multiplier code in the low nibble**. The record layout and
 several exact byte relationships are established. A subsequent PO-35 readback
-test maps drum keys 1 and 9 to high nibbles 0 and 8, and displayed multiplier 2
-to low code 2. The complete key/rate map and audible timing remain uncalibrated.
+test maps drum keys 1 and 9 to high nibbles 0 and 8. Follow-up readbacks map
+displayed multipliers 2 and 3 to low codes 2 and 3. The complete key/rate map
+and audible timing remain uncalibrated.
 
 The initial 2026-11-06 investigation used existing captures only. Its corpus
 counts below remain separate from the later hardware follow-up in this guide.
@@ -236,6 +237,12 @@ The experiment is not described as a single-byte edit. It provides another
 reason to preserve the high bits of zero-low-code entries. No playback-timing
 measurement or full multiplier-cycle sweep was performed.
 
+A [later clean repeat](PO35_MULTIPLIER_STATE.md) began with a byte-identical
+serialized baseline and changed only `81 → 82`, leaving step 3 zero. A separate
+`82 → 83` edit retained the old step-3 value without writing a new marker at
+step 4. The original cochange is not required by multiplier encoding; its
+specific cause remains unresolved.
+
 Readback frame hashes, in table order:
 
 - `1f70548986c7fc289a1a430eb94eaf93fe7408085b13bde58f8fc48fed7ee267`
@@ -255,8 +262,8 @@ by selective SEND and were not included in the byte comparisons.
   model. Bits 6 and 7 cannot simply inherit PO-32's treatment.
 - Preserve zero-low-nibble bytes and the final mask exactly.
 - Retain the observed mappings for physical keys 1 and 9 and displayed
-  multiplier 2. Do not promote these points into a verified map of every key,
+  multipliers 2 and 3. Do not promote these points into a verified map of every key,
   unused low code, or acoustic multiplier behavior.
-- Preserve the extra zero-low-code entry changed during the multiplier trial;
-  its update rule remains unresolved. No additional hardware action is needed
-  to record the results of this bounded test.
+- Preserve the extra zero-low-code entry when present, but do not generate it
+  from a multiplier value: the clean repeat does not require that write.
+  No additional hardware action is needed to retain these bounded findings.
