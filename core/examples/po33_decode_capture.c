@@ -275,7 +275,8 @@ int main(int argc, char **argv) {
     fprintf(stderr, "Expected finite stereo PCM16/24/32 or float32 WAV at 32–192 kHz.\n");
     goto cleanup;
   }
-  if (!po_capture_decode(&capture, PO_STEREO_CHANNEL_NORMAL, &frame, &frame_len)) {
+  if (!po_capture_decode_for_family(&capture, PO_STEREO_CHANNEL_NORMAL, PO_FRAME_FAMILY_PO33,
+                                    &frame, &frame_len)) {
     fprintf(stderr, "No complete PO-33 counter preamble and sync recovered.\n");
     goto cleanup;
   }

@@ -63,7 +63,7 @@ static int po_transfer_verify_collect_candidate(const po_capture_t *capture,
   if (capture == NULL || reference == NULL || out == NULL)
     return 0;
   *out = (po_transfer_verify_candidate_t){.order = order};
-  if (!po_capture_decode(capture, order, &out->wire, &out->wire_bytes))
+  if (!po_capture_decode_for_family(capture, order, family, &out->wire, &out->wire_bytes))
     return 1;
   out->recovered = 1;
   if (!po_frame_report_collect(family, out->wire, out->wire_bytes, &out->report)) {

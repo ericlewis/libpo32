@@ -272,6 +272,56 @@ static void test_transfer_verification(void) {
       strstr(stdout_text, "verification=not-exact matches=0") != NULL);
 }
 
+static void test_repeated_transfers(void) {
+  uint8_t first[8192], second[8192];
+  char stdout_text[2048], stderr_text[1024];
+  for (unsigned family = 0; family < 2; ++family) {
+    for (unsigned kind = 0; kind < 4; ++kind) {
+      size_t first_size = family ? verify_frame35(first, sizeof(first), 0x60)
+                                 : verify_frame(first, sizeof(first), 0x60);
+      size_t second_size = family ? verify_frame35(second, sizeof(second), 0x50)
+                                  : verify_frame(second, sizeof(second), 0x50);
+      char *args[] = {"po_transfer_verify",  "--family",  family ? "po35" : "po33",
+                      "retry-reference.bin", "retry.wav", NULL};
+      uint8_t *a = NULL, *b = NULL, *joined;
+      size_t a_size, b_size, joined_size, gap = 4800u * 4u;
+      verify_save("retry-reference.bin", second, second_size);
+      if (kind == 1)
+        first[first_size - 1u] ^= 1u; /* Corrupt terminal checksum. */
+      if (kind == 3)                  /* Complete frame of the other family must also be skipped. */
+        first_size = family ? verify_frame(first, sizeof(first), 0x60)
+                            : verify_frame35(first, sizeof(first), 0x60);
+      verify_write_raw_transfer_wav("retry-first.wav", first, first_size - (kind == 0 ? 5u : 0u));
+      verify_write_raw_transfer_wav("retry-second.wav", second, second_size);
+      assert(po_frame_read_file("retry-first.wav", &a, &a_size));
+      assert(po_frame_read_file("retry-second.wav", &b, &b_size));
+      assert(a_size >= 44u && b_size >= 44u);
+      joined_size = a_size + gap + b_size - 44u;
+      joined = calloc(joined_size, 1u);
+      assert(joined != NULL);
+      memcpy(joined, a, a_size);
+      memcpy(joined + a_size + gap, b + 44u, b_size - 44u);
+      verify_write_le32(joined + 4u, (uint32_t)(joined_size - 8u));
+      verify_write_le32(joined + 40u, (uint32_t)(joined_size - 44u));
+      verify_save("retry.wav", joined, joined_size);
+      free(joined);
+      free(a);
+      free(b);
+      for (unsigned swapped = 0; swapped < 2; ++swapped) {
+        if (swapped) {
+          verify_swap_pcm16_stereo("retry.wav", "retry-swapped.wav");
+          args[4] = "retry-swapped.wav";
+        }
+        assert(verify_run_cli(5, args, stdout_text, sizeof(stdout_text), stderr_text,
+                              sizeof(stderr_text)) == (kind == 2 ? 1 : 0));
+        /* Never skip a complete but different bank to find a matching reference. */
+        assert(strstr(stdout_text, kind == 2 ? "parser=complete exact=no"
+                                             : "parser=complete exact=yes") != NULL);
+      }
+    }
+  }
+}
+
 static void test_frame_file_reader(void) {
   uint8_t *bytes = NULL;
   size_t length = 77u;
@@ -300,6 +350,7 @@ int main(void) {
   assert(status == 0);
   test_frame_file_reader();
   test_transfer_verification();
+  test_repeated_transfers();
   puts("Transfer verification tests passed");
   return 0;
 }

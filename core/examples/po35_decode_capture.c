@@ -496,7 +496,7 @@ int main(int argc, char **argv) {
   for (unsigned attempt = force_swap ? 1u : 0u; attempt < 2u; ++attempt) {
     po35_decode_result_t result;
     order = attempt ? PO_STEREO_CHANNEL_SWAPPED : PO_STEREO_CHANNEL_NORMAL;
-    if (po_capture_decode(&capture, order, &wire, &length) &&
+    if (po_capture_decode_for_family(&capture, order, PO_FRAME_FAMILY_PO35, &wire, &length) &&
         po35_frame_parse(wire, length, NULL, NULL, &result) == PO_OK && result.done) {
       found = 1;
       length = result.frame_bytes;

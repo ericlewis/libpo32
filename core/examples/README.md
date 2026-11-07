@@ -104,6 +104,13 @@ decoded backup used as input to the encoder. The other raw exports include
 `payloads.bin`, `packets.tsv` and `summary.txt`, alongside model-specific
 records and audio. A failed decode is not a valid partial backup.
 
+For each attempted channel order, the decoders scan transfer candidates in
+capture order and select the first complete checksum-valid frame of their
+family. An interrupted attempt can precede a successful retry in the same WAV;
+no silence-based cropping or transfer stitching is required. Complete frames
+can still be selective exports rather than full banks. Split recordings when
+you need a later complete bank instead of the first one.
+
 ### Capture Diagnosis
 
 `po_capture_doctor` reads one valid stereo capture and reports its source WAV
@@ -126,9 +133,12 @@ diagnostic.
 
 `po_transfer_verify` compares one explicit, complete raw reference frame with
 one readable stereo capture. Select `--family po33` or `--family po35`; the
-command runs the existing one-shot receiver for normal and swapped channel
-order and reports both candidates. It does not repair bytes, stitch transfers,
-infer a family, or choose a channel order.
+command demodulates normal and swapped channel order separately and reports
+both candidates. For each order it selects the first complete checksum-valid
+frame of the requested family. If none completes, it retains the first preamble
+candidate for parser diagnostics. It does not repair bytes, stitch transfers,
+infer a family, or choose a channel order. Selection never depends on matching
+the reference: a different valid bank before a matching bank remains a mismatch.
 
 ```sh
 ./build/core/po_transfer_verify --family po33 decoded-po33/frame.bin readback.wav
