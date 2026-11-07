@@ -37,3 +37,18 @@ The receiver accepts finite interleaved float input at 32,000 through
 192,000 Hz. Channel order is explicit. It finds the counter preamble and
 recovers wire bytes, potentially including bytes beyond the final packet.
 Always pass those bytes to the relevant model parser to establish completion.
+
+### Captures containing repeated transfers
+
+`po_stereo_candidates_init_f32` demodulates once into the same caller-owned
+workspace. Call `po_stereo_candidates_next` to enumerate counter/sync matches
+in capture order across both nibble alignments. Parse each returned wire span
+with the requested family parser, stopping at the first complete valid frame.
+An incomplete or checksum-invalid first attempt need not hide a later retry.
+
+The iterator borrows the byte workspace until iteration ends. Input and scalar
+scratch can be released after initialization. Each candidate includes trailing
+bytes; use the model parser's `frame_bytes` to delimit the frame. An insufficient
+output buffer reports its required size without advancing the iterator; exhausted
+iteration returns `PO_ERR_FRAME`. No bytes are repaired or combined between
+attempts. The original `po_stereo_decode_f32` remains a raw single-candidate API.

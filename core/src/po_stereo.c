@@ -274,6 +274,17 @@ static uint8_t packed_byte(const uint8_t *nibbles, size_t index, size_t parity) 
   return (uint8_t)(nibbles[2 * index + parity] | (nibbles[2 * index + parity + 1] << 4));
 }
 
+/* Caller has checked that a complete 4096-byte preamble fits at start. */
+static int counter_matches(const uint8_t *nibbles, size_t start) {
+  if (packed_byte(nibbles, 4092, start) != 0x4d || packed_byte(nibbles, 4093, start) != 0xb8 ||
+      packed_byte(nibbles, 4094, start) != 0x16 || packed_byte(nibbles, 4095, start) != 0x5d)
+    return 0;
+  for (size_t j = 0; j < 4092; ++j)
+    if (packed_byte(nibbles, j, start) != (uint8_t)j)
+      return 0;
+  return 1;
+}
+
 static po_status_t find_frame(const uint8_t *nibbles, size_t count, uint8_t *out, size_t capacity,
                               size_t *out_len) {
   size_t parity;
@@ -282,36 +293,31 @@ static po_status_t find_frame(const uint8_t *nibbles, size_t count, uint8_t *out
   for (parity = 0; parity < 2; ++parity) {
     size_t length = (count - parity) / 2u, i;
     for (i = 4092; i + 4 <= length; ++i) {
-      if (packed_byte(nibbles, i, parity) == 0x4d && packed_byte(nibbles, i + 1, parity) == 0xb8 &&
-          packed_byte(nibbles, i + 2, parity) == 0x16 &&
-          packed_byte(nibbles, i + 3, parity) == 0x5d) {
-        size_t start = i - 4092, j;
-        for (j = 0; j < 4092 && packed_byte(nibbles, start + j, parity) == (uint8_t)j; ++j) {
-        }
-        if (j == 4092) {
-          *out_len = length - start;
-          if (capacity < *out_len)
-            return PO_ERR_BUFFER_TOO_SMALL;
-          for (j = 0; j < *out_len; ++j)
-            out[j] = packed_byte(nibbles, start + j, parity);
-          return PO_OK;
-        }
+      size_t start = i - 4092;
+      if (counter_matches(nibbles, 2 * start + parity)) {
+        *out_len = length - start;
+        if (capacity < *out_len)
+          return PO_ERR_BUFFER_TOO_SMALL;
+        for (size_t j = 0; j < *out_len; ++j)
+          out[j] = packed_byte(nibbles, start + j, parity);
+        return PO_OK;
       }
     }
   }
   return PO_ERR_FRAME;
 }
 
-po_status_t po_stereo_decode_f32(const float *interleaved, size_t frame_count, uint32_t sample_rate,
-                                 po_stereo_channel_order_t order, po_stereo_workspace_t *workspace,
-                                 uint8_t *out_wire, size_t wire_capacity, size_t *out_len) {
+po_status_t po_stereo_candidates_init_f32(po_stereo_candidates_t *candidates,
+                                          const float *interleaved, size_t frame_count,
+                                          uint32_t sample_rate, po_stereo_channel_order_t order,
+                                          po_stereo_workspace_t *workspace) {
   size_t scalar_count, byte_count, maximum_wire, i, count;
   double *audio, *pilot;
   po_status_t status;
-  if (!out_len)
+  if (!candidates)
     return PO_ERR_INVALID_ARG;
-  *out_len = 0;
-  if (!workspace || (!interleaved && frame_count) || (!out_wire && wire_capacity) ||
+  *candidates = (po_stereo_candidates_t){0};
+  if (!workspace || (!interleaved && frame_count) ||
       (order != PO_STEREO_CHANNEL_NORMAL && order != PO_STEREO_CHANNEL_SWAPPED))
     return PO_ERR_INVALID_ARG;
   status = po_stereo_decode_requirements(frame_count, sample_rate, &scalar_count, &byte_count,
@@ -336,5 +342,54 @@ po_status_t po_stereo_decode_f32(const float *interleaved, size_t frame_count, u
   if (frame_count < 8192)
     return PO_ERR_FRAME;
   count = demodulate(audio, pilot, workspace->bytes, frame_count, sample_rate);
-  return find_frame(workspace->bytes, count, out_wire, wire_capacity, out_len);
+  *candidates = (po_stereo_candidates_t){workspace->bytes, count, 8184u};
+  return PO_OK;
+}
+
+po_status_t po_stereo_candidates_next(po_stereo_candidates_t *candidates, uint8_t *out_wire,
+                                      size_t wire_capacity, size_t *out_len) {
+  size_t sync;
+  if (!out_len)
+    return PO_ERR_INVALID_ARG;
+  *out_len = 0;
+  if (!candidates || !candidates->nibbles || (!out_wire && wire_capacity))
+    return PO_ERR_INVALID_ARG;
+  if (candidates->nibble_count < 8192u)
+    return PO_ERR_FRAME;
+  for (sync = candidates->next_sync; sync <= candidates->nibble_count - 8u; ++sync) {
+    const uint8_t *nibbles = candidates->nibbles;
+    size_t start, length;
+    if (sync < 8184u)
+      continue;
+    start = sync - 8184u;
+    if (!counter_matches(nibbles, start))
+      continue;
+    length = (candidates->nibble_count - start) / 2u;
+    *out_len = length;
+    if (wire_capacity < length)
+      return PO_ERR_BUFFER_TOO_SMALL;
+    for (size_t j = 0; j < length; ++j)
+      out_wire[j] = packed_byte(nibbles, j, start);
+    candidates->next_sync = sync + 1u;
+    return PO_OK;
+  }
+  candidates->next_sync = candidates->nibble_count;
+  return PO_ERR_FRAME;
+}
+
+po_status_t po_stereo_decode_f32(const float *interleaved, size_t frame_count, uint32_t sample_rate,
+                                 po_stereo_channel_order_t order, po_stereo_workspace_t *workspace,
+                                 uint8_t *out_wire, size_t wire_capacity, size_t *out_len) {
+  po_stereo_candidates_t candidates;
+  po_status_t status;
+  if (!out_len)
+    return PO_ERR_INVALID_ARG;
+  *out_len = 0;
+  if (!out_wire && wire_capacity)
+    return PO_ERR_INVALID_ARG;
+  status = po_stereo_candidates_init_f32(&candidates, interleaved, frame_count, sample_rate, order,
+                                         workspace);
+  if (status != PO_OK)
+    return status;
+  return find_frame(candidates.nibbles, candidates.nibble_count, out_wire, wire_capacity, out_len);
 }
