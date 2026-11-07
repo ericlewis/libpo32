@@ -329,6 +329,12 @@ the pattern-reference and parameter-pair hypotheses.
 
 ## Investigation order
 
+The later [PO-35 control-range roundtrip](PO35_ROUNDTRIP.md) preserved all tested
+per-step values but changed six global parameter zeros to ones. This strengthens
+the case for treating global defaults and per-step controls separately. A
+no-update/inherit meaning for pattern zero remains a hypothesis; do not infer
+it solely from the contrast in stored values.
+
 1. Search retained same-other-content comparisons for FX-reference edits and
    key-1/nondefault-multiplier events. Keep actual counterexamples in the results.
 2. Use existing root-only header edits to separate metadata from voice-table
