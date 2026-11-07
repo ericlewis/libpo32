@@ -217,6 +217,122 @@ static void test_speech_tone_view(void) {
   assert(memcmp(&settings.speech[0], &before, sizeof(before)) == 0);
 }
 
+static void test_speech_event_golden_values(void) {
+  static const struct {
+    uint8_t event_raw, secondary_raw;
+    po35_speech_event_t value;
+  } cases[] = {
+      {0x00, 0x00, {0, PO35_SPEECH_EVENT_NONE, 0, 0}},
+      {0xe1, 0xcf, {14, PO35_SPEECH_EVENT_ONSET, 12, 15}},
+      {0x1f, 0x8f, {1, PO35_SPEECH_EVENT_CONTINUE, 8, 15}},
+      {0x90, 0xad, {9, PO35_SPEECH_EVENT_NONE, 10, 13}},
+      {0xf2, 0x3a, {15, 2, 3, 10}},
+      {0xff, 0xff, {15, PO35_SPEECH_EVENT_CONTINUE, 15, 15}},
+  };
+  for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+    po35_speech_event_t value;
+    uint8_t raw = 0xa5, secondary = 0x5a;
+    po_status_t status =
+        po35_speech_event_decode(cases[i].event_raw, cases[i].secondary_raw, &value);
+    assert(status == PO_OK);
+    assert(value.slot_raw == cases[i].value.slot_raw);
+    assert(value.code_raw == cases[i].value.code_raw);
+    assert(value.note_raw == cases[i].value.note_raw);
+    assert(value.gate_raw == cases[i].value.gate_raw);
+    status = po35_speech_event_encode(&cases[i].value, &raw, &secondary);
+    assert(status == PO_OK);
+    assert(raw == cases[i].event_raw && secondary == cases[i].secondary_raw);
+  }
+}
+
+static void test_speech_event_byte_preservation(void) {
+  /* Every stored pair survives, including inactive state, slot 15 and code 2. */
+  for (unsigned int raw = 0; raw <= UINT8_MAX; ++raw) {
+    for (unsigned int secondary = 0; secondary <= UINT8_MAX; ++secondary) {
+      po35_speech_event_t event;
+      uint8_t encoded_event = 0, encoded_secondary = 0;
+      po_status_t status = po35_speech_event_decode((uint8_t)raw, (uint8_t)secondary, &event);
+      assert(status == PO_OK);
+      status = po35_speech_event_encode(&event, &encoded_event, &encoded_secondary);
+      assert(status == PO_OK);
+      assert(encoded_event == raw && encoded_secondary == secondary);
+    }
+  }
+}
+
+static void test_speech_event_edit_locality(void) {
+  uint8_t original[PO35_PATTERN_BYTES], expected[PO35_PATTERN_BYTES], encoded[PO35_PATTERN_BYTES];
+  for (size_t i = 0; i < sizeof(original); ++i)
+    original[i] = (uint8_t)(i * 71u + 19u);
+  original[0] = 3;
+  /* The view edits only two selected cells, including at both array edges. */
+  for (size_t step = 0; step < PO35_PATTERN_STEP_COUNT; ++step) {
+    po35_pattern_t pattern;
+    po35_speech_event_t event = {14, PO35_SPEECH_EVENT_CONTINUE, 8, 7};
+    po_status_t status = po35_pattern_decode(original, sizeof(original), &pattern);
+    assert(status == PO_OK);
+    status = po35_speech_event_encode(&event, &pattern.speech_events[step],
+                                      &pattern.speech_secondary_raw[step]);
+    assert(status == PO_OK);
+    memcpy(expected, original, sizeof(expected));
+    expected[1 + step] = 0xef;
+    expected[17 + step] = 0x87;
+    status = po35_pattern_encode(&pattern, encoded, sizeof(encoded));
+    assert(status == PO_OK);
+    assert(memcmp(encoded, expected, sizeof(expected)) == 0);
+
+    /* Editing only the note retains event, gate, parameters, FX and mask. */
+    status = po35_speech_event_decode(pattern.speech_events[step],
+                                      pattern.speech_secondary_raw[step], &event);
+    assert(status == PO_OK);
+    event.note_raw = 12;
+    status = po35_speech_event_encode(&event, &pattern.speech_events[step],
+                                      &pattern.speech_secondary_raw[step]);
+    assert(status == PO_OK);
+    expected[17 + step] = 0xc7;
+    status = po35_pattern_encode(&pattern, encoded, sizeof(encoded));
+    assert(status == PO_OK);
+    assert(memcmp(encoded, expected, sizeof(expected)) == 0);
+  }
+}
+
+static void test_speech_event_validation(void) {
+  const po35_speech_event_t valid = {14, PO35_SPEECH_EVENT_CONTINUE, 12, 15};
+  uint8_t raw = 0xa5, secondary = 0x5a;
+  po_status_t status = po35_speech_event_decode(0x1f, 0xcf, NULL);
+  assert(status == PO_ERR_INVALID_ARG);
+  for (unsigned int present = 0; present < 7u; ++present) {
+    status = po35_speech_event_encode(present & 1u ? &valid : NULL, present & 2u ? &raw : NULL,
+                                      present & 4u ? &secondary : NULL);
+    assert(status == PO_ERR_INVALID_ARG);
+    assert(raw == 0xa5 && secondary == 0x5a);
+  }
+  for (unsigned int field = 0; field < 4u; ++field) {
+    for (unsigned int invalid = 16; invalid <= UINT8_MAX; ++invalid) {
+      po35_speech_event_t event = valid, before;
+      switch (field) {
+      case 0:
+        event.slot_raw = (uint8_t)invalid;
+        break;
+      case 1:
+        event.code_raw = (uint8_t)invalid;
+        break;
+      case 2:
+        event.note_raw = (uint8_t)invalid;
+        break;
+      default:
+        event.gate_raw = (uint8_t)invalid;
+        break;
+      }
+      before = event;
+      status = po35_speech_event_encode(&event, &raw, &secondary);
+      assert(status == PO_ERR_RANGE);
+      assert(raw == 0xa5 && secondary == 0x5a);
+      assert(memcmp(&event, &before, sizeof(event)) == 0);
+    }
+  }
+}
+
 static void test_speech_edit_api_surface(void) {
   static const uint8_t records[PO35_SPEECH_RECORD_BYTES] = {0};
   const po35_speech_edit_t edit = {
@@ -1032,6 +1148,10 @@ int main(void) {
   test_speech_codecs();
   test_speech_root_view();
   test_speech_tone_view();
+  test_speech_event_golden_values();
+  test_speech_event_byte_preservation();
+  test_speech_event_edit_locality();
+  test_speech_event_validation();
   test_speech_edit_api_surface();
   test_speech_edit_plan_measurement();
   test_speech_edit_plan_descriptor_failures();
