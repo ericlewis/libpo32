@@ -1,4 +1,6 @@
 #include "po_capture.h"
+#include "po33.h"
+#include "po35.h"
 #include "po_wav_internal.h"
 #include <math.h>
 #include <stdio.h>
@@ -129,8 +131,19 @@ int po_capture_read(const char *path, po_capture_t *out) {
   return 1;
 }
 
-int po_capture_decode(const po_capture_t *capture, po_stereo_channel_order_t order,
-                      uint8_t **out_wire, size_t *out_length) {
+static int po_capture_complete(po_frame_family_t family, const uint8_t *wire, size_t length) {
+  if (family == PO_FRAME_FAMILY_PO33) {
+    po33_decode_result_t result;
+    return po33_frame_parse(wire, length, NULL, NULL, &result) == PO_OK && result.done;
+  } else {
+    po35_decode_result_t result;
+    return po35_frame_parse(wire, length, NULL, NULL, &result) == PO_OK && result.done;
+  }
+}
+
+static int po_capture_decode_impl(const po_capture_t *capture, po_stereo_channel_order_t order,
+                                  const po_frame_family_t *family, uint8_t **out_wire,
+                                  size_t *out_length) {
   po_stereo_workspace_t work = {0};
   uint8_t *wire = NULL;
   size_t wire_capacity = 0, length = 0;
@@ -139,7 +152,8 @@ int po_capture_decode(const po_capture_t *capture, po_stereo_channel_order_t ord
     return 0;
   *out_wire = NULL;
   *out_length = 0;
-  if (capture == NULL || capture->samples == NULL || capture->frames == 0)
+  if (capture == NULL || capture->samples == NULL || capture->frames == 0 ||
+      (family && *family != PO_FRAME_FAMILY_PO33 && *family != PO_FRAME_FAMILY_PO35))
     return 0;
   if (po_stereo_decode_requirements(capture->frames, capture->rate, &work.scalar_count,
                                     &work.byte_count, &wire_capacity) != PO32_OK)
@@ -147,9 +161,27 @@ int po_capture_decode(const po_capture_t *capture, po_stereo_channel_order_t ord
   work.scalars = (double *)malloc(work.scalar_count * sizeof(double));
   work.bytes = (uint8_t *)malloc(work.byte_count);
   wire = (uint8_t *)malloc(wire_capacity);
-  if (work.scalars != NULL && work.bytes != NULL && wire != NULL &&
-      po_stereo_decode_f32(capture->samples, capture->frames, capture->rate, order, &work, wire,
-                           wire_capacity, &length) == PO32_OK) {
+  if (work.scalars != NULL && work.bytes != NULL && wire != NULL) {
+    if (family) {
+      po_stereo_candidates_t candidates, first;
+      if (po_stereo_candidates_init_f32(&candidates, capture->samples, capture->frames,
+                                        capture->rate, order, &work) == PO_OK) {
+        first = candidates;
+        while (po_stereo_candidates_next(&candidates, wire, wire_capacity, &length) == PO_OK) {
+          if (po_capture_complete(*family, wire, length)) {
+            ok = 1;
+            break;
+          }
+        }
+        if (!ok) /* Retain the first failed candidate for existing diagnostics. */
+          ok = po_stereo_candidates_next(&first, wire, wire_capacity, &length) == PO_OK;
+      }
+    } else {
+      ok = po_stereo_decode_f32(capture->samples, capture->frames, capture->rate, order, &work,
+                                wire, wire_capacity, &length) == PO_OK;
+    }
+  }
+  if (ok) {
     *out_wire = wire;
     *out_length = length;
     ok = 1;
@@ -159,4 +191,14 @@ int po_capture_decode(const po_capture_t *capture, po_stereo_channel_order_t ord
   free(work.scalars);
   free(work.bytes);
   return ok;
+}
+
+int po_capture_decode(const po_capture_t *capture, po_stereo_channel_order_t order,
+                      uint8_t **out_wire, size_t *out_length) {
+  return po_capture_decode_impl(capture, order, NULL, out_wire, out_length);
+}
+
+int po_capture_decode_for_family(const po_capture_t *capture, po_stereo_channel_order_t order,
+                                 po_frame_family_t family, uint8_t **out_wire, size_t *out_length) {
+  return po_capture_decode_impl(capture, order, &family, out_wire, out_length);
 }

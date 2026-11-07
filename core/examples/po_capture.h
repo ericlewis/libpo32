@@ -1,6 +1,7 @@
 #ifndef PO_CAPTURE_H
 #define PO_CAPTURE_H
 #include "po_stereo.h"
+#include "po_frame_report.h"
 /* Hosted WAV/file allocation adapter; not part of the freestanding API. */
 typedef struct po_audio {
   float *samples; /* Interleaved; channel values are never combined. */
@@ -24,4 +25,12 @@ typedef struct po_capture {
 int po_capture_read(const char *path, po_capture_t *out);
 int po_capture_decode(const po_capture_t *capture, po_stereo_channel_order_t order,
                       uint8_t **out_wire, size_t *out_length);
+/* Prefer the first complete checksum-valid frame for family in capture order.
+ * If none validates, return the first preamble candidate for parser diagnostics.
+ * Never select by equality to a reference, stitch transfers or repair bytes.
+ * Returns raw wire through the remaining capture, including trailing bytes;
+ * callers must parse for completion and exact frame length. Caller frees wire.
+ * Output pointers are required and cleared on failure. */
+int po_capture_decode_for_family(const po_capture_t *capture, po_stereo_channel_order_t order,
+                                 po_frame_family_t family, uint8_t **out_wire, size_t *out_length);
 #endif
