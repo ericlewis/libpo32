@@ -198,6 +198,9 @@ set_tests_properties(po33_pool_manifest_tests PROPERTIES WORKING_DIRECTORY "${CM
 add_executable(po33_pool_edit_tests tests/test_po33_pool_edit.c)
 target_link_libraries(po33_pool_edit_tests PRIVATE po32)
 add_test(NAME po33_pool_edit_tests COMMAND po33_pool_edit_tests)
+add_executable(po33_sound_transfer_tests tests/test_po33_sound_transfer.c)
+target_link_libraries(po33_sound_transfer_tests PRIVATE po32)
+add_test(NAME po33_sound_transfer_tests COMMAND po33_sound_transfer_tests)
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   add_test(NAME po33_plan_type_tests COMMAND ${CMAKE_COMMAND}
     -DCOMPILER=${CMAKE_C_COMPILER}
