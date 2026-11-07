@@ -22,6 +22,8 @@ The stereo families share [frame and modem APIs](api/STEREO.md). PO-33's
 from its sample and pattern layout. PO-35/137 drum patches reuse the PO-32
 patch codec and synth; see the [signal path](SYNTH.md) and
 [patch parameter reference](PATCH_PARAMETERS.md).
+PO-35's [speech-event evidence](formats/PO35_SPEECH_EVENTS.md) covers onset,
+continuation, note/gate fields and the limits of their numeric interpretation.
 
 ## Working on libpo
 

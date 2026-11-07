@@ -20,7 +20,7 @@ behavior changes follow from this guide.
 | PO-35 settings byte 154 | Selected or last-used instrument in a combined speech/drum ID space | Strong candidate for numbering; update timing unresolved |
 | PO-35 pattern mask at 181..182 | Narrow reference summary derived from that combined ID space | Exact corpus fit; purpose and firmware arithmetic unproven |
 | PO-35 step state at 161..176 | Effect origin/reference or retained effect-edit history | Strong association with the suspected FX nibble; two counterexamples to a universal lookup |
-| PO-35 speech event low code `F` | Continuation/state update rather than a fresh ordinary onset | Strong structural and UI support; acoustic retrigger behavior unresolved |
+| PO-35 `F` when the speech slot changes | Replace the source of an ongoing voice | A stored slot change exists; its playback position/retrigger behavior is unresolved |
 | PO-33 state at 386..401 | Per-pattern retained FX/editor position or cached state | Better fit than a live playhead or occupancy map; update conditions unresolved |
 | PO-33 q3 | Resonance-related control | Plausible from the four knob functions; tested playback differences remain unresolved |
 | PO-35 footer byte 177 | Packed pattern key and scale | Plausible placement; two bit partitions remain indistinguishable |
@@ -103,6 +103,13 @@ another update condition; renaming the field to `effect_start` would be prematur
 
 ## 3. Sustained speech can change while it continues
 
+Controlled [speech-event playback](PO35_SPEECH_EVENTS.md) now distinguishes
+ordinary onsets from continuations: code `1` restarts the source, while `F`
+preserves its position across a pattern boundary and a note change. After the
+tested shorter gate ends the note, subsequent `F` events do not restart it.
+These are PO-35 observations; the slot-changing case and PO-137 playback were
+not independently tested.
+
 Existing analysis finds all 367 linear low-code-`F` speech events follow an
 active event with a full secondary low nibble. Across same-slot continuations,
 notes, voice indices and parameter rows can change. One boundary changes slot
@@ -117,9 +124,9 @@ current slot defaults need not match an older pattern, and why inactive
 secondary state can survive an event move. They do not determine the exact
 gate duration, onset phase or interpolation law.
 
-This makes a renderer based solely on isolated note-on events a weak model.
-A better experimental model separates onset, continuation, gate, note and
-parameter updates. No public enum for every low code follows yet. The drum
+An event model therefore needs separate onset, continuation, gate, note and
+parameter updates. Code `2` remains unresolved, and accepting its raw nibble
+does not assign it ordinary-onset behavior. The drum
 multiplier is a separate context: the clean repeated edit changed only `81`
 to `82`; the original extra step-3 byte is not a required endpoint marker.
 See [the rejected marker prediction](PO35_MULTIPLIER_STATE.md).
@@ -327,13 +334,58 @@ exporter output should be searched before requesting hardware. A separate
 pitch-only comparison could challenge the `flag` naming without conflating
 the pattern-reference and parameter-pair hypotheses.
 
+## 8. Gate timing and source clock
+
+The [event sweep](PO35_SPEECH_EVENTS.md#note-and-gate-sweeps) identifies the
+secondary low nibble as a gate-duration control, but does not recover a complete
+timing equation. At 60 BPM, fitting four gate codes and predicting the other
+twelve favors a 1/16-step slope over 1/15. Median envelope-endpoint error is
+3.75 ms versus 6.77 ms. Changing the measurement threshold changes the fitted
+offset and slope, so the envelope cannot be treated as the programmed cutoff.
+
+Two models, `g/16` and `(g+1)/16`, differ by a constant 15.625 ms at that tempo.
+An unconstrained release delay can absorb the difference. Audible output from
+gate zero alone does not resolve it: attack/release transients can outlast the
+programmed gate.
+
+An additional candidate came from alternating endpoint increments near
+10/20 ms and the older default-length relationship `floor(2*L/3)`:
+
+```text
+candidate gate ticks = floor(3 * (g + 1) / 2)
+candidate ticks per sequencer step = 24
+```
+
+This improves median endpoint error to 2.80 ms on the same recordings. It was
+identified after inspecting those outcomes; reusing the split is not independent
+validation. The older default-length relation itself fits only 9 of 12 eligible
+distinct states. At one tempo, a sequencer tick grid and another processing
+cadence remain difficult to separate. No tick conversion belongs in the raw API
+on this evidence. A later tempo comparison can distinguish more of these models.
+
+Source advance also needs calibration. Successive nominal half-second marker
+changes bound playback speed to roughly 0.40–0.455 of the nominal record rate
+in the test sequence. The ratio of global tempo 60 to preserved header byte 4's
+value 140 falls inside that range. This supports the sample-associated-BPM lead;
+it is not an isolated header edit proving that byte's law or a reason to equate
+the renderer's nominal record clock with sequencer playback speed.
+
+New-note formant zero has a separate evidence limit. Its matched playback was
+minimum-like, while the preceding step matched a held-value reference. The
+loaded bank was verified, but its post-play readback failed. Retain that acoustic
+observation without claiming verified post-play storage or globally rewriting
+zero to one. The [confirmed control comparisons](PO35_SPEECH_EVENTS.md#parameter-zero-is-event-dependent)
+had valid readbacks on both sides of playback.
+
 ## Investigation order
 
 The later [PO-35 control-range roundtrip](PO35_ROUNDTRIP.md) preserved all tested
 per-step values but changed six global parameter zeros to ones. This strengthens
 the case for treating global defaults and per-step controls separately. A
-no-update/inherit meaning for pattern zero remains a hypothesis; do not infer
-it solely from the contrast in stored values.
+generic no-update/inherit meaning for every pattern zero does not follow from
+that storage contrast. Later controlled playback supports independent pitch
+and formant retention on `F`, and minimum-like pitch zero on code `1`, as
+described in the [speech-event guide](PO35_SPEECH_EVENTS.md).
 
 1. Search retained same-other-content comparisons for FX-reference edits and
    key-1/nondefault-multiplier events. Keep actual counterexamples in the results.
@@ -346,7 +398,7 @@ it solely from the contrast in stored values.
    can reflect receive/export state updates, not numerical clamping. Playback,
    edit-then-export and untouched readback are separate experiments.
 
-This pass changed documentation only. The new reference-fit audit used archived
-frame bytes through the native parser, not fresh waveform recovery. Existing
-hardware results remain bounded by their recorded procedures. No additional
-hardware interaction is needed to retain these ranked hypotheses.
+The reference-fit audits used archived frame bytes through the native parser;
+the linked playback tests are a separate evidence source. Hardware results
+remain bounded by their recorded procedures. These hypotheses do not change
+raw codec behavior or justify automatic value normalization.
