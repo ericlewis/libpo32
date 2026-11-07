@@ -135,7 +135,7 @@ these bytes. A separate existing isolated PO-35 comparison also shows secondary
 step state surviving after its active event moves elsewhere.
 
 The subsequent [PO-35/137 drum-event audit](PO35_DRUM_EVENTS.md) covers the
-larger retained corpus and finds a reference-related mask relationship that
+larger retained corpus and reconfirms the reference-related mask relationship that
 does not carry over to PO-32, despite the matching 48-byte drum-lane shape.
 
 PO-33 stores parameters for all sixteen sounds at every step rather than one

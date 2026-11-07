@@ -15,9 +15,22 @@ hardware gestures, generate a new device transfer, or change codec behavior.
 All 100 retained PO-35/137 capture identities matched their archived frame
 hashes and passed current native framing/checksum validation with exact complete
 consumption. Known pattern and settings records also passed their typed
-decoders. Deduplication leaves 89 frames, 82 full-pattern occurrences, and 62
-distinct full-pattern payloads. Removing the pattern-index byte still leaves
-62 distinct payloads; their drum-event regions contain 50 distinct vectors.
+decoders. The counting populations are:
+
+| Population | Full `CCB2` occurrences | Empty `29FF` markers | Distinct full payloads |
+| --- | ---: | ---: | ---: |
+| All 100 capture identities, including repeated frames | 85 | 884 | 62 |
+| After deduplication to 89 distinct frames | 82 | 726 | 62 |
+
+The earlier guide's 85 full records uses the first population; this pass's
+82 occurrences uses the second. Of the 47 distinct frames with sixteen pattern
+records, only three contain sixteen full `CCB2` patterns. Eleven contain one
+full pattern plus fifteen empty markers, and 33 contain sixteen empty markers.
+Thus sixteen pattern records does not mean sixteen full patterns.
+
+Removing the pattern-index byte still leaves 62 distinct full payloads; their
+drum-event regions contain 50 distinct vectors. Nibble statistics below use
+those 62 payloads, not all repeated occurrences.
 
 Six more recent PO-35 readbacks also passed native parsing. They contain only
 empty-pattern markers and add no drum-event observations. These are distinct
@@ -89,10 +102,12 @@ has no byte-difference cutoff. It finds no pair differing only in drum-event
 bytes, and only this one pair differing within drum events, paired controls,
 and the final mask. Thus it supplies no isolated high-nibble or multiplier edit.
 
-## The final mask has a precise, unusual relationship
+## Reconfirmed final-mask relationship
 
-For every one of the 62 distinct patterns, the following arithmetic reproduces
-the stored mask. It was checked independently in native C using the typed
+The existing [format guide](PO35.md#pattern-records) already records this mask
+relationship; it is reconfirmed here, not newly discovered. For every one of
+the 62 distinct patterns, the following arithmetic reproduces the stored mask.
+It was checked independently in native C using the typed
 pattern fields and in the analysis script using raw byte offsets:
 
 ```text
@@ -108,7 +123,9 @@ Consequently, in this corpus, the drum contribution survives only when its
 high nibble is zero. Simply adding bit 15 whenever any drum event has a nonzero
 low nibble matches only 36 of 62 patterns. Treating the mask as a bitmap of
 active drum steps matches none; a bitmap of drum-event bit-7 positions matches
-only one.
+only one. The same naive rule matches 59 of 85 full-pattern occurrences before
+frame deduplication, or 56 of 82 afterward. These are different denominators
+for the same retained data, not contradictory measurements.
 
 A concrete counterexample is the public PO-137 reference's pattern 5: it has
 three `61` drum events, no active speech events, and a stored mask of zero.
