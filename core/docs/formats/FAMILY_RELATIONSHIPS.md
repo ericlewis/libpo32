@@ -7,6 +7,9 @@ not one layout with different sound bodies. **PO-35 is the bridge:** it shares
 PO-33's stereo transport and PO-32's drum-patch representation. Its settings
 and drum-pattern organization are also closer to PO-32 than to PO-33.
 
+For ranked interpretations of unresolved fields and tests that distinguish
+them, see [what the remaining fields could mean](FIELD_HYPOTHESES.md).
+
 ```mermaid
 flowchart LR
     wire[Shared packet envelope and checksum] --> tonic[PO-32]
