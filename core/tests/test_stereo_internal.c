@@ -84,6 +84,7 @@ static void test_candidate_iteration(void) {
   uint8_t wire[4097], nibbles[16390] = {0}, out[8195];
   po_stereo_candidates_t candidates, before;
   size_t written = 0;
+  po_status_t status;
   po_wire_counter_write(wire);
   wire[4096] = 0x11;
   nibbles_from_bytes(wire, sizeof(wire), nibbles, 1);
@@ -92,36 +93,49 @@ static void test_candidate_iteration(void) {
   candidates = (po_stereo_candidates_t){nibbles, sizeof(nibbles), 8184};
   before = candidates;
   memset(out, 0xa5, sizeof(out));
-  assert(po_stereo_candidates_next(&candidates, out, 1, &written) == PO_ERR_BUFFER_TOO_SMALL);
+  status = po_stereo_candidates_next(&candidates, out, 1, &written);
+  assert(status == PO_ERR_BUFFER_TOO_SMALL);
   assert(written == 8194 && out[0] == 0xa5 && candidates.next_sync == before.next_sync);
-  assert(po_stereo_candidates_next(&candidates, NULL, 0, &written) == PO_ERR_BUFFER_TOO_SMALL);
+  status = po_stereo_candidates_next(&candidates, NULL, 0, &written);
+  assert(status == PO_ERR_BUFFER_TOO_SMALL);
   assert(written == 8194 && candidates.next_sync == before.next_sync);
   /* Earlier odd-aligned candidate must precede the later even-aligned one. */
-  assert(po_stereo_candidates_next(&candidates, out, sizeof(out), &written) == PO_OK);
+  status = po_stereo_candidates_next(&candidates, out, sizeof(out), &written);
+  assert(status == PO_OK);
   assert(written == 8194 && out[4096] == 0x11);
-  assert(po_stereo_candidates_next(&candidates, out, sizeof(out), &written) == PO_OK);
+  status = po_stereo_candidates_next(&candidates, out, sizeof(out), &written);
+  assert(status == PO_OK);
   assert(written == sizeof(wire) && memcmp(out, wire, sizeof(wire)) == 0);
   memset(out, 0xa5, sizeof(out));
-  assert(po_stereo_candidates_next(&candidates, out, sizeof(out), &written) == PO_ERR_FRAME);
+  status = po_stereo_candidates_next(&candidates, out, sizeof(out), &written);
+  assert(status == PO_ERR_FRAME);
   assert(!written && out[0] == 0xa5);
   nibbles[1] ^= 1u; /* A sync word alone must not admit a damaged counter. */
   candidates = before;
-  assert(po_stereo_candidates_next(&candidates, out, sizeof(out), &written) == PO_OK);
+  status = po_stereo_candidates_next(&candidates, out, sizeof(out), &written);
+  assert(status == PO_OK);
   assert(written == sizeof(wire) && memcmp(out, wire, sizeof(wire)) == 0);
   candidates = (po_stereo_candidates_t){nibbles, 8191, 8184};
   memset(out, 0xa5, sizeof(out));
-  assert(po_stereo_candidates_next(&candidates, out, sizeof(out), &written) == PO_ERR_FRAME);
+  status = po_stereo_candidates_next(&candidates, out, sizeof(out), &written);
+  assert(status == PO_ERR_FRAME);
   assert(!written && out[0] == 0xa5);
-  assert(po_stereo_candidates_next(&candidates, out, sizeof(out), &written) == PO_ERR_FRAME);
-  assert(po_stereo_candidates_next(NULL, out, sizeof(out), &written) == PO_ERR_INVALID_ARG);
-  assert(po_stereo_candidates_next(&candidates, NULL, 1, &written) == PO_ERR_INVALID_ARG);
-  assert(po_stereo_candidates_next(&candidates, out, sizeof(out), NULL) == PO_ERR_INVALID_ARG);
-  assert(po_stereo_candidates_init_f32(NULL, NULL, 0, 48000, PO_STEREO_CHANNEL_NORMAL, NULL) ==
-         PO_ERR_INVALID_ARG);
-  assert(po_stereo_candidates_init_f32(&candidates, NULL, 0, 48000, PO_STEREO_CHANNEL_NORMAL,
-                                       NULL) == PO_ERR_INVALID_ARG);
+  status = po_stereo_candidates_next(&candidates, out, sizeof(out), &written);
+  assert(status == PO_ERR_FRAME);
+  status = po_stereo_candidates_next(NULL, out, sizeof(out), &written);
+  assert(status == PO_ERR_INVALID_ARG);
+  status = po_stereo_candidates_next(&candidates, NULL, 1, &written);
+  assert(status == PO_ERR_INVALID_ARG);
+  status = po_stereo_candidates_next(&candidates, out, sizeof(out), NULL);
+  assert(status == PO_ERR_INVALID_ARG);
+  status = po_stereo_candidates_init_f32(NULL, NULL, 0, 48000, PO_STEREO_CHANNEL_NORMAL, NULL);
+  assert(status == PO_ERR_INVALID_ARG);
+  status =
+      po_stereo_candidates_init_f32(&candidates, NULL, 0, 48000, PO_STEREO_CHANNEL_NORMAL, NULL);
+  assert(status == PO_ERR_INVALID_ARG);
   assert(candidates.nibbles == NULL && candidates.nibble_count == 0);
-  assert(po_stereo_candidates_next(&candidates, out, sizeof(out), &written) == PO_ERR_INVALID_ARG);
+  status = po_stereo_candidates_next(&candidates, out, sizeof(out), &written);
+  assert(status == PO_ERR_INVALID_ARG);
 }
 static void test_clock_drift(void) {
   uint8_t wire[4352];
