@@ -273,6 +273,28 @@ typedef struct po33_sample_insert_plan {
   po33_sample_insert_reason_t reason;
 } po33_sample_insert_plan_t;
 
+/* Build a standalone melodic sound transfer without a source bank. Slot is
+ * zero-based (0..7); samples are nonempty native encoded bytes, as produced by
+ * po33_samples_encode_f32. The frame contains only BEGIN, SOUND_SELECT,
+ * SOUND_DATA and END. Range, silent guard, allocation rounding and packet
+ * boundaries match sample insertion. No settings or patterns are included.
+ *
+ * Requirements returns exact frame/allocation sizes; both outputs are required
+ * and disjoint. Valid outputs are cleared on failure. Build needs no workspace
+ * or heap. samples, out (the entire capacity), and written must be disjoint.
+ * Alias errors return INVALID_ARG with no output guarantees. Otherwise build
+ * failures preserve out and clear *written. Null required pointers return
+ * INVALID_ARG, invalid slot/count or arithmetic overflow RANGE, and short
+ * capacity BUFFER_TOO_SMALL. The caller owns all buffers.
+ *
+ * The receiver's existing pool references/free space are not available here.
+ * A PO-33 accepted one retargeted sound-only transfer and retained an omitted
+ * sound audibly; this is not a device-capacity or arbitrary-alias guarantee. */
+po_status_t po33_sound_transfer_requirements(size_t sample_bytes, size_t *frame_bytes,
+                                             size_t *allocation_bytes);
+po_status_t po33_sound_transfer_build(uint8_t slot, const uint8_t *samples, size_t sample_bytes,
+                                      uint8_t *out, size_t capacity, size_t *written);
+
 typedef enum po33_sample_detach_reason {
   PO33_SAMPLE_DETACH_REASON_NONE = 0,
   PO33_SAMPLE_DETACH_REASON_SLOT_OUT_OF_RANGE,

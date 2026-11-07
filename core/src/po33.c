@@ -1453,13 +1453,48 @@ static int insert_scan_packet(const po_packet_t *packet, void *user) {
   return 0;
 }
 
+static po_status_t sound_record_requirements(size_t sample_bytes, size_t *record_bytes,
+                                             size_t *allocation_bytes) {
+  size_t blocks;
+  if (sample_bytes == 0u || sample_bytes > UINT32_MAX ||
+      sample_bytes > SIZE_MAX - PO33_POOL_ALLOCATION_BLOCK_BYTES)
+    return PO_ERR_RANGE;
+  blocks = (sample_bytes + PO33_POOL_ALLOCATION_BLOCK_BYTES) / PO33_POOL_ALLOCATION_BLOCK_BYTES;
+  if (blocks > (SIZE_MAX - PO33_SOUND_HEADER_BYTES) /
+                   (PO33_POOL_ALLOCATION_BLOCK_BYTES + 17u * PO_WIRE_OVERHEAD_BYTES))
+    return PO_ERR_RANGE;
+  *record_bytes = PO33_SOUND_HEADER_BYTES +
+                  blocks * (PO33_POOL_ALLOCATION_BLOCK_BYTES + 17u * PO_WIRE_OVERHEAD_BYTES);
+  *allocation_bytes = blocks * PO33_POOL_ALLOCATION_BLOCK_BYTES;
+  return PO_OK;
+}
+
+po_status_t po33_sound_transfer_requirements(size_t sample_bytes, size_t *frame_bytes,
+                                             size_t *allocation_bytes) {
+  size_t record_bytes, allocation;
+  const size_t framing = PO33_PREAMBLE_BYTES + 3u * PO_WIRE_OVERHEAD_BYTES + 1u;
+  po_status_t status;
+  if (frame_bytes == NULL || allocation_bytes == NULL ||
+      po33_ranges_overlap(frame_bytes, sizeof(*frame_bytes), allocation_bytes,
+                          sizeof(*allocation_bytes)))
+    return PO_ERR_INVALID_ARG;
+  *frame_bytes = 0u;
+  *allocation_bytes = 0u;
+  status = sound_record_requirements(sample_bytes, &record_bytes, &allocation);
+  if (status != PO_OK || record_bytes > SIZE_MAX - framing)
+    return PO_ERR_RANGE;
+  *frame_bytes = framing + record_bytes;
+  *allocation_bytes = allocation;
+  return PO_OK;
+}
+
 po_status_t po33_sample_insert_plan(const uint8_t *frame, size_t frame_len, uint8_t slot,
                                     const uint8_t *samples, size_t sample_bytes,
                                     po33_sample_insert_plan_t *plan) {
   po33_insert_scan_t scan = {.slot = slot};
   po33_decode_result_t result;
   po_status_t status;
-  size_t blocks;
+  size_t record_bytes, allocation_bytes;
   if (plan == NULL ||
       (frame != NULL && po33_ranges_overlap(plan, sizeof(*plan), frame, frame_len)) ||
       (samples != NULL && po33_ranges_overlap(plan, sizeof(*plan), samples, sample_bytes)))
@@ -1494,17 +1529,13 @@ po_status_t po33_sample_insert_plan(const uint8_t *frame, size_t frame_len, uint
     plan->reason = PO33_SAMPLE_INSERT_REASON_REFERENCED;
   if (plan->reason != PO33_SAMPLE_INSERT_REASON_NONE)
     return PO_ERR_PARSE;
-  blocks = (sample_bytes + PO33_POOL_ALLOCATION_BLOCK_BYTES) / PO33_POOL_ALLOCATION_BLOCK_BYTES;
-  if (frame_len > SIZE_MAX - PO33_SOUND_HEADER_BYTES ||
-      blocks > (SIZE_MAX - frame_len - PO33_SOUND_HEADER_BYTES) /
-                   (PO33_POOL_ALLOCATION_BLOCK_BYTES + 17u * PO_WIRE_OVERHEAD_BYTES))
+  status = sound_record_requirements(sample_bytes, &record_bytes, &allocation_bytes);
+  if (status != PO_OK || record_bytes > SIZE_MAX - frame_len)
     return PO_ERR_RANGE;
-  plan->required_frame_bytes =
-      frame_len + PO33_SOUND_HEADER_BYTES +
-      blocks * (PO33_POOL_ALLOCATION_BLOCK_BYTES + 17u * PO_WIRE_OVERHEAD_BYTES);
+  plan->required_frame_bytes = frame_len + record_bytes;
   plan->required_workspace_bytes = plan->required_frame_bytes;
   plan->sample_bytes = sample_bytes;
-  plan->allocation_bytes = blocks * PO33_POOL_ALLOCATION_BLOCK_BYTES;
+  plan->allocation_bytes = allocation_bytes;
   plan->selector_offset = scan.offset;
   plan->slot = slot;
   return PO_OK;
@@ -1518,6 +1549,70 @@ typedef struct po33_insert_rebuild {
   int inserted;
 } po33_insert_rebuild_t;
 
+static po_status_t append_sample_record(po33_builder_t *builder, uint8_t slot,
+                                        const uint8_t *samples, size_t sample_bytes,
+                                        size_t allocation_bytes) {
+  uint8_t header[PO33_SOUND_HEADER_BYTES], data[PO_MAX_PAYLOAD];
+  po33_sound_header_t value = {0u, (uint32_t)sample_bytes, slot};
+  size_t position = 0u;
+  po_status_t status = po33_sound_header_encode(&value, header, sizeof(header));
+  if (status != PO_OK)
+    return status;
+  for (size_t block = 0u; block < allocation_bytes; block += PO33_POOL_ALLOCATION_BLOCK_BYTES) {
+    size_t end = PO33_SOUND_HEADER_BYTES + block + PO33_POOL_ALLOCATION_BLOCK_BYTES;
+    while (position < end) {
+      size_t count = end - position;
+      if (count > sizeof(data))
+        count = sizeof(data);
+      for (size_t i = 0u; i < count; ++i) {
+        size_t index = position + i;
+        data[i] = index < PO33_SOUND_HEADER_BYTES ? header[index]
+                                                  : (index - PO33_SOUND_HEADER_BYTES < sample_bytes
+                                                         ? samples[index - PO33_SOUND_HEADER_BYTES]
+                                                         : 0u);
+      }
+      status = po33_builder_append_packet(builder, PO33_TAG_SOUND_DATA, data, count, NULL);
+      if (status != PO_OK)
+        return status;
+      position += count;
+    }
+  }
+  return PO_OK;
+}
+
+po_status_t po33_sound_transfer_build(uint8_t slot, const uint8_t *samples, size_t sample_bytes,
+                                      uint8_t *out, size_t capacity, size_t *written) {
+  size_t frame_bytes = 0u, allocation_bytes = 0u;
+  po33_builder_t builder;
+  po_status_t status;
+  if ((out != NULL && samples != NULL &&
+       po33_ranges_overlap(out, capacity, samples, sample_bytes)) ||
+      (written != NULL && out != NULL &&
+       po33_ranges_overlap(written, sizeof(*written), out, capacity)) ||
+      (written != NULL && samples != NULL &&
+       po33_ranges_overlap(written, sizeof(*written), samples, sample_bytes)))
+    return PO_ERR_INVALID_ARG;
+  if (written != NULL)
+    *written = 0u;
+  if (samples == NULL || out == NULL || written == NULL)
+    return PO_ERR_INVALID_ARG;
+  if (slot >= 8u)
+    return PO_ERR_RANGE;
+  status = po33_sound_transfer_requirements(sample_bytes, &frame_bytes, &allocation_bytes);
+  if (status != PO_OK)
+    return status;
+  if (capacity < frame_bytes)
+    return PO_ERR_BUFFER_TOO_SMALL;
+  status = po33_builder_init(&builder, out, capacity);
+  if (status == PO_OK)
+    status = po33_builder_append_packet(&builder, PO33_TAG_SOUND_SELECT, &slot, 1u, NULL);
+  if (status == PO_OK)
+    status = append_sample_record(&builder, slot, samples, sample_bytes, allocation_bytes);
+  if (status == PO_OK)
+    status = po33_builder_finish(&builder, written);
+  return status;
+}
+
 static int insert_rebuild_packet(const po_packet_t *packet, void *user) {
   po33_insert_rebuild_t *r = user;
   const po33_sample_insert_plan_t *p = r->plan;
@@ -1528,33 +1623,10 @@ static int insert_rebuild_packet(const po_packet_t *packet, void *user) {
   if (r->status != PO_OK)
     return 1;
   if (packet->offset == p->selector_offset) {
-    uint8_t header[PO33_SOUND_HEADER_BYTES], data[PO_MAX_PAYLOAD];
-    po33_sound_header_t value = {0u, (uint32_t)p->sample_bytes, p->slot};
-    size_t position = 0u;
-    r->status = po33_sound_header_encode(&value, header, sizeof(header));
+    r->status =
+        append_sample_record(r->builder, p->slot, r->samples, p->sample_bytes, p->allocation_bytes);
     if (r->status != PO_OK)
       return 1;
-    for (size_t block = 0u; block < p->allocation_bytes;
-         block += PO33_POOL_ALLOCATION_BLOCK_BYTES) {
-      size_t end = PO33_SOUND_HEADER_BYTES + block + PO33_POOL_ALLOCATION_BLOCK_BYTES;
-      while (position < end) {
-        size_t count = end - position;
-        if (count > sizeof(data))
-          count = sizeof(data);
-        for (size_t i = 0u; i < count; ++i) {
-          size_t index = position + i;
-          data[i] = index < PO33_SOUND_HEADER_BYTES
-                        ? header[index]
-                        : (index - PO33_SOUND_HEADER_BYTES < p->sample_bytes
-                               ? r->samples[index - PO33_SOUND_HEADER_BYTES]
-                               : 0u);
-        }
-        r->status = po33_builder_append_packet(r->builder, PO33_TAG_SOUND_DATA, data, count, NULL);
-        if (r->status != PO_OK)
-          return 1;
-        position += count;
-      }
-    }
     r->inserted = 1;
   }
   return 0;
