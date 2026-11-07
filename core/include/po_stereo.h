@@ -72,6 +72,35 @@ po_status_t po_stereo_decode_requirements(size_t frame_count, uint32_t sample_ra
 po_status_t po_stereo_decode_f32(const float *interleaved, size_t frame_count, uint32_t sample_rate,
                                  po_stereo_channel_order_t order, po_stereo_workspace_t *workspace,
                                  uint8_t *out_wire, size_t wire_capacity, size_t *out_len);
+
+/* One-shot demodulation followed by candidate iteration in capture order,
+ * across both nibble alignments. Model parsers must validate each candidate;
+ * finding a preamble does not establish a complete or checksum-valid frame.
+ * Do not modify fields directly. No allocation or model-specific parsing. */
+typedef struct po_stereo_candidates {
+  const uint8_t *nibbles;
+  size_t nibble_count;
+  size_t next_sync;
+} po_stereo_candidates_t;
+
+/* Uses decode_requirements storage and the same input/rate constraints as
+ * decode_f32. Clears candidates on failure. On success, candidates borrows
+ * workspace->bytes: keep that array alive and unchanged until iteration ends.
+ * The scalar workspace and input may be released after initialization.
+ * candidates, workspace, scratch and input must not overlap. */
+po_status_t po_stereo_candidates_init_f32(po_stereo_candidates_t *candidates,
+                                          const float *interleaved, size_t frame_count,
+                                          uint32_t sample_rate, po_stereo_channel_order_t order,
+                                          po_stereo_workspace_t *workspace);
+
+/* Copies the next counter/sync and remaining raw wire bytes, including any
+ * trailing audio or later transfers. Output must not overlap candidates,
+ * borrowed scratch or out_len. FRAME means no candidates remain. out_len is
+ * required and zero on failure, except BUFFER_TOO_SMALL reports needed bytes
+ * without consuming the candidate. Output is untouched on error. NULL output
+ * with zero capacity can query length; a successful call advances iteration. */
+po_status_t po_stereo_candidates_next(po_stereo_candidates_t *candidates, uint8_t *out_wire,
+                                      size_t wire_capacity, size_t *out_len);
 #ifdef __cplusplus
 }
 #endif
