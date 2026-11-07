@@ -4,13 +4,15 @@
 
 The strongest working interpretation is a **four-bit drum selector in the high
 nibble and an event/multiplier code in the low nibble**. The record layout and
-several exact byte relationships are established; the physical drum-key mapping
-and audible meaning of codes 2 and 3 are not independently calibrated.
+several exact byte relationships are established. A subsequent PO-35 readback
+test maps drum keys 1 and 9 to high nibbles 0 and 8, and displayed multiplier 2
+to low code 2. The complete key/rate map and audible timing remain uncalibrated.
 
-This 2026-11-06 investigation used existing captures only. It did not perform
-hardware gestures, generate a new device transfer, or change codec behavior.
+The initial 2026-11-06 investigation used existing captures only. Its corpus
+counts below remain separate from the later hardware follow-up in this guide.
+Neither pass changed codec behavior.
 
-## Scope and validation
+## Offline scope and validation
 
 All 100 retained PO-35/137 capture identities matched their archived frame
 hashes and passed current native framing/checksum validation with exact complete
@@ -185,14 +187,76 @@ signal on other channels: channels 3..6 are digital zero, and channels 1..2
 have roughly -94.5 dBFS RMS with peaks below -79.9 dBFS. It provides no usable
 modem evidence and is not interpreted as a pattern containing zero events.
 
+## Hardware follow-up: drum key and multiplier
+
+A PO-35 Speak was tested while stopped, with both knobs untouched. A selective
+readback first confirmed Pattern 16 was empty. The user selected the Tonic
+section (Sound 16), auditioned drum key 1 with WRITE off, then entered WRITE
+mode and placed step 1. The following changes were made separately, with a
+readback after each:
+
+| State | Step 1 event | Step 1 pitch/morph | Stored mask | Settings byte 154 |
+| --- | --- | --- | --- | ---: |
+| Drum key 1, ordinary step entry | `01` | `80 01` | `8000` | 15 |
+| Drum key 9, same step replaced | `81` | `80 01` | `0000` | 23 |
+| Drum key 9, displayed multiplier 2 | `82` | `80 01` | `0000` | 23 |
+
+Each accepted readback is a complete 50-packet selective frame with one full
+pattern, settings, drum patches and indexed tables, and no speech groups.
+The target is pattern index 15, step index 0. The native parser validates all
+packets and the terminal tail. No source bytes were repaired, reconstructed,
+or combined between takes.
+
+For the key change, the user left WRITE mode, tapped drum key 9, returned to
+WRITE, and toggled step 1 off then on. Exactly three transmitted payload bytes
+changed:
+
+- Pattern byte 97: `01 → 81`.
+- Pattern byte 182: `80 → 00`, changing the LE16 mask from `8000` to `0000`.
+- Settings byte 154: `0F → 17` (15 → 23).
+
+This directly associates the event's high-nibble change `0 → 8` with physical
+drum keys `1 → 9`, rather than a PO-32-style accent change. The zero mask is
+stored alongside an explicitly entered drum-key-9 event, consistent with the
+earlier reference-bitset observation. The settings change is consistent with
+`15 + drum_index` in a combined speech/drum identifier space for these two
+points; selected versus last-played state and the remaining IDs are unresolved.
+
+For the multiplier change, the user held the lit step-1 button and tapped BPM
+once, then reported a displayed value of 2. Exactly two pattern payload bytes
+changed, with all other transmitted payloads identical:
+
+- Byte 97: `81 → 82` at step 1.
+- Byte 99: `00 → 80` at step 3, retaining a zero low event code.
+
+The first change ties low code 2 to the reported multiplier setting while
+preserving the selected drum and pitch/morph pair. The second is a recorded
+cochange, not evidence of a new triggered step or a proven automatic-fill rule.
+The experiment is not described as a single-byte edit. It provides another
+reason to preserve the high bits of zero-low-code entries. No playback-timing
+measurement or full multiplier-cycle sweep was performed.
+
+Readback frame hashes, in table order:
+
+- `1f70548986c7fc289a1a430eb94eaf93fe7408085b13bde58f8fc48fed7ee267`
+- `92d55e803375ee54ed89dade0b2476ffb31ddbe11b5dd3435f46808c7d402680`
+- `f64107ceaaf29948a2409e1a8ac65800a5828f3b264a5d12ddb40ff5af932366`
+
+The USB recordings had timestamp discontinuities overall. Two key-change
+takes failed complete-frame recovery and were excluded; cropping them did not
+produce a valid frame either. A fresh repeat provided the accepted key-change
+frame. These successful native checks establish usable decoded payloads, not
+clean timing for the entire recordings. Other patterns and speech were omitted
+by selective SEND and were not included in the byte comparisons.
+
 ## Decision
 
 - Keep the four-bit selector plus low event-code interpretation as the leading
   model. Bits 6 and 7 cannot simply inherit PO-32's treatment.
 - Preserve zero-low-nibble bytes and the final mask exactly.
-- Do not assign physical drum numbers or numeric multiplier behavior solely
-  from labels or these factory patterns.
-- No new hardware test is needed to retain these findings. If exact numeric
-  mapping becomes necessary, a controlled drum-key change on one fixed step
-  and a separate multiplier change would distinguish the remaining candidates.
-  The existing corpus has no such isolated pair.
+- Retain the observed mappings for physical keys 1 and 9 and displayed
+  multiplier 2. Do not promote these points into a verified map of every key,
+  unused low code, or acoustic multiplier behavior.
+- Preserve the extra zero-low-code entry changed during the multiplier trial;
+  its update rule remains unresolved. No additional hardware action is needed
+  to record the results of this bounded test.
